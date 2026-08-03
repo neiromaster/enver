@@ -1,5 +1,9 @@
 # enver
 
+[![CI](https://github.com/neiromaster/enver/actions/workflows/ci.yml/badge.svg)](https://github.com/neiromaster/enver/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/neiromaster/enver.svg)](https://pkg.go.dev/github.com/neiromaster/enver)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 Inject environment variables from named, layered YAML profiles into any child
 command — **without mutating the target tool's own config**. Built for running
 [Claude Code](https://github.com/anthropics/claude-code) against different
@@ -34,7 +38,7 @@ This drops the `enver` binary into `$GOBIN` (on your `PATH`). Or build from
 source without installing:
 
 ```sh
-git clone <this-repo> && cd enver && make build   # → ./bin/enver
+git clone https://github.com/neiromaster/enver && cd enver && make build   # → ./bin/enver
 ```
 
 ## Config
@@ -167,6 +171,32 @@ case-insensitive) are masked in preview output. `--export` is always unmasked so
 
 No file under `~/.claude/` or elsewhere is modified.
 
+## Security
+
+- **Secrets at rest** — `enver encrypt` stores values as `enc:v1:` ciphertext
+  (AES-256-GCM) so the config is safe to commit. The key lives at
+  `~/.config/enver/key` (mode `0600`) — **never commit the key**.
+- **Preview masking** — `--print` redacts `key|token|secret|password|auth|credential`
+  values; use `--no-mask` or `--export` to reveal them.
+- **Threat model** — encryption protects against accidental leaks (git,
+  dotfiles, casual disk access), not against an attacker with read access to
+  both the config and the key on the same machine. For stronger key storage,
+  keep the key out of the repo and inject it via `ENVER_KEY` in CI.
+
+To report a vulnerability, open a private security advisory on GitHub.
+
+## Contributing
+
+enver is a thin, domain-agnostic shim by design — features that encode knowledge
+of the launched command (e.g. API health probes) belong elsewhere. Bug reports,
+docs and tests are welcome. Run checks locally:
+
+```sh
+make vet test
+```
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).

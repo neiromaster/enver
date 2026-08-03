@@ -1,6 +1,11 @@
 # ~/.config/enver/config.yaml
 # enver: inject env vars from named profiles into any command.
 # Run: enver anth -- claude
+#
+# To store secrets encrypted here, run:
+#   enver keygen        # creates ~/.config/enver/key  (NEVER commit the key)
+#   enver encrypt       # encrypts secret-looking values (enc:v1:...) in this file
+# Decryption at runtime is transparent: `enver <profile> -- <cmd>` just works.
 
 default: anth
 
