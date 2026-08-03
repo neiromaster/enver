@@ -13,7 +13,7 @@ import (
 	"github.com/neiromaster/enver/internal/runner"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 const helpText = `enver — environment profile injector (v%s)
 
