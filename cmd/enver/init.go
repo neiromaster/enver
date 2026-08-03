@@ -4,47 +4,24 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/spf13/cobra"
 )
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-func doInitCmd(args []string) int {
-	o := opts{}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--config":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "enver: --config requires a value")
-				return 2
-			}
-			o.configPath = args[i+1]
-			i++
-		case strings.HasPrefix(a, "--config="):
-			o.configPath = strings.TrimPrefix(a, "--config=")
-		case strings.HasPrefix(a, "-") && len(a) > 1:
-			fmt.Fprintf(os.Stderr, "enver: unknown flag %q\n", a)
-			return 2
-		default:
-			if o.profile == "" {
-				o.profile = a
-			} else {
-				fmt.Fprintf(os.Stderr, "enver: unexpected argument %q\n", a)
-				return 2
-			}
-		}
-	}
-	return doInit(o)
+var initCmd = &cobra.Command{
+	Use:   "init [name]",
+	Short: "Interactively create a profile",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  doInit,
 }
 
-func doInit(o opts) int {
-	cfgPath := config.GlobalPath(o.configPath)
-
+func doInit(cmd *cobra.Command, args []string) error {
+	cfgPath := config.GlobalPath(rootFlags.configPath)
 	reader := bufio.NewReader(os.Stdin)
 	ask := func(prompt string) (string, error) {
 		fmt.Print(prompt)
@@ -52,15 +29,18 @@ func doInit(o opts) int {
 		return strings.TrimSpace(s), err
 	}
 
-	existing, _ := config.LoadMerged(o.configPath, false)
+	existing, _ := config.LoadMerged(rootFlags.configPath, false)
 	names := existing.ProfileNames()
 
-	name := o.profile
+	name := ""
+	if len(args) > 0 {
+		name = args[0]
+	}
 	if name == "" {
 		for {
 			n, err := ask("Profile name: ")
 			if err != nil {
-				return 0 // EOF (e.g. Ctrl-D) — abort quietly
+				return nil
 			}
 			if !profileNameRe.MatchString(n) {
 				fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
@@ -70,8 +50,7 @@ func doInit(o opts) int {
 			break
 		}
 	} else if !profileNameRe.MatchString(name) {
-		fmt.Fprintf(os.Stderr, "enver: invalid profile name %q\n", name)
-		return 2
+		return fmt.Errorf("invalid profile name %q", name)
 	}
 
 	extends := ""
@@ -82,7 +61,7 @@ func doInit(o opts) int {
 		}
 		e, err := ask("Extends (blank for none)" + hint + ": ")
 		if err != nil {
-			return 0
+			return nil
 		}
 		if e == "" {
 			break
@@ -100,7 +79,7 @@ func doInit(o opts) int {
 	for {
 		line, err := ask("  ")
 		if err != nil {
-			return 0
+			return nil
 		}
 		if line == "" {
 			break
@@ -118,8 +97,7 @@ func doInit(o opts) int {
 		env[k] = v
 	}
 	if len(env) == 0 && extends == "" {
-		fmt.Fprintln(os.Stderr, "enver: a profile needs at least one env var or an extends")
-		return 2
+		return fmt.Errorf("a profile needs at least one env var or an extends")
 	}
 
 	setDefault := false
@@ -131,24 +109,16 @@ func doInit(o opts) int {
 		setDefault = strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")
 	}
 
-	if dir := filepath.Dir(cfgPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "enver: %v\n", err)
-			return 1
-		}
-	}
 	p := config.Profile{Extends: extends, Env: env}
 	if err := config.UpsertProfile(cfgPath, name, p, setDefault); err != nil {
-		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
-		return 1
+		return err
 	}
-
 	fmt.Printf("✓ wrote profile %q to %s\n", name, cfgPath)
 	if setDefault {
 		fmt.Printf("✓ set as default\n")
 	}
 	fmt.Printf("\nUse it: enver %s -- <command>\n", name)
-	return 0
+	return nil
 }
 
 func contains(ss []string, s string) bool {

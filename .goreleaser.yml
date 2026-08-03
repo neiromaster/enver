@@ -61,6 +61,15 @@ homebrew_casks:
     commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
     binaries:
       - enver
+    generate_completions_from_executable:
+      executable: "enver"
+      args: ["completion"]
+      base_name: "enver"
+      shell_parameter_format: cobra
+      shells:
+        - bash
+        - zsh
+        - fish
 
 gomod:
   proxy: true
