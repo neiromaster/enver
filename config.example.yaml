@@ -1,0 +1,37 @@
+# ~/.config/enver/config.yaml
+# enver: inject env vars from named profiles into any command.
+# Run: enver anth -- claude
+
+default: anth
+
+profiles:
+  # Official Anthropic API.
+  anth:
+    env:
+      ANTHROPIC_API_KEY: sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
+      ANTHROPIC_BASE_URL: https://api.anthropic.com
+      ANTHROPIC_MODEL: claude-sonnet-5
+      ANTHROPIC_SMALL_FAST_MODEL: claude-haiku-4-5-20251001
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5
+      ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-5
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-haiku-4-5-20251001
+
+  # Any Anthropic-compatible provider, e.g. OpenRouter.
+  openrouter:
+    env:
+      ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
+      ANTHROPIC_API_KEY: sk-or-xxxxxxxxxxxxxxxxxxxxxxxx
+      ANTHROPIC_MODEL: anthropic/claude-sonnet-5
+      ANTHROPIC_SMALL_FAST_MODEL: anthropic/claude-haiku-4-5-20251001
+
+  # Inherit from `anth`, override only the endpoint (e.g. a local proxy).
+  local-proxy:
+    extends: anth
+    env:
+      ANTHROPIC_BASE_URL: http://localhost:8082
+
+  # Generic, non-claude example: a separate app config.
+  prod-db:
+    env:
+      DATABASE_URL: postgres://user:pass@db.internal:5432/app
+      LOG_LEVEL: info

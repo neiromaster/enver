@@ -1,0 +1,19 @@
+# enver binary
+/enver
+
+# Go test/build artifacts
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local config / env (never commit secrets)
+.env
+.env.*
+!.env.example
+*.local.yaml
