@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -97,6 +98,11 @@ func UpsertProfile(path, name string, p Profile, setDefault bool) error {
 	out, err := yaml.Marshal(&root)
 	if err != nil {
 		return err
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(path, out, 0o644)
 }
