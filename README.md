@@ -25,16 +25,15 @@ invocation that injects env only into the child process.
 ## Install
 
 ```sh
-go install github.com/neiromaster/enver@latest
+go install github.com/neiromaster/enver/cmd/enver@latest
 ```
 
-Or build from source:
+This drops the `enver` binary into `$GOBIN` (on your `PATH`). Or build from
+source without installing:
 
 ```sh
-git clone <this-repo> && cd enver && go build -o enver .
+git clone <this-repo> && cd enver && make build   # → ./bin/enver
 ```
-
-Then put the `enver` binary on your `PATH`.
 
 ## Config
 

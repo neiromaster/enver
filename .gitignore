@@ -1,4 +1,5 @@
-# enver binary
+# local build output
+/bin/
 /enver
 
 # Go test/build artifacts
