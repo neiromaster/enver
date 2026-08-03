@@ -61,12 +61,6 @@ homebrew_casks:
     commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
     binaries:
       - enver
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/enver"]
-          end
 
 gomod:
   proxy: true
