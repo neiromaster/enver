@@ -48,20 +48,25 @@ release:
     owner: neiromaster
     name: enver
 
-brews:
-  - repository:
+homebrew_casks:
+  - name: enver
+    repository:
       owner: neiromaster
       name: homebrew-enver
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/neiromaster/enver"
     description: "Inject environment variables from layered YAML profiles into any command"
     license: "MIT"
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} {{ .Tag }}"
-    test: |
-      system "#{bin}/enver", "--version"
-    install: |
-      bin.install "enver"
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
+    binaries:
+      - enver
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/enver"]
+          end
 
 gomod:
   proxy: true
