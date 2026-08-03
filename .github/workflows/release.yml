@@ -23,7 +23,12 @@ jobs:
 
       - uses: goreleaser/goreleaser-action@v7
         with:
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with `repo` scope on neiromaster/homebrew-enver, so goreleaser
+          # can push the formula to the tap repo. Add as a repo secret named
+          # HOMEBREW_TAP_GITHUB_TOKEN in neiromaster/enver. Without it, the
+          # GitHub Release is still published; only the formula push is skipped.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

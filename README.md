@@ -30,6 +30,15 @@ invocation that injects env only into the child process.
 
 ## Install
 
+**Homebrew** (macOS & Linux):
+
+```sh
+brew tap neiromaster/enver
+brew install enver
+```
+
+**Go** (anywhere with a Go toolchain):
+
 ```sh
 go install github.com/neiromaster/enver/cmd/enver@latest
 ```
@@ -40,6 +49,9 @@ source without installing:
 ```sh
 git clone https://github.com/neiromaster/enver && cd enver && make build   # → ./bin/enver
 ```
+
+Pre-compiled binaries for linux/darwin/windows × amd64/arm64 are on the
+[releases page](https://github.com/neiromaster/enver/releases).
 
 ## Config
 

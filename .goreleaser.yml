@@ -48,5 +48,20 @@ release:
     owner: neiromaster
     name: enver
 
+brews:
+  - repository:
+      owner: neiromaster
+      name: homebrew-enver
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/neiromaster/enver"
+    description: "Inject environment variables from layered YAML profiles into any command"
+    license: "MIT"
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} {{ .Tag }}"
+    test: |
+      system "#{bin}/enver", "--version"
+    install: |
+      bin.install "enver"
+
 gomod:
   proxy: true
