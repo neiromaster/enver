@@ -34,6 +34,7 @@ invocation that injects env only into the child process.
 
 ```sh
 brew tap neiromaster/enver
+brew trust neiromaster/enver   # Homebrew requires trusting third-party taps
 brew install enver
 ```
 
