@@ -1,11 +1,15 @@
+// Command enver injects environment variables from named, layered YAML profiles
+// into a child command without mutating the target tool's own config.
 package main
 
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/runner"
 )
 
 const version = "0.1.0"
@@ -123,7 +127,7 @@ func run(args []string) int {
 		return 0
 	}
 
-	cfg, err := loadMerged(o.configPath, !o.noLocal)
+	cfg, err := config.LoadMerged(o.configPath, !o.noLocal)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		return 2
@@ -162,65 +166,19 @@ func run(args []string) int {
 	}
 
 	// run mode
-	env, _, err := cfg.resolveProfile(profile)
+	env, _, err := cfg.ResolveProfile(profile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		return 2
 	}
-	return runCmd(o.cmdArgs, mergedEnv(env))
+	return runner.Run(o.cmdArgs, runner.MergedEnv(env))
 }
 
-// mergedEnv starts from the current environment and overlays the profile vars,
-// returning a sorted "K=V" slice suitable for exec.Cmd.Env.
-func mergedEnv(profileEnv map[string]string) []string {
-	curMap := map[string]string{}
-	for _, kv := range os.Environ() {
-		k, v, ok := strings.Cut(kv, "=")
-		if ok {
-			curMap[k] = v
-		}
-	}
-	for k, v := range profileEnv {
-		curMap[k] = v
-	}
-	keys := make([]string, 0, len(curMap))
-	for k := range curMap {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	res := make([]string, 0, len(keys))
-	for _, k := range keys {
-		res = append(res, k+"="+curMap[k])
-	}
-	return res
-}
-
-func runCmd(cmdArgs []string, env []string) int {
-	path, err := exec.LookPath(cmdArgs[0])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "enver: command not found: %s\n", cmdArgs[0])
-		return 127
-	}
-	cmd := exec.Command(path, cmdArgs[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
-		}
-		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
-		return 1
-	}
-	return 0
-}
-
-func doList(cfg Config) int {
-	names := cfg.profileNames()
+func doList(cfg config.Config) int {
+	names := cfg.ProfileNames()
 	if len(names) == 0 {
 		fmt.Println("(no profiles defined)")
-		fmt.Printf("\nCreate one at: %s\n", globalConfigPath(""))
+		fmt.Printf("\nCreate one at: %s\n", config.GlobalPath(""))
 		return 0
 	}
 	fmt.Printf("%-4s %-20s %-16s %s\n", "", "PROFILE", "EXTENDS", "VARS")
@@ -240,8 +198,8 @@ func doList(cfg Config) int {
 	return 0
 }
 
-func doPrint(cfg Config, profile string, exportFmt, unmasked bool) int {
-	env, chain, err := cfg.resolveProfile(profile)
+func doPrint(cfg config.Config, profile string, exportFmt, unmasked bool) int {
+	env, chain, err := cfg.ResolveProfile(profile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		return 2
@@ -261,7 +219,7 @@ func doPrint(cfg Config, profile string, exportFmt, unmasked bool) int {
 			continue
 		}
 		if !unmasked {
-			v = maskValue(k, v)
+			v = config.MaskValue(k, v)
 		}
 		fmt.Printf("%s=%s\n", k, v)
 	}

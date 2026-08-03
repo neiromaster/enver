@@ -1,4 +1,5 @@
-package main
+// Package config loads, layers and resolves enver profiles.
+package config
 
 import (
 	"fmt"
@@ -23,9 +24,10 @@ type Config struct {
 	Profiles map[string]Profile `yaml:"profiles"`
 }
 
-// globalConfigPath resolves the user-level config location:
+// GlobalPath resolves the user-level config location:
 // $XDG_CONFIG_HOME/enver/config.yaml, falling back to ~/.config/enver/config.yaml.
-func globalConfigPath(override string) string {
+// A non-empty override is returned as-is.
+func GlobalPath(override string) string {
 	if override != "" {
 		return override
 	}
@@ -39,8 +41,8 @@ func globalConfigPath(override string) string {
 	return filepath.Join(home, ".config", "enver", "config.yaml")
 }
 
-// loadConfig reads a single YAML file. Missing file → empty Config, no error.
-func loadConfig(path string) (Config, error) {
+// load reads a single YAML file. A missing file yields an empty Config, no error.
+func load(path string) (Config, error) {
 	var c Config
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -55,10 +57,10 @@ func loadConfig(path string) (Config, error) {
 	return c, nil
 }
 
-// findLocalConfigs walks from cwd up to (but not including) $HOME, collecting
+// findLocal walks from cwd up to (but not including) $HOME, collecting
 // .enver.yaml files. Returns them ordered home-side-first so that merging in
 // order makes the nearest (cwd) override win.
-func findLocalConfigs() []string {
+func findLocal() []string {
 	home := os.Getenv("HOME")
 	cwd, err := os.Getwd()
 	if err != nil || home == "" || !strings.HasPrefix(cwd+string(filepath.Separator), home+string(filepath.Separator)) {
@@ -84,9 +86,9 @@ func findLocalConfigs() []string {
 	return paths
 }
 
-// mergeConfig folds override into base. Override wins for `default` and for
-// per-key env values; profiles union; `extends` is taken from override when set.
-func mergeConfig(base, override Config) Config {
+// Merge folds override into base. Override wins for `default` and for per-key
+// env values; profiles union; `extends` is taken from override when set.
+func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
 		out.Default = override.Default
@@ -110,28 +112,28 @@ func mergeConfig(base, override Config) Config {
 	return out
 }
 
-// loadMerged loads the global config then applies local .enver.yaml layers.
-func loadMerged(globalOverride string, useLocal bool) (Config, error) {
-	cfg, err := loadConfig(globalConfigPath(globalOverride))
+// LoadMerged loads the global config then applies local .enver.yaml layers.
+func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
+	cfg, err := load(GlobalPath(globalOverride))
 	if err != nil {
 		return cfg, err
 	}
 	if !useLocal {
 		return cfg, nil
 	}
-	for _, p := range findLocalConfigs() {
-		overlay, err := loadConfig(p)
+	for _, p := range findLocal() {
+		overlay, err := load(p)
 		if err != nil {
 			return cfg, err
 		}
-		cfg = mergeConfig(cfg, overlay)
+		cfg = Merge(cfg, overlay)
 	}
 	return cfg, nil
 }
 
-// resolveProfile walks the `extends` chain (root applied first, child wins)
-// and returns the flattened env map plus the chain (name → … → root).
-func (c Config) resolveProfile(name string) (env map[string]string, chain []string, err error) {
+// ResolveProfile walks the `extends` chain (root applied first, child wins) and
+// returns the flattened env map plus the chain (name → … → root).
+func (c Config) ResolveProfile(name string) (env map[string]string, chain []string, err error) {
 	chain = []string{}
 	cur := name
 	seen := map[string]bool{}
@@ -159,8 +161,8 @@ func (c Config) resolveProfile(name string) (env map[string]string, chain []stri
 	return env, chain, nil
 }
 
-// profileNames returns sorted profile names.
-func (c Config) profileNames() []string {
+// ProfileNames returns the profile names sorted alphabetically.
+func (c Config) ProfileNames() []string {
 	names := make([]string, 0, len(c.Profiles))
 	for n := range c.Profiles {
 		names = append(names, n)
@@ -171,8 +173,8 @@ func (c Config) profileNames() []string {
 
 var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|credential)`)
 
-// maskValue redacts secret-looking values for display.
-func maskValue(k, v string) string {
+// MaskValue redacts secret-looking values for display.
+func MaskValue(k, v string) string {
 	if secretRe.MatchString(k) && len(v) > 6 {
 		return v[:4] + "…" + fmt.Sprintf("(len=%d)", len(v))
 	}
