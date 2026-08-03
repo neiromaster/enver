@@ -9,6 +9,7 @@ API keys / base URLs / model sets, but works for any command.
 enver anth -- claude
 enver openrouter -- claude --model claude-sonnet-5
 eval "$(enver prod-db --export)"
+enver init                  # interactively create a profile
 ```
 
 ## Why
@@ -81,6 +82,27 @@ profiles:
 Merge rules: `default` is overridden when set; profiles union; per-profile env
 keys are overridden per-key; `extends` is taken from the closer layer when set.
 
+## Creating profiles interactively
+
+`enver init` walks you through a new profile and writes it into the global
+config, preserving any existing structure and comments:
+
+```
+$ enver init
+Profile name: glm
+Extends (blank for none) (available: anth): anth
+Environment variables (KEY=value, blank line to finish):
+  ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
+  ANTHROPIC_API_KEY=sk-...
+  ANTHROPIC_MODEL=glm-5
+
+Set "glm" as the default? (current default: anth) [y/N] y
+✓ wrote profile "glm" to ~/.config/enver/config.yaml
+```
+
+Pass the name as an argument to skip the first prompt: `enver init glm`. Env
+keys merge additively into an existing profile of the same name.
+
 ## Usage
 
 ```
@@ -88,6 +110,7 @@ enver [profile] -- <command> [args...]      Run command with the profile's env
 enver [profile]                             Preview resolved env (secrets masked)
 enver [profile] --print                     Same, explicit
 enver [profile] --export                    Print `export K=V` (unmasked, for eval)
+enver init [name]                           Interactively create a profile
 enver -l, --list                            List profiles
 enver --config <path>                       Override global config file
 enver --no-local                            Ignore .enver.yaml layers

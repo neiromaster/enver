@@ -24,6 +24,7 @@ Usage:
   enver [profile]                             Show the profile's resolved env (masked)
   enver [profile] --print                     Same as above, explicit
   enver [profile] --export                    Print "export K=V" lines (unmasked, for eval)
+  enver init [name]                           Interactively create a profile
   enver -l, --list                            List profiles
   enver -h, --help                            Show this help
   enver -v, --version                         Show version
@@ -112,6 +113,12 @@ func main() {
 }
 
 func run(args []string) int {
+	// `init` is a subcommand only without a `--` separator, so
+	// `enver init -- claude` still runs a profile named "init".
+	if len(args) > 0 && args[0] == "init" && !hasSeparator(args) {
+		return doInitCmd(args[1:])
+	}
+
 	o, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
@@ -230,4 +237,14 @@ func doPrint(cfg config.Config, profile string, exportFmt, unmasked bool) int {
 // so the output of --export is safe for POSIX shells.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// hasSeparator reports whether args contain a bare "--".
+func hasSeparator(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return true
+		}
+	}
+	return false
 }
