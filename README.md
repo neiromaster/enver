@@ -10,6 +10,7 @@ enver anth -- claude
 enver openrouter -- claude --model claude-sonnet-5
 eval "$(enver prod-db --export)"
 enver init                  # interactively create a profile
+enver encrypt               # encrypt secret values at rest
 ```
 
 ## Why
@@ -103,6 +104,32 @@ Set "glm" as the default? (current default: anth) [y/N] y
 Pass the name as an argument to skip the first prompt: `enver init glm`. Env
 keys merge additively into an existing profile of the same name.
 
+## Encrypting secrets
+
+Secrets in the config can be encrypted at rest so the config is safe to commit
+to a dotfiles repo. Only individual secret-looking values are encrypted — keys,
+structure and non-secret values (base URLs, model names) stay plaintext.
+
+```sh
+enver keygen                    # create ~/.config/enver/key (mode 0600)
+enver encrypt                   # encrypt secret-looking values in the config
+enver encrypt glm --all         # encrypt every value in the "glm" profile
+enver decrypt                   # restore plaintext (for editing)
+```
+
+Encrypted values use the format `enc:v1:<base64(nonce||ciphertext||tag)>`
+(AES-256-GCM). Encryption is idempotent — re-running `encrypt` skips already
+encrypted values.
+
+At runtime `enver <profile> -- <command>` **transparently decrypts** with no
+prompt, so the day-to-day command is unchanged. The key is resolved in this
+order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), then the
+default key file. A profile with no encrypted values runs without any key.
+
+> Commit the encrypted config; never commit the key file. Encryption protects
+> against accidental leaks (git, dotfiles, casual disk access), not against an
+> attacker with read access to both the config and the key on the same machine.
+
 ## Usage
 
 ```
@@ -111,8 +138,12 @@ enver [profile]                             Preview resolved env (secrets masked
 enver [profile] --print                     Same, explicit
 enver [profile] --export                    Print `export K=V` (unmasked, for eval)
 enver init [name]                           Interactively create a profile
+enver keygen [--force]                      Generate the encryption key file
+enver encrypt [profile] [--all]             Encrypt secret values in the config
+enver decrypt [profile]                     Decrypt values back to plaintext
 enver -l, --list                            List profiles
 enver --config <path>                       Override global config file
+enver --key <path>                          Key file (or ENVER_KEY env)
 enver --no-local                            Ignore .enver.yaml layers
 enver --no-mask                             Show full secrets in --print
 enver -v, --version

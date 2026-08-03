@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/runner"
 )
 
@@ -25,12 +26,16 @@ Usage:
   enver [profile] --print                     Same as above, explicit
   enver [profile] --export                    Print "export K=V" lines (unmasked, for eval)
   enver init [name]                           Interactively create a profile
+  enver keygen [--force]                      Generate the encryption key file
+  enver encrypt [profile] [--all]             Encrypt secret values in the config
+  enver decrypt [profile]                     Decrypt values back to plaintext
   enver -l, --list                            List profiles
   enver -h, --help                            Show this help
   enver -v, --version                         Show version
 
 Options:
   --config <path>     Override the global config file
+  --key <path>        Key file for encryption (default: ENVER_KEY env or key file)
   --no-local          Ignore .enver.yaml files in the directory hierarchy
   --no-mask           Show full secret values with --print
 
@@ -57,6 +62,7 @@ type opts struct {
 	noMask     bool
 	noLocal    bool
 	configPath string
+	keyPath    string
 	help       bool
 	showVer    bool
 }
@@ -83,6 +89,14 @@ func parseArgs(args []string) (opts, error) {
 			o.noMask = true
 		case a == "--no-local":
 			o.noLocal = true
+		case a == "--key":
+			if i+1 >= len(args) {
+				return o, fmt.Errorf("--key requires a value")
+			}
+			o.keyPath = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--key="):
+			o.keyPath = strings.TrimPrefix(a, "--key=")
 		case a == "-h" || a == "--help":
 			o.help = true
 		case a == "-v" || a == "--version":
@@ -117,6 +131,9 @@ func run(args []string) int {
 	// `enver init -- claude` still runs a profile named "init".
 	if len(args) > 0 && args[0] == "init" && !hasSeparator(args) {
 		return doInitCmd(args[1:])
+	}
+	if len(args) > 0 && isCryptSubcommand(args[0]) && !hasSeparator(args) {
+		return doCryptCmd(args[0], args[1:])
 	}
 
 	o, err := parseArgs(args)
@@ -173,7 +190,7 @@ func run(args []string) int {
 	}
 
 	// run mode
-	env, _, err := cfg.ResolveProfile(profile)
+	env, _, err := resolveAndDecrypt(cfg, profile, o)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		return 2
@@ -206,7 +223,7 @@ func doList(cfg config.Config) int {
 }
 
 func doPrint(cfg config.Config, profile string, exportFmt, unmasked bool) int {
-	env, chain, err := cfg.ResolveProfile(profile)
+	env, chain, err := resolveAndDecrypt(cfg, profile, opts{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		return 2
@@ -243,6 +260,73 @@ func shellQuote(s string) string {
 func hasSeparator(args []string) bool {
 	for _, a := range args {
 		if a == "--" {
+			return true
+		}
+	}
+	return false
+}
+
+// isCryptSubcommand reports whether name is a crypto subcommand.
+func isCryptSubcommand(name string) bool {
+	switch name {
+	case "keygen", "encrypt", "decrypt":
+		return true
+	}
+	return false
+}
+
+// resolveKey returns the active key. Precedence: --key path > ENVER_KEY env >
+// default key file (only if it exists). Returns nil when no key is configured.
+func resolveKey(o opts) ([]byte, error) {
+	if o.keyPath != "" {
+		return crypto.LoadKey(o.keyPath)
+	}
+	if v := os.Getenv("ENVER_KEY"); v != "" {
+		return crypto.DecodeKey(v)
+	}
+	if path := crypto.KeyFilePath(); fileExists(path) {
+		return crypto.LoadKey(path)
+	}
+	return nil, nil
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// resolveAndDecrypt resolves a profile and transparently decrypts any encrypted
+// values. A key is only required when encrypted values are present.
+func resolveAndDecrypt(cfg config.Config, profile string, o opts) (map[string]string, []string, error) {
+	env, chain, err := cfg.ResolveProfile(profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasEncrypted(env) {
+		return env, chain, nil
+	}
+	key, err := resolveKey(o)
+	if err != nil {
+		return nil, chain, err
+	}
+	if key == nil {
+		return nil, chain, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
+	}
+	for k, v := range env {
+		if crypto.IsEncrypted(v) {
+			plain, err := crypto.DecryptValue(v, key)
+			if err != nil {
+				return nil, chain, fmt.Errorf("decrypt %s: %w", k, err)
+			}
+			env[k] = plain
+		}
+	}
+	return env, chain, nil
+}
+
+func hasEncrypted(env map[string]string) bool {
+	for _, v := range env {
+		if crypto.IsEncrypted(v) {
 			return true
 		}
 	}
