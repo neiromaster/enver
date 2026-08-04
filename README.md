@@ -208,6 +208,16 @@ docs and tests are welcome. Run checks locally:
 make vet test
 ```
 
+A pre-commit hook (via [lefthook](https://github.com/evilmartians/lefthook))
+auto-formats staged Go files. Enable it once after cloning — lefthook is pinned
+as a Go tool dependency in `go.mod`, so nothing global is required:
+
+```sh
+make hooks   # runs `go tool lefthook install`
+```
+
+CI also runs `gofmt` and `golangci-lint`, so unformatted code won't merge.
+
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## License

@@ -1,4 +1,4 @@
-.PHONY: build install test vet clean fmt
+.PHONY: build install test vet clean fmt hooks
 
 BINARY := enver
 PKG := github.com/neiromaster/enver
@@ -23,3 +23,7 @@ fmt:
 
 clean:
 	rm -rf bin
+
+# Install git hooks via lefthook (a pinned Go tool dependency, no global install).
+hooks:
+	go tool lefthook install
