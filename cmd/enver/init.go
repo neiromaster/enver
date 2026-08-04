@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -12,6 +13,9 @@ import (
 )
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// reservedSubcommands shadow profiles in the bare form — reach them via `enver run`.
+var reservedSubcommands = []string{"run", "init", "keygen", "encrypt", "decrypt", "completion", "help"}
 
 var initCmd = &cobra.Command{
 	Use:   "init [name]",
@@ -53,6 +57,10 @@ func doInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid profile name %q", name)
 	}
 
+	if slices.Contains(reservedSubcommands, name) {
+		fmt.Printf("  note: %q shares a name with a subcommand; run it with `enver run %s -- <command>`\n", name, name)
+	}
+
 	extends := ""
 	for {
 		hint := ""
@@ -66,7 +74,7 @@ func doInit(cmd *cobra.Command, args []string) error {
 		if e == "" {
 			break
 		}
-		if !contains(names, e) {
+		if !slices.Contains(names, e) {
 			fmt.Printf("  no existing profile %q; leave blank or pick one above\n", e)
 			continue
 		}
@@ -119,13 +127,4 @@ func doInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\nUse it: enver %s -- <command>\n", name)
 	return nil
-}
-
-func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

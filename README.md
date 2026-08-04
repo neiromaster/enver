@@ -10,8 +10,8 @@ command — **without mutating the target tool's own config**. Built for running
 API keys / base URLs / model sets, but works for any command.
 
 ```
-enver anth -- claude
-enver openrouter -- claude --model claude-sonnet-5
+enver run anth -- claude
+enver run openrouter -- claude --model claude-sonnet-5
 eval "$(enver prod-db --export)"
 enver init                  # interactively create a profile
 enver encrypt               # encrypt secret values at rest
@@ -25,8 +25,9 @@ claude-specific switchers (`ccm`, `claude-code-switcher`) mutate
 `~/.claude/settings.json` or hardcode the `ANTHROPIC_*` schema.
 
 `enver` is a **provider-agnostic exec shim**: one YAML store, profiles that can
-inherit via `extends`, layered `cwd → home`, and a clean `profile -- command`
-invocation that injects env only into the child process.
+inherit via `extends`, layered `cwd → home`, and a clean
+`run <profile> -- <command>` invocation that injects env only into the child
+process.
 
 ## Install
 
@@ -150,7 +151,8 @@ default key file. A profile with no encrypted values runs without any key.
 ## Usage
 
 ```
-enver [profile] -- <command> [args...]      Run command with the profile's env
+enver run [profile] -- <command> [args...]  Run command with the profile's env (canonical)
+enver [profile] -- <command> [args...]      Shorthand for the above
 enver [profile]                             Preview resolved env (secrets masked)
 enver [profile] --print                     Same, explicit
 enver [profile] --export                    Print `export K=V` (unmasked, for eval)
@@ -169,6 +171,11 @@ enver -h, --help
 
 With no profile, the config's `default` is used. A bare `enver <profile>`
 previews the resolved env; a bare `enver` lists profiles.
+
+The first positional token is matched against subcommand names (`run`, `init`,
+`keygen`, `encrypt`, `decrypt`, `completion`) before being treated as a profile,
+so a profile that shares one of those names must be run via the explicit verb:
+`enver run <profile> -- <command>`.
 
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
 case-insensitive) are masked in preview output. `--export` is always unmasked so

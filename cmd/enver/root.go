@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
-	"github.com/neiromaster/enver/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -75,27 +74,31 @@ var rootFlags struct {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "enver [profile] -- <command> [args...]",
+	Use:   "enver [run] [profile] -- <command> [args...]",
 	Short: "Inject environment variables from layered YAML profiles into a command",
 	Long: `enver — environment profile injector.
 
 Inject environment variables from a layered YAML config into a child command,
 without mutating any tool's own config.
 
+Run a profile with ` + "`enver run <profile> -- <command>`" + `; the shorthand
+` + "`enver <profile> -- <command>`" + ` also works. When no profile is given, the
+config's ` + "`default`" + ` is used.
+
+The first positional token is matched against subcommand names (run, init,
+keygen, encrypt, decrypt, completion) before being treated as a profile. To run
+a profile whose name collides with a subcommand, use the ` + "`run`" + ` verb.
+
 Config locations (merged in order, later wins):
   1. $XDG_CONFIG_HOME/enver/config.yaml  (or ~/.config/enver/config.yaml)
   2. .enver.yaml walked from cwd up to (not including) $HOME
 
-When no profile is given, the config's ` + "`default`" + ` is used.
-
-The subcommand names init, keygen, encrypt, decrypt and completion are reserved
-and cannot be used as profile names.
-
 Examples:
-  enver anth -- claude                       # run claude with the "anth" profile
-  enver -- claude                            # run claude with the default profile
+  enver run anth -- claude                   # run claude with the "anth" profile
+  enver run -- claude                        # run claude with the default profile
+  enver anth -- claude                       # shorthand for running
   enver anth                                 # preview resolved env (masked)
-  eval "$(enver anth --export)"              # apply to current shell`,
+  eval "$(enver anth --export)"              # apply env to the current shell`,
 	Args:              cobra.ArbitraryArgs,
 	SilenceUsage:      true,
 	SilenceErrors:     true,
@@ -117,7 +120,7 @@ func init() {
 	lf.BoolVar(&rootFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 	lf.BoolVar(&rootFlags.noMask, "no-mask", false, "show full secrets with --print")
 
-	rootCmd.AddCommand(keygenCmd, encryptCmd, decryptCmd, initCmd)
+	rootCmd.AddCommand(keygenCmd, encryptCmd, decryptCmd, initCmd, runCmd)
 }
 
 func main() {
@@ -128,19 +131,7 @@ func main() {
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
-	// Args after `--` are the child command (cobra leaves them unparsed).
-	dashAt := cmd.ArgsLenAtDash()
-	var profile string
-	var cmdArgs []string
-	if dashAt >= 0 {
-		before := args[:dashAt]
-		cmdArgs = args[dashAt:]
-		if len(before) > 0 {
-			profile = before[0]
-		}
-	} else if len(args) > 0 {
-		profile = args[0]
-	}
+	profile, cmdArgs := parseProfileAndCmd(args, cmd.ArgsLenAtDash())
 
 	if rootFlags.listMode {
 		return doList()
@@ -174,22 +165,15 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return doPrint(cfg, profile, false, rootFlags.noMask)
 	}
 
-	if profile == "" {
-		return fmt.Errorf("no profile specified and no `default` set in config")
-	}
-	env, _, err := resolveAndDecrypt(cfg, profile)
-	if err != nil {
-		return err
-	}
-	// The child's exit code must be propagated exactly; cobra only signals 0/1.
-	if code := runner.Run(cmdArgs, runner.MergedEnv(env)); code != 0 {
-		os.Exit(code)
-	}
-	return nil
+	return runProfile(cfg, profile, cmdArgs)
 }
 
 // completeProfile powers dynamic shell completion of profile names.
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Past the profile, defer to the shell so the child command completes from PATH.
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
 	cfg, err := config.LoadMerged(rootFlags.configPath, !rootFlags.noLocal)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
