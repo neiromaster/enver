@@ -84,7 +84,9 @@ func EncryptValue(plain string, key []byte) (string, error) {
 		return "", err
 	}
 	sealed := gcm.Seal(nil, nonce, []byte(plain), nil)
-	payload := append(nonce, sealed...)
+	payload := make([]byte, 0, len(nonce)+len(sealed))
+	payload = append(payload, nonce...)
+	payload = append(payload, sealed...)
 	return prefix + base64.StdEncoding.EncodeToString(payload), nil
 }
 

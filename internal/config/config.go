@@ -68,16 +68,11 @@ func findLocal() []string {
 		return nil
 	}
 	var paths []string
-	dir := cwd
-	for {
-		if dir == home || dir == "/" || filepath.Dir(dir) == dir {
-			break
-		}
+	for dir := cwd; dir != home && dir != "/" && filepath.Dir(dir) != dir; dir = filepath.Dir(dir) {
 		p := filepath.Join(dir, ".enver.yaml")
 		if _, err := os.Stat(p); err == nil {
 			paths = append(paths, p)
 		}
-		dir = filepath.Dir(dir)
 	}
 	// paths is nearest-first; reverse so cwd is applied last.
 	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {

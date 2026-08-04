@@ -1,0 +1,30 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  exclusions:
+    rules:
+      # enver's job is to exec user-supplied commands and read user-supplied
+      # config paths — these gosec findings are false positives for that design.
+      - linters: [gosec]
+        text: "G204" # subprocess launched with variable
+      - linters: [gosec]
+        text: "G304" # file inclusion via variable
+      # Config files/dirs are intentionally permissive: secrets are AES-256-GCM
+      # encrypted at rest, not protected by file perms. The secret key file is
+      # written 0600 in internal/crypto/crypto.go.
+      - linters: [gosec]
+        text: "G301" # directory permissions
+      - linters: [gosec]
+        text: "G306" # writefile permissions
