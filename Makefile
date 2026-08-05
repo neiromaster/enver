@@ -1,4 +1,4 @@
-.PHONY: build install test vet clean fmt hooks
+.PHONY: build install test vet clean fmt hooks completions
 
 BINARY := enver
 PKG := github.com/neiromaster/enver
@@ -7,6 +7,13 @@ PKG := github.com/neiromaster/enver
 build:
 	mkdir -p bin
 	go build -o bin/$(BINARY) ./cmd/enver
+
+# Regenerate shell completion scripts into ./completions (needed before a local goreleaser run).
+completions: build
+	mkdir -p completions
+	./bin/$(BINARY) completion bash > completions/enver.bash
+	./bin/$(BINARY) completion zsh  > completions/enver.zsh
+	./bin/$(BINARY) completion fish > completions/enver.fish
 
 # Install into $GOBIN (usually on $PATH) — the canonical way to get enver.
 install:

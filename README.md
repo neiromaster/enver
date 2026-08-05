@@ -39,9 +39,11 @@ brew trust neiromaster/enver   # Homebrew requires trusting third-party taps
 brew install enver
 ```
 
-The `enver` cask installs **both** the `enver` and `enverx` binaries. Shell
-completions for `enver` are wired up automatically; for `enverx`, generate them
-manually, e.g. `enverx completion bash > $(brew --prefix)/etc/bash_completion.d/enverx`.
+The `enver` cask installs **both** the `enver` and `enverx` binaries and wires
+up `enver` shell completions (bash, zsh, fish) automatically. On macOS the cask
+also strips Gatekeeper quarantine, so the binaries run without a manual
+"Allow Anyway" step. For `enverx` completions, generate them manually, e.g.
+`enverx completion bash > $(brew --prefix)/etc/bash_completion.d/enverx`.
 
 **Go** (anywhere with a Go toolchain):
 

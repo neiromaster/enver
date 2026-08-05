@@ -35,6 +35,12 @@ archives:
   - ids: [enver, enverx]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE*
+      - README*
+      - completions/enver.bash
+      - completions/enver.zsh
+      - completions/enver.fish
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -70,15 +76,15 @@ homebrew_casks:
     binaries:
       - enver
       - enverx
-    generate_completions_from_executable:
-      executable: "enver"
-      args: ["completion"]
-      base_name: "enver"
-      shell_parameter_format: cobra
-      shells:
-        - bash
-        - zsh
-        - fish
+    completions:
+      bash: completions/enver.bash
+      zsh: completions/enver.zsh
+      fish: completions/enver.fish
+    # Clear quarantine so the unsigned binary runs without manual Gatekeeper approval.
+    hooks:
+      post:
+        install: |
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}"]
 
 gomod:
   proxy: true

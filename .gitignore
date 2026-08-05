@@ -1,6 +1,7 @@
 # local build output
 /bin/
 /enver
+/completions/
 
 # Go test/build artifacts
 *.test
