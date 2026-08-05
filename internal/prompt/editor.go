@@ -42,7 +42,7 @@ func readLineInteractive(fd int, in io.Reader, out io.Writer, prompt string) (st
 	if err != nil {
 		return "", err
 	}
-	defer term.Restore(fd, old)
+	defer func() { _ = term.Restore(fd, old) }()
 
 	write := func(s string) { _, _ = io.WriteString(out, s) }
 

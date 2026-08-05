@@ -5,7 +5,6 @@ package prompt
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -40,7 +39,7 @@ func (r *Reader) ReadLine(prompt string) (string, error) {
 	if r.isTTY {
 		return readLineInteractive(r.fd, r.in, r.out, prompt)
 	}
-	fmt.Fprint(r.out, prompt)
+	_, _ = io.WriteString(r.out, prompt)
 	line, err := r.br.ReadString('\n')
 	return strings.TrimRight(line, "\r\n"), err
 }
