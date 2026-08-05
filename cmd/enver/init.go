@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/ergochat/readline"
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
@@ -24,11 +23,15 @@ var initCmd = &cobra.Command{
 
 func doInit(cmd *cobra.Command, args []string) error {
 	cfgPath := config.GlobalPath(globalFlags.configPath)
-	reader := bufio.NewReader(os.Stdin)
+	rl, err := readline.New("")
+	if err != nil {
+		return err
+	}
+	defer rl.Close()
 	ask := func(prompt string) (string, error) {
-		fmt.Print(prompt)
-		s, err := reader.ReadString('\n')
-		return strings.TrimSpace(s), err
+		rl.SetPrompt(prompt)
+		line, err := rl.Readline()
+		return strings.TrimSpace(line), err
 	}
 
 	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})

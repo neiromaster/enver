@@ -3,6 +3,7 @@ module github.com/neiromaster/enver
 go 1.26.5
 
 require (
+	github.com/ergochat/readline v0.1.3
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
