@@ -8,14 +8,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
-
-// reservedSubcommands shadow profiles in the bare form — reach them via `enver run`.
-var reservedSubcommands = []string{"run", "init", "keygen", "encrypt", "decrypt", "completion", "help"}
 
 var initCmd = &cobra.Command{
 	Use:   "init [name]",
@@ -25,7 +23,7 @@ var initCmd = &cobra.Command{
 }
 
 func doInit(cmd *cobra.Command, args []string) error {
-	cfgPath := config.GlobalPath(rootFlags.configPath)
+	cfgPath := config.GlobalPath(globalFlags.configPath)
 	reader := bufio.NewReader(os.Stdin)
 	ask := func(prompt string) (string, error) {
 		fmt.Print(prompt)
@@ -33,7 +31,7 @@ func doInit(cmd *cobra.Command, args []string) error {
 		return strings.TrimSpace(s), err
 	}
 
-	existing, _ := config.LoadMerged(rootFlags.configPath, false)
+	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})
 	names := existing.ProfileNames()
 
 	name := ""
@@ -55,10 +53,6 @@ func doInit(cmd *cobra.Command, args []string) error {
 		}
 	} else if !profileNameRe.MatchString(name) {
 		return fmt.Errorf("invalid profile name %q", name)
-	}
-
-	if slices.Contains(reservedSubcommands, name) {
-		fmt.Printf("  note: %q shares a name with a subcommand; run it with `enver run %s -- <command>`\n", name, name)
 	}
 
 	extends := ""
@@ -125,6 +119,6 @@ func doInit(cmd *cobra.Command, args []string) error {
 	if setDefault {
 		fmt.Printf("✓ set as default\n")
 	}
-	fmt.Printf("\nUse it: enver %s -- <command>\n", name)
+	fmt.Printf("\nUse it: enver x %s -- <command>\n", name)
 	return nil
 }

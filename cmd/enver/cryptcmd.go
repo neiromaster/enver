@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/spf13/cobra"
@@ -40,7 +41,7 @@ var encryptCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "run `enver keygen` first")
 			return err
 		}
-		path := config.GlobalPath(rootFlags.configPath)
+		path := config.GlobalPath(globalFlags.configPath)
 		n, err := config.EncryptFile(path, key, profile, all)
 		if err != nil {
 			return err
@@ -63,7 +64,7 @@ var decryptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		path := config.GlobalPath(rootFlags.configPath)
+		path := config.GlobalPath(globalFlags.configPath)
 		n, err := config.DecryptFile(path, key, profile)
 		if err != nil {
 			return err
@@ -74,17 +75,14 @@ var decryptCmd = &cobra.Command{
 }
 
 func requireKey() ([]byte, error) {
-	if rootFlags.keyPath != "" {
-		return crypto.LoadKey(rootFlags.keyPath)
+	key, err := app.ResolveKey(appOpts())
+	if err != nil {
+		return nil, err
 	}
-	if v := os.Getenv("ENVER_KEY"); v != "" {
-		return crypto.DecodeKey(v)
+	if key == nil {
+		return nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
 	}
-	path := crypto.KeyFilePath()
-	if !fileExists(path) {
-		return nil, fmt.Errorf("no key found at %s", path)
-	}
-	return crypto.LoadKey(path)
+	return key, nil
 }
 
 func init() {
