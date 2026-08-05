@@ -10,9 +10,9 @@ command — **without mutating the target tool's own config**. Built for running
 API keys / base URLs / model sets, but works for any command.
 
 ```
-enver run anth -- claude
-enver run openrouter -- claude --model claude-sonnet-5
-eval "$(enver prod-db --export)"
+enverx anth -- claude
+enver x openrouter -- claude --model claude-sonnet-5
+eval "$(enver export prod-db)"
 enver init                  # interactively create a profile
 enver encrypt               # encrypt secret values at rest
 ```
@@ -26,7 +26,7 @@ claude-specific switchers (`ccm`, `claude-code-switcher`) mutate
 
 `enver` is a **provider-agnostic exec shim**: one YAML store, profiles that can
 inherit via `extends`, layered `cwd → home`, and a clean
-`run <profile> -- <command>` invocation that injects env only into the child
+`enverx <profile> -- <command>` invocation that injects env only into the child
 process.
 
 ## Install
@@ -39,21 +39,28 @@ brew trust neiromaster/enver   # Homebrew requires trusting third-party taps
 brew install enver
 ```
 
+The `enver` cask installs **both** the `enver` and `enverx` binaries. Shell
+completions for `enver` are wired up automatically; for `enverx`, generate them
+manually, e.g. `enverx completion bash > $(brew --prefix)/etc/bash_completion.d/enverx`.
+
 **Go** (anywhere with a Go toolchain):
 
 ```sh
 go install github.com/neiromaster/enver/cmd/enver@latest
+go install github.com/neiromaster/enver/cmd/enverx@latest
 ```
 
-This drops the `enver` binary into `$GOBIN` (on your `PATH`). Or build from
-source without installing:
+This drops the `enver` and `enverx` binaries into `$GOBIN` (on your `PATH`). Or
+build from source without installing:
 
 ```sh
 git clone https://github.com/neiromaster/enver && cd enver && make build   # → ./bin/enver
 ```
 
-Pre-compiled binaries for linux/darwin/windows × amd64/arm64 are on the
-[releases page](https://github.com/neiromaster/enver/releases).
+`make build` produces `enver`; build the runner separately with
+`go build ./cmd/enverx`. Pre-compiled binaries for linux/darwin/windows ×
+amd64/arm64 are on the [releases page](https://github.com/neiromaster/enver/releases);
+each archive includes both `enver` and `enverx`.
 
 ## Config
 
@@ -139,7 +146,7 @@ Encrypted values use the format `enc:v1:<base64(nonce||ciphertext||tag)>`
 (AES-256-GCM). Encryption is idempotent — re-running `encrypt` skips already
 encrypted values.
 
-At runtime `enver <profile> -- <command>` **transparently decrypts** with no
+At runtime `enverx <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
 order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), then the
 default key file. A profile with no encrypted values runs without any key.
@@ -151,43 +158,46 @@ default key file. A profile with no encrypted values runs without any key.
 ## Usage
 
 ```
-enver run [profile] -- <command> [args...]  Run command with the profile's env (canonical)
-enver [profile] -- <command> [args...]      Shorthand for the above
-enver [profile]                             Preview resolved env (secrets masked)
-enver [profile] --print                     Same, explicit
-enver [profile] --export                    Print `export K=V` (unmasked, for eval)
-enver init [name]                           Interactively create a profile
-enver keygen [--force]                      Generate the encryption key file
-enver encrypt [profile] [--all]             Encrypt secret values in the config
-enver decrypt [profile]                     Decrypt values back to plaintext
-enver -l, --list                            List profiles
-enver --config <path>                       Override global config file
-enver --key <path>                          Key file (or ENVER_KEY env)
-enver --no-local                            Ignore .enver.yaml layers
-enver --no-mask                             Show full secrets in --print
-enver -v, --version
-enver -h, --help
+enverx [profile] -- <command> [args...]   Run command with the profile's env (dedicated runner)
+enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the detached form)
+enver show [profile] [--no-mask]          Preview resolved env (masked by default)
+enver export [profile]                    Print `export K=V` (unmasked, for eval)
+enver list                                List profiles
+enver init [name]                         Interactively create a profile
+enver keygen [--force]                    Generate the encryption key file
+enver encrypt [profile] [--all]           Encrypt secret values in the config
+enver decrypt [profile]                   Decrypt values back to plaintext
+enver --config <path>                     Override global config file
+enver --key <path>                        Key file (or ENVER_KEY env)
+enver --no-local                          Ignore .enver.yaml layers
+enver --version / enverx --version / -h, --help
 ```
 
-With no profile, the config's `default` is used. A bare `enver <profile>`
-previews the resolved env; a bare `enver` lists profiles.
+> **Breaking:** the bare forms `enver <profile> -- <command>` and `enver <profile>`
+> (preview) were removed. Use `enverx <profile> -- <command>` (or `enver x ...`)
+> to run, and `enver show <profile>` to preview. `enver run` was renamed to `enver x`.
 
-The first positional token is matched against subcommand names (`run`, `init`,
-`keygen`, `encrypt`, `decrypt`, `completion`) before being treated as a profile,
-so a profile that shares one of those names must be run via the explicit verb:
-`enver run <profile> -- <command>`.
+With no profile, the config's `default` is used. `enver show <profile>` previews
+the resolved env (masked by default); `enver list` lists profiles.
+
+The first positional token is matched against subcommand names (`x`, `show`,
+`export`, `list`, `init`, `keygen`, `encrypt`, `decrypt`, `completion`) before
+being treated as a profile, so a profile that shares one of those names must be
+run via the explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
-case-insensitive) are masked in preview output. `--export` is always unmasked so
-`eval "$(enver <profile> --export)"` applies to the current shell.
+case-insensitive) are masked in `enver show` output (use `--no-mask` to reveal).
+`enver export` is always unmasked so `eval "$(enver export <profile>)"` applies to
+the current shell.
 
 ## How it works
 
 1. Load global config, then overlay each `.enver.yaml` from home down to cwd.
 2. Resolve the selected profile (or `default`), walking `extends` with cycle
    detection — root applied first, child overrides parent.
-3. For run mode: child env = current `os.Environ()` ⊕ profile env, then `exec`
-   the command with stdin/out/err connected and the child's exit code propagated.
+3. For `enver x` / `enverx`: child env = current `os.Environ()` ⊕ profile env,
+   then `exec` the command with stdin/out/err connected and the child's exit code
+   propagated.
 
 No file under `~/.claude/` or elsewhere is modified.
 
@@ -196,8 +206,8 @@ No file under `~/.claude/` or elsewhere is modified.
 - **Secrets at rest** — `enver encrypt` stores values as `enc:v1:` ciphertext
   (AES-256-GCM) so the config is safe to commit. The key lives at
   `~/.config/enver/key` (mode `0600`) — **never commit the key**.
-- **Preview masking** — `--print` redacts `key|token|secret|password|auth|credential`
-  values; use `--no-mask` or `--export` to reveal them.
+- **Preview masking** — `enver show` redacts `key|token|secret|password|auth|credential`
+  values; use `--no-mask` or `enver export` to reveal them.
 - **Threat model** — encryption protects against accidental leaks (git,
   dotfiles, casual disk access), not against an attacker with read access to
   both the config and the key on the same machine. For stronger key storage,
