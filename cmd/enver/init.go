@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ergochat/readline"
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/prompt"
 	"github.com/spf13/cobra"
 )
 
@@ -23,14 +23,9 @@ var initCmd = &cobra.Command{
 
 func doInit(cmd *cobra.Command, args []string) error {
 	cfgPath := config.GlobalPath(globalFlags.configPath)
-	rl, err := readline.New("")
-	if err != nil {
-		return err
-	}
-	defer rl.Close()
+	pr := prompt.New()
 	ask := func(prompt string) (string, error) {
-		rl.SetPrompt(prompt)
-		line, err := rl.Readline()
+		line, err := pr.ReadLine(prompt)
 		return strings.TrimSpace(line), err
 	}
 
