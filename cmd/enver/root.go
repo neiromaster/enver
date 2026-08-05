@@ -3,65 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime/debug"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/version"
 	"github.com/spf13/cobra"
 )
-
-var (
-	version = "dev"
-	commit  = ""
-	date    = ""
-)
-
-func formatVersion(version, commit, date string) string {
-	meta := make([]string, 0, 2)
-	if commit != "" {
-		meta = append(meta, commit)
-	}
-	if date != "" {
-		meta = append(meta, date)
-	}
-	if len(meta) == 0 {
-		return version
-	}
-	return version + " (" + strings.Join(meta, ", ") + ")"
-}
-
-func buildSetting(bi *debug.BuildInfo, key string) string {
-	for _, s := range bi.Settings {
-		if s.Key == key {
-			return s.Value
-		}
-	}
-	return ""
-}
-
-func resolveFromBuildInfo(bi *debug.BuildInfo) (string, string, string) {
-	if bi == nil {
-		return "", "", ""
-	}
-	v := ""
-	if mv := bi.Main.Version; mv != "" && mv != "(devel)" {
-		v = mv
-	}
-	return v, buildSetting(bi, "vcs.revision"), buildSetting(bi, "vcs.time")
-}
-
-func buildVersion() string {
-	v, c, d := version, commit, date
-	if v == "dev" {
-		if bi, ok := debug.ReadBuildInfo(); ok {
-			if bv, bc, bd := resolveFromBuildInfo(bi); bv != "" {
-				v = bv
-				c, d = bc, bd
-			}
-		}
-	}
-	return formatVersion(v, c, d)
-}
 
 var rootFlags struct {
 	configPath string
@@ -107,7 +53,7 @@ Examples:
 }
 
 func init() {
-	rootCmd.Version = buildVersion()
+	rootCmd.Version = version.String()
 
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&rootFlags.configPath, "config", "", "override the global config file")
