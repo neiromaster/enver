@@ -59,3 +59,23 @@ func TestRenameProfileAbsentSource(t *testing.T) {
 		t.Fatal("absent source should fail")
 	}
 }
+
+func TestSetAndClearDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  a:\n    env: {K: v}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetDefault(path, "a"); err != nil {
+		t.Fatalf("SetDefault: %v", err)
+	}
+	if !strings.Contains(string(mustRead(t, path)), "default: a") {
+		t.Fatal("default not set")
+	}
+	if err := ClearDefault(path); err != nil {
+		t.Fatalf("ClearDefault: %v", err)
+	}
+	if strings.Contains(string(mustRead(t, path)), "default") {
+		t.Fatal("default not cleared")
+	}
+}

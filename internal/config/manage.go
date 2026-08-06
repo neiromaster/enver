@@ -49,3 +49,31 @@ func RenameProfile(path, old, new string) error {
 	}
 	return writePath(path, out)
 }
+
+// SetDefault sets the top-level default to name.
+func SetDefault(path, name string) error {
+	return setOrClearDefault(path, &name)
+}
+
+// ClearDefault removes the top-level default key.
+func ClearDefault(path string) error {
+	return setOrClearDefault(path, nil)
+}
+
+func setOrClearDefault(path string, name *string) error {
+	root, err := loadOrInitRoot(path)
+	if err != nil {
+		return err
+	}
+	body := root.Content[0]
+	if name == nil {
+		removeKey(body, "default")
+	} else {
+		setScalar(body, "default", *name)
+	}
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return writePath(path, out)
+}
