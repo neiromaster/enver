@@ -115,21 +115,27 @@ keys are overridden per-key; `extends` is taken from the closer layer when set.
 `enver init` walks you through a new profile and writes it into the global
 config, preserving any existing structure and comments:
 
-```
-$ enver init
-Profile name: glm
-Extends (blank for none) (available: anth): anth
-Environment variables (KEY=value, blank line to finish):
-  ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
-  ANTHROPIC_API_KEY=sk-...
-  ANTHROPIC_MODEL=glm-5
+- **Profile name** — letters, digits, `-`, `_`; must start with a letter or digit.
+  Pass it as an argument (`enver init glm`) to skip this prompt.
+- **Extends** — picked from a list of existing profiles (with a `(none)` option).
+  Skipped when no profiles exist yet.
+- **Variables** — for each, enter a name, a value, and an optional comment; leave
+  the name blank to finish. A profile needs at least one variable or an extends.
+- **Default** — optionally set as the default profile.
 
-Set "glm" as the default? (current default: anth) [y/N] y
-✓ wrote profile "glm" to ~/.config/enver/config.yaml
+The optional comment is stored as a YAML comment above the entry. It survives
+`enver encrypt`, so you can keep a plaintext hint (e.g. a link to the secret
+store) above an encrypted value:
+
+```yaml
+profiles:
+  glm:
+    env:
+      # get this token from https://vault.example/anth
+      ANTHROPIC_API_KEY: enc:v1:...
 ```
 
-Pass the name as an argument to skip the first prompt: `enver init glm`. Env
-keys merge additively into an existing profile of the same name.
+Env keys merge additively into an existing profile of the same name.
 
 ## Encrypting secrets
 
