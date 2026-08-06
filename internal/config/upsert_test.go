@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ profiles:
 		t.Fatal(err)
 	}
 	p := Profile{Env: map[string]string{"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}}
-	if err := UpsertProfile(path, "anth", p, false); err != nil {
+	if err := UpsertProfile(path, "anth", p, false, nil); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -52,7 +53,7 @@ func TestUpsertCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yaml")
 	p := Profile{Extends: "anth", Env: map[string]string{"K": "v"}}
-	if err := UpsertProfile(path, "new", p, true); err != nil {
+	if err := UpsertProfile(path, "new", p, true, nil); err != nil {
 		t.Fatalf("upsert into missing file: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -145,4 +146,82 @@ func TestCryptoPrefixMatch(t *testing.T) {
 	if !crypto.IsEncrypted("enc:v1:YWJj") {
 		t.Fatal("IsEncrypted should match enc:v1:")
 	}
+}
+
+func TestUpsertWritesEnvCommentAboveEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	p := Profile{Env: map[string]string{"API_KEY": "sk-xxx"}}
+	comments := map[string]string{"API_KEY": "get this token from vault X"}
+	if err := UpsertProfile(path, "anth", p, false, comments); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	s := string(mustRead(t, path))
+	// Comment renders, indented, on its own line immediately above the entry,
+	// regardless of yaml.v3's indent width or key-vs-value attachment.
+	re := regexp.MustCompile(`(?m)^[ \t]*# get this token from vault X[ \t]*\n[ \t]*API_KEY:`)
+	if !re.MatchString(s) {
+		t.Fatalf("comment not rendered above API_KEY entry:\n%s", s)
+	}
+}
+
+func TestUpsertKeepsCommentWhenValueUpdatedWithoutComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := UpsertProfile(path, "anth",
+		Profile{Env: map[string]string{"API_KEY": "v1"}},
+		false, map[string]string{"API_KEY": "from vault"}); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	// Re-upsert the same key with a new value but no comment: value changes,
+	// the existing comment must survive.
+	if err := UpsertProfile(path, "anth",
+		Profile{Env: map[string]string{"API_KEY": "v2"}},
+		false, nil); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if !strings.Contains(s, "API_KEY: v2") {
+		t.Fatalf("value not updated:\n%s", s)
+	}
+	if !strings.Contains(s, "from vault") {
+		t.Fatalf("existing comment wiped on re-upsert:\n%s", s)
+	}
+}
+
+func TestEnvCommentSurvivesEncryptDecrypt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := UpsertProfile(path, "anth",
+		Profile{Env: map[string]string{"API_KEY": "sk-secret"}},
+		false, map[string]string{"API_KEY": "from vault"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	if _, err := EncryptFile(path, key, "", false); err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	enc := string(mustRead(t, path))
+	if !strings.Contains(enc, "from vault") {
+		t.Fatalf("comment lost after encrypt:\n%s", enc)
+	}
+	if _, err := DecryptFile(path, key, ""); err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	dec := string(mustRead(t, path))
+	if !strings.Contains(dec, "from vault") {
+		t.Fatalf("comment lost after decrypt:\n%s", dec)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

@@ -53,7 +53,7 @@ func setScalar(mapping *yaml.Node, key, val string) {
 //
 // Env keys merge additively (new values override existing same keys). Extends is
 // set only when non-empty. setDefault updates the top-level `default` key.
-func UpsertProfile(path, name string, p Profile, setDefault bool) error {
+func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[string]string) error {
 	var root yaml.Node
 	data, err := os.ReadFile(path)
 	switch {
@@ -88,6 +88,14 @@ func UpsertProfile(path, name string, p Profile, setDefault bool) error {
 		sort.Strings(keys)
 		for _, k := range keys {
 			setScalar(env, k, p.Env[k])
+			if c := comments[k]; c != "" {
+				// idx is the value node's position; idx-1 is the key node.
+				// Attaching HeadComment to the key node renders the comment on
+				// the line above the KEY: entry.
+				if idx := findIndex(env, k); idx >= 0 {
+					env.Content[idx-1].HeadComment = c
+				}
+			}
 		}
 	}
 

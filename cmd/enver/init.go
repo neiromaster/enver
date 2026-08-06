@@ -110,7 +110,7 @@ func doInit(cmd *cobra.Command, args []string) error {
 	}
 
 	p := config.Profile{Extends: extends, Env: env}
-	if err := config.UpsertProfile(cfgPath, name, p, setDefault); err != nil {
+	if err := config.UpsertProfile(cfgPath, name, p, setDefault, nil); err != nil {
 		return err
 	}
 	fmt.Printf("✓ wrote profile %q to %s\n", name, cfgPath)
