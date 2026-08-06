@@ -45,7 +45,7 @@ func init() {
 	pf.StringVar(&globalFlags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 
-	rootCmd.AddCommand(xCmd, showCmd, exportCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd)
+	rootCmd.AddCommand(xCmd, showCmd, exportCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd)
 }
 
 func main() {
