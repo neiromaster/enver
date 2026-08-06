@@ -3,16 +3,34 @@ package main
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
-	"github.com/neiromaster/enver/internal/prompt"
+	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+func validateProfileName(name string) error {
+	if !profileNameRe.MatchString(name) {
+		return fmt.Errorf("invalid profile name %q", name)
+	}
+	return nil
+}
+
+func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[string]string) {
+	env := make(map[string]string, len(entries))
+	comments := map[string]string{}
+	for _, e := range entries {
+		env[e.Key] = e.Value
+		if e.Comment != "" {
+			comments[e.Key] = e.Comment
+		}
+	}
+	return config.Profile{Extends: extends, Env: env}, comments
+}
 
 var initCmd = &cobra.Command{
 	Use:   "init [name]",
@@ -23,12 +41,6 @@ var initCmd = &cobra.Command{
 
 func doInit(cmd *cobra.Command, args []string) error {
 	cfgPath := config.GlobalPath(globalFlags.configPath)
-	pr := prompt.New()
-	ask := func(prompt string) (string, error) {
-		line, err := pr.ReadLine(prompt)
-		return strings.TrimSpace(line), err
-	}
-
 	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})
 	names := existing.ProfileNames()
 
@@ -38,79 +50,64 @@ func doInit(cmd *cobra.Command, args []string) error {
 	}
 	if name == "" {
 		for {
-			n, err := ask("Profile name: ")
+			n, err := ui.Input("Profile name")
 			if err != nil {
 				return nil
 			}
-			if !profileNameRe.MatchString(n) {
+			n = strings.TrimSpace(n)
+			if err := validateProfileName(n); err != nil {
 				fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
 				continue
 			}
 			name = n
 			break
 		}
-	} else if !profileNameRe.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q", name)
+	} else if err := validateProfileName(name); err != nil {
+		return err
 	}
 
 	extends := ""
-	for {
-		hint := ""
-		if len(names) > 0 {
-			hint = " (available: " + strings.Join(names, ", ") + ")"
+	if len(names) > 0 {
+		opts := []ui.Option{{Value: "", Label: "(none)"}}
+		for _, n := range names {
+			opts = append(opts, ui.Option{Value: n, Label: n})
 		}
-		e, err := ask("Extends (blank for none)" + hint + ": ")
+		picked, err := ui.Select("Extends", opts)
 		if err != nil {
 			return nil
 		}
-		if e == "" {
-			break
-		}
-		if !slices.Contains(names, e) {
-			fmt.Printf("  no existing profile %q; leave blank or pick one above\n", e)
-			continue
-		}
-		extends = e
-		break
+		extends = picked
 	}
 
-	env := map[string]string{}
-	fmt.Println("Environment variables (KEY=value, blank line to finish):")
+	var entries []ui.EnvEntry
 	for {
-		line, err := ask("  ")
+		entry, err := ui.EnvCard(ui.EnvEntry{})
 		if err != nil {
 			return nil
 		}
-		if line == "" {
+		entry.Key = strings.TrimSpace(entry.Key)
+		if entry.Key == "" {
 			break
 		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(k) == "" {
-			fmt.Println("  skip: expected KEY=value")
+		if strings.ContainsAny(entry.Key, " \t") {
+			fmt.Println("  skip: invalid key (no spaces)")
 			continue
 		}
-		k = strings.TrimSpace(k)
-		if strings.ContainsAny(k, " \t") {
-			fmt.Printf("  skip: invalid key %q (no spaces)\n", k)
-			continue
-		}
-		env[k] = v
+		entries = append(entries, entry)
 	}
-	if len(env) == 0 && extends == "" {
+	if len(entries) == 0 && extends == "" {
 		return fmt.Errorf("a profile needs at least one env var or an extends")
 	}
 
 	setDefault := false
 	if existing.Default == "" {
-		ans, _ := ask(fmt.Sprintf("Set %q as the default profile? [Y/n] ", name))
-		setDefault = ans == "" || strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")
+		setDefault, _ = ui.Confirm(fmt.Sprintf("Set %q as the default profile?", name), true)
 	} else {
-		ans, _ := ask(fmt.Sprintf("Set %q as the default? (current default: %s) [y/N] ", name, existing.Default))
-		setDefault = strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")
+		setDefault, _ = ui.Confirm(fmt.Sprintf("Set %q as the default? (current: %s)", name, existing.Default), false)
 	}
 
-	p := config.Profile{Extends: extends, Env: env}
-	if err := config.UpsertProfile(cfgPath, name, p, setDefault, nil); err != nil {
+	profile, comments := buildProfile(extends, entries)
+	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, comments); err != nil {
 		return err
 	}
 	fmt.Printf("✓ wrote profile %q to %s\n", name, cfgPath)
