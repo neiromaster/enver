@@ -206,3 +206,20 @@ func mapEq(a, b map[string]string) bool {
 	}
 	return true
 }
+
+func TestExtendedBy(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base":  {},
+		"mid":   {Extends: "base"},
+		"leaf":  {Extends: "mid"},
+		"other": {Extends: "base"},
+	}}
+	got := cfg.ExtendedBy("base")
+	want := []string{"mid", "other"}
+	if !sliceEq(got, want) {
+		t.Fatalf("ExtendedBy(base) = %v, want %v", got, want)
+	}
+	if got := cfg.ExtendedBy("leaf"); len(got) != 0 {
+		t.Fatalf("ExtendedBy(leaf) = %v, want none", got)
+	}
+}

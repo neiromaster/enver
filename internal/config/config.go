@@ -166,6 +166,18 @@ func (c Config) ProfileNames() []string {
 	return names
 }
 
+// ExtendedBy returns the names of profiles that extend name, sorted.
+func (c Config) ExtendedBy(name string) []string {
+	var out []string
+	for n, p := range c.Profiles {
+		if p.Extends == name {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|credential)`)
 
 // MaskValue redacts secret-looking values for display.

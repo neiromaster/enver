@@ -106,3 +106,27 @@ func writePath(path string, out []byte) error {
 	}
 	return os.WriteFile(path, out, 0o644)
 }
+
+// DeleteProfile removes the named profile from the file. Missing file or profile
+// is a no-op (no error). It does not touch the default pointer — callers guard
+// against deleting the default.
+func DeleteProfile(path, name string) error {
+	root, err := loadNode(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	body := root.Content[0]
+	pm := profilesMapping(body)
+	if pm == nil {
+		return nil
+	}
+	removeKey(pm, name)
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return writePath(path, out)
+}

@@ -87,3 +87,38 @@ func TestWriteProfileCreatesFile(t *testing.T) {
 		t.Fatal("file not created with profile")
 	}
 }
+
+func TestDeleteProfileRemovesNodeAndPreservesOthers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	in := `default: anth
+profiles:
+  anth:
+    env:
+      K: v
+  glm:
+    env:
+      K2: v2
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProfile(path, "glm"); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if strings.Contains(s, "glm") {
+		t.Fatalf("profile not removed:\n%s", s)
+	}
+	if !strings.Contains(s, "anth") {
+		t.Fatalf("sibling profile lost:\n%s", s)
+	}
+}
+
+func TestDeleteProfileMissingIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "absent.yaml")
+	if err := DeleteProfile(path, "anth"); err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+}
