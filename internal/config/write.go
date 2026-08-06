@@ -45,7 +45,7 @@ func removeKey(mapping *yaml.Node, key string) {
 // WriteProfile replaces a profile's own env wholesale (keys absent from p.Env are
 // deleted), sets extends when non-empty or clears it when empty, and sets or
 // clears the top-level default. comments[key] (non-empty) renders above that
-// entry; an empty/missing comment leaves an existing comment untouched. Creates
+// entry; a key absent from the map is written with no comment. Creates
 // the file (and parent dirs) if absent.
 func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool, comments map[string]string) error {
 	root, err := loadOrInitRoot(path)
