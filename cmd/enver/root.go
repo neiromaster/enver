@@ -28,8 +28,20 @@ environment injected, without mutating any tool's own config.
   enver show <profile>                  preview resolved env (masked)
   enver export <profile>                print ` + "`export K=V`" + ` for eval
   enver list                            list profiles
-  enver add [name]                      create a profile interactively
+  enver add [name]                      interactively add a profile
+  enver edit [profile]                  edit a profile (vars, extends, default)
+  enver remove [profile]                delete a profile
+  enver rename [old] [new]              rename a profile (+ extends/default refs)
+  enver duplicate <src> [new]           copy a profile
+  enver default [profile]               set/show the default (--clear to clear)
+  enver validate                        check config health
   enver keygen | encrypt | decrypt      manage encrypted secrets
+
+The first positional token is matched against subcommand names before being
+treated as a profile. Reserved: x, show, export, list, add, edit, remove,
+rename, duplicate, default, validate, keygen, encrypt, decrypt, completion.
+Use the explicit verb for a profile sharing one: enverx <profile> -- <command>
+(or enver x ...).
 
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
 layered with .enver.yaml walked from cwd up to $HOME.`,

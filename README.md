@@ -137,6 +137,42 @@ profiles:
 
 Env keys merge additively into an existing profile of the same name.
 
+## Editing profiles
+
+`enver edit` opens a profile in an interactive menu where the profile's own
+variables are listed and editable, while variables inherited through `extends`
+are shown read-only (marked `(inherited)`) — change those in the profile they
+come from. Nothing is written until you select **Done**, so you can experiment
+freely:
+
+- **Add or edit a variable** — select an existing var to change its value or
+  comment, or add a new one (name, value, optional comment, as in `add`).
+- **Change extends** — repoint the profile at another profile or clear it; a
+  choice that would form an `extends` cycle is rejected when you commit.
+- **Toggle default** — set or clear this profile as the default.
+- **Delete variable** — remove one of the profile's own variables.
+- **Delete profile** — remove the whole profile. This is guarded: it is refused
+  while other profiles extend it or it is the default (see `remove`).
+
+Cancelling exits without writing. A profile must keep at least one variable or
+an `extends`, so **Done** is rejected on an empty profile.
+
+## Managing profiles
+
+- **`enver remove [profile]`** — delete a profile. Refused while other profiles
+  extend it or while it is the default (the error names the dependents); repoint
+  or remove those first. Pass `--yes` / `-y` to skip the confirmation prompt.
+- **`enver rename [old] [new]`** — rename a profile and rewrite every reference:
+  any `extends: old` in other profiles and the top-level `default` if it matches.
+  Refused if the new name already exists.
+- **`enver duplicate <src> [new]`** — make a structural copy of a profile
+  (extends, env, and comments). The copy is not made the default.
+- **`enver default [profile]`** — with no argument, print the current default;
+  with a name, set it; `--clear` removes the default.
+- **`enver validate`** — audit config health: dangling `extends` and `extends`
+  cycles (errors), and profiles with no env and no extends (warnings). Exits
+  non-zero if any error is found.
+
 ## Encrypting secrets
 
 Secrets in the config can be encrypted at rest so the config is safe to commit
@@ -172,6 +208,12 @@ enver show [profile] [--no-mask]          Preview resolved env (masked by defaul
 enver export [profile]                    Print `export K=V` (unmasked, for eval)
 enver list                                List profiles
 enver add [name]                          Interactively add a profile
+enver edit [profile]                      Interactively edit a profile
+enver remove [profile] [-y]               Delete a profile
+enver rename [old] [new]                  Rename a profile (rewrites extends/default refs)
+enver duplicate <src> [new]               Copy a profile (extends, env, comments)
+enver default [profile] [--clear]         Set, show, or clear the default profile
+enver validate                            Check config health
 enver keygen [--force]                    Generate the encryption key file
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
@@ -191,9 +233,10 @@ With no profile, the config's `default` is used. `enver show <profile>` previews
 the resolved env (masked by default); `enver list` lists profiles.
 
 The first positional token is matched against subcommand names (`x`, `show`,
-`export`, `list`, `add`, `keygen`, `encrypt`, `decrypt`, `completion`) before
-being treated as a profile, so a profile that shares one of those names must be
-run via the explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
+`export`, `list`, `add`, `edit`, `remove`, `rename`, `duplicate`, `default`,
+`validate`, `keygen`, `encrypt`, `decrypt`, `completion`) before being treated
+as a profile, so a profile that shares one of those names must be run via the
+explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
 case-insensitive) are masked in `enver show` output (use `--no-mask` to reveal).
