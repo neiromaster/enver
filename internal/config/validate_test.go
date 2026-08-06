@@ -1,4 +1,3 @@
-// internal/config/validate_test.go
 package config
 
 import "testing"
@@ -40,5 +39,23 @@ func TestValidateSeverityExit(t *testing.T) {
 	}
 	if !hasErr {
 		t.Error("dangling extends should be an error severity")
+	}
+}
+
+func TestValidateDeepDanglingNotLabeledCycle(t *testing.T) {
+	// a -> b -> ghost ; b's dangling ref to ghost is the real issue.
+	cfg := Config{Profiles: map[string]Profile{
+		"a": {Extends: "b"},
+		"b": {Extends: "ghost"},
+	}}
+	got := map[string]string{}
+	for _, is := range Validate(cfg) {
+		got[is.Profile] = is.Kind
+	}
+	if got["b"] != "dangling-extends" {
+		t.Errorf("b = %q, want dangling-extends", got["b"])
+	}
+	if got["a"] == "cycle" {
+		t.Error("a mislabeled as cycle (deep dangling should not be)")
 	}
 }

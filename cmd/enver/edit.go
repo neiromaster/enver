@@ -193,7 +193,15 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		case "action":
 			switch key {
 			case actionDone:
-				return commitEdit(path, cfg, s, wasDefault)
+				if err := commitEdit(path, cfg, s, wasDefault); err != nil {
+					return err
+				}
+				if s.deleteProfile {
+					fmt.Printf("✓ removed profile %q\n", s.name)
+				} else {
+					fmt.Printf("✓ updated profile %q\n", s.name)
+				}
+				return nil
 			case actionAdd:
 				entry, err := ui.EnvCard(ui.EnvEntry{})
 				if err != nil {
@@ -238,11 +246,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				if err != nil || !ans {
 					continue
 				}
-				if err := config.DeleteProfile(path, name); err != nil {
-					return err
-				}
-				fmt.Printf("✓ removed profile %q\n", name)
-				return nil
+				s.deleteProfile = true
+				continue
 			}
 		case "own":
 			cur, _ := s.find(key)
@@ -253,6 +258,9 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			if edited.Key = strings.TrimSpace(edited.Key); edited.Key == "" {
 				continue // blank name cancels the edit of this var
 			}
+			if edited.Key != key {
+				s.deleteKey(key)
+			}
 			s.upsert(edited)
 		case "inherited":
 			fmt.Println("  inherited variable — view only")
@@ -260,15 +268,30 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// commitEdit validates the working copy (extends cycle, non-empty invariant)
-// then writes it. setDefault/clearDefault are derived from wasDefault vs the
-// toggled state.
+// commitEdit commits the working copy: a pending delete is honored first;
+// otherwise it validates (extends cycle, non-empty invariant) and writes the
+// profile. setDefault/clearDefault are derived from wasDefault vs the toggled
+// state.
 func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) error {
+	if s.deleteProfile {
+		return config.DeleteProfile(path, s.name)
+	}
+	if err := commitValidate(cfg, s); err != nil {
+		return err
+	}
+	p := config.Profile{Extends: s.extends, Env: s.envMap()}
+	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault, s.commentsMap())
+}
+
+// commitValidate checks that the working copy can be committed: the non-empty
+// invariant, and (when extends is set) that it would not form a cycle. It does
+// not touch the filesystem.
+func commitValidate(cfg config.Config, s editState) error {
 	if err := s.canCommit(); err != nil {
 		return err
 	}
 	if s.extends != "" {
-		probe := config.Config{Default: cfg.Default, Profiles: map[string]config.Profile{}}
+		probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
 		for k, v := range cfg.Profiles {
 			probe.Profiles[k] = v
 		}
@@ -279,8 +302,7 @@ func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) er
 			return fmt.Errorf("extends %q would create a cycle", s.extends)
 		}
 	}
-	p := config.Profile{Extends: s.extends, Env: s.envMap()}
-	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault, s.commentsMap())
+	return nil
 }
 
 func editTitle(s editState) string {

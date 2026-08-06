@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,5 +80,72 @@ func TestParseMenuChoice(t *testing.T) {
 	}
 	if kind, key := parseMenuChoice(actionDone, s); kind != "action" || key != actionDone {
 		t.Fatalf("action choice: kind=%q key=%q", kind, key)
+	}
+}
+
+func TestCommitValidateCycleRejected(t *testing.T) {
+	// a -> b -> a is a cycle.
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"a": {Extends: "b"},
+		"b": {Extends: "a"},
+	}}
+	s := newEditState("a", config.Profile{Extends: "b", Env: map[string]string{"K": "v"}}, nil, false)
+	s.extends = "b" // a extending b, where b extends a
+	if err := commitValidate(cfg, s); err == nil {
+		t.Fatal("cycle not rejected")
+	}
+}
+
+func TestCommitValidateValidExtends(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"K": "v"}},
+		"a":    {Env: map[string]string{"K2": "v2"}},
+	}}
+	s := newEditState("a", config.Profile{Extends: "base", Env: map[string]string{"K2": "v2"}}, nil, false)
+	if err := commitValidate(cfg, s); err != nil {
+		t.Fatalf("valid extends rejected: %v", err)
+	}
+}
+
+func TestCommitValidateEmpty(t *testing.T) {
+	s := newEditState("a", config.Profile{}, nil, false)
+	if err := commitValidate(config.Config{}, s); err == nil {
+		t.Fatal("empty non-extending profile should not validate")
+	}
+}
+
+func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p",
+		config.Profile{Env: map[string]string{"A": "1", "B": "2"}},
+		true, map[string]string{"A": "a-hint", "B": "b-hint"}); err != nil {
+		t.Fatal(err)
+	}
+	prof, comments, isDefault, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Default: "p", Profiles: map[string]config.Profile{"p": prof}}
+	s := newEditState("p", prof, comments, isDefault)
+	// Edit A (keep comment), delete B, add C with a comment.
+	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new", Comment: "a-hint"})
+	s.deleteKey("B")
+	s.upsert(ui.EnvEntry{Key: "C", Value: "3", Comment: "c-hint"})
+	if err := commitEdit(path, cfg, s, true); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	_, got, isDef, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["A"] != "a-hint" || got["C"] != "c-hint" {
+		t.Fatalf("comments not preserved on surviving vars: %v", got)
+	}
+	if _, has := got["B"]; has {
+		t.Fatal("deleted var's comment survived")
+	}
+	if !isDef {
+		t.Fatal("default not preserved through edit")
 	}
 }

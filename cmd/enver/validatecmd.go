@@ -1,4 +1,3 @@
-// cmd/enver/validatecmd.go
 package main
 
 import (

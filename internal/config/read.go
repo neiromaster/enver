@@ -1,4 +1,3 @@
-// internal/config/read.go
 package config
 
 import "os"
@@ -43,7 +42,6 @@ func ReadProfile(path, name string) (p Profile, comments map[string]string, isDe
 			keyNode, valNode := env.Content[i], env.Content[i+1]
 			p.Env[keyNode.Value] = valNode.Value
 			if c := keyNode.HeadComment; c != "" {
-				// Trim leading "# " if present.
 				if len(c) >= 2 && c[0] == '#' && c[1] == ' ' {
 					c = c[2:]
 				}

@@ -1,7 +1,9 @@
-// internal/config/validate.go
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Issue is one config-health finding.
 type Issue struct {
@@ -39,7 +41,11 @@ func Validate(cfg Config) []Issue {
 				continue
 			}
 			if _, _, err := cfg.ResolveProfile(n); err != nil {
-				issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
+				if strings.Contains(err.Error(), "cycle") {
+					issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
+				}
+				// a "not found" here is a deeper dangling link, reported at its own
+				// source profile; do not double-report or mislabel it as a cycle.
 			}
 		}
 		if len(p.Env) == 0 && p.Extends == "" {

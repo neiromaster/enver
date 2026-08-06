@@ -1,4 +1,3 @@
-// internal/config/read_test.go
 package config
 
 import (
