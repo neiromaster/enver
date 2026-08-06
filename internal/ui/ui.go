@@ -1,4 +1,4 @@
-// Package ui provides interactive terminal prompts built on charmbracelet/huh
+// Package ui provides interactive terminal prompts built on charm.land/huh
 // for enver's human-facing commands. All prompts are interactive (TTY) only.
 package ui
 

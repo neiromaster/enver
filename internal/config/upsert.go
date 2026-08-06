@@ -53,6 +53,8 @@ func setScalar(mapping *yaml.Node, key, val string) {
 //
 // Env keys merge additively (new values override existing same keys). Extends is
 // set only when non-empty. setDefault updates the top-level `default` key.
+// comments[key] (non-empty) sets/overrides the comment above that env entry;
+// empty/missing leaves any existing comment untouched.
 func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[string]string) error {
 	var root yaml.Node
 	data, err := os.ReadFile(path)

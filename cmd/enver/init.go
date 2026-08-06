@@ -101,9 +101,17 @@ func doInit(cmd *cobra.Command, args []string) error {
 
 	setDefault := false
 	if existing.Default == "" {
-		setDefault, _ = ui.Confirm(fmt.Sprintf("Set %q as the default profile?", name), true)
+		ans, err := ui.Confirm(fmt.Sprintf("Set %q as the default profile?", name), true)
+		if err != nil {
+			return nil
+		}
+		setDefault = ans
 	} else {
-		setDefault, _ = ui.Confirm(fmt.Sprintf("Set %q as the default? (current: %s)", name, existing.Default), false)
+		ans, err := ui.Confirm(fmt.Sprintf("Set %q as the default? (current: %s)", name, existing.Default), false)
+		if err != nil {
+			return nil
+		}
+		setDefault = ans
 	}
 
 	profile, comments := buildProfile(extends, entries)
