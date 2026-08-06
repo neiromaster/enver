@@ -1,0 +1,89 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestWriteProfileReplacesEnvAndDeletesAbsentKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	in := `profiles:
+  anth:
+    env:
+      KEEP: "1"
+      DROP: "1"
+      API_KEY: old
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// New env keeps KEEP and adds MODEL; DROP and API_KEY are deleted. The
+	// comments map is authoritative — WriteProfile writes exactly these keys
+	// with exactly these comments (the caller, edit, passes the full set seeded
+	// from ReadProfile).
+	p := Profile{Env: map[string]string{"KEEP": "1", "MODEL": "claude-sonnet-5"}}
+	comments := map[string]string{"KEEP": "kept hint", "MODEL": "chosen model"}
+	if err := WriteProfile(path, "anth", p, false, false, comments); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if strings.Contains(s, "DROP") || strings.Contains(s, "API_KEY") {
+		t.Fatalf("absent keys not deleted:\n%s", s)
+	}
+	// !!str renders int-like values quoted (type-safe); plain strings stay unquoted.
+	if !strings.Contains(s, `KEEP: "1"`) {
+		t.Fatalf("KEEP missing or not quoted:\n%s", s)
+	}
+	if !strings.Contains(s, "MODEL: claude-sonnet-5") {
+		t.Fatalf("MODEL missing:\n%s", s)
+	}
+	if !strings.Contains(s, "kept hint") || !strings.Contains(s, "chosen model") {
+		t.Fatalf("comments from the map missing:\n%s", s)
+	}
+}
+
+func TestWriteProfileClearsExtendsAndSetsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  anth:\n    extends: base\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "anth", Profile{Extends: "", Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if strings.Contains(s, "extends") {
+		t.Fatalf("extends not cleared:\n%s", s)
+	}
+	if !strings.Contains(s, "default: anth") {
+		t.Fatalf("default not set:\n%s", s)
+	}
+}
+
+func TestWriteProfileClearsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("default: anth\nprofiles:\n  anth:\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, false, true, nil); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	if strings.Contains(string(mustRead(t, path)), "default") {
+		t.Fatal("default not cleared")
+	}
+}
+
+func TestWriteProfileCreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "config.yaml")
+	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !strings.Contains(string(mustRead(t, path)), "anth") {
+		t.Fatal("file not created with profile")
+	}
+}

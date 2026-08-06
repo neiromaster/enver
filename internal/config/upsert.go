@@ -56,23 +56,9 @@ func setScalar(mapping *yaml.Node, key, val string) {
 // comments[key] (non-empty) sets/overrides the comment above that env entry;
 // empty/missing leaves any existing comment untouched.
 func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[string]string) error {
-	var root yaml.Node
-	data, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		if len(data) == 0 {
-			root = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
-		} else if err := yaml.Unmarshal(data, &root); err != nil {
-			return err
-		}
-	case os.IsNotExist(err):
-		root = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
-	default:
+	root, err := loadOrInitRoot(path)
+	if err != nil {
 		return err
-	}
-
-	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
 	body := root.Content[0]
 
@@ -105,7 +91,7 @@ func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[s
 		setScalar(body, "default", name)
 	}
 
-	out, err := yaml.Marshal(&root)
+	out, err := yaml.Marshal(root)
 	if err != nil {
 		return err
 	}
