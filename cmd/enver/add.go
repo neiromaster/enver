@@ -32,14 +32,14 @@ func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[st
 	return config.Profile{Extends: extends, Env: env}, comments
 }
 
-var initCmd = &cobra.Command{
-	Use:   "init [name]",
-	Short: "Interactively create a profile",
+var addCmd = &cobra.Command{
+	Use:   "add [name]",
+	Short: "Interactively add a profile",
 	Args:  cobra.MaximumNArgs(1),
-	RunE:  doInit,
+	RunE:  doAdd,
 }
 
-func doInit(cmd *cobra.Command, args []string) error {
+func doAdd(cmd *cobra.Command, args []string) error {
 	cfgPath := config.GlobalPath(globalFlags.configPath)
 	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})
 	names := existing.ProfileNames()

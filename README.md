@@ -13,7 +13,7 @@ API keys / base URLs / model sets, but works for any command.
 enverx anth -- claude
 enver x openrouter -- claude --model claude-sonnet-5
 eval "$(enver export prod-db)"
-enver init                  # interactively create a profile
+enver add                   # interactively create a profile
 enver encrypt               # encrypt secret values at rest
 ```
 
@@ -112,11 +112,11 @@ keys are overridden per-key; `extends` is taken from the closer layer when set.
 
 ## Creating profiles interactively
 
-`enver init` walks you through a new profile and writes it into the global
+`enver add` walks you through a new profile and writes it into the global
 config, preserving any existing structure and comments:
 
 - **Profile name** — letters, digits, `-`, `_`; must start with a letter or digit.
-  Pass it as an argument (`enver init glm`) to skip this prompt.
+  Pass it as an argument (`enver add glm`) to skip this prompt.
 - **Extends** — picked from a list of existing profiles (with a `(none)` option).
   Skipped when no profiles exist yet.
 - **Variables** — for each, enter a name, a value, and an optional comment; leave
@@ -171,7 +171,7 @@ enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the deta
 enver show [profile] [--no-mask]          Preview resolved env (masked by default)
 enver export [profile]                    Print `export K=V` (unmasked, for eval)
 enver list                                List profiles
-enver init [name]                         Interactively create a profile
+enver add [name]                          Interactively add a profile
 enver keygen [--force]                    Generate the encryption key file
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
@@ -185,11 +185,13 @@ enver --version / enverx --version / -h, --help
 > (preview) were removed. Use `enverx <profile> -- <command>` (or `enver x ...`)
 > to run, and `enver show <profile>` to preview. `enver run` was renamed to `enver x`.
 
+> **Breaking:** `enver init` was renamed to `enver add` — `init` implied initialization, but the command only adds a profile.
+
 With no profile, the config's `default` is used. `enver show <profile>` previews
 the resolved env (masked by default); `enver list` lists profiles.
 
 The first positional token is matched against subcommand names (`x`, `show`,
-`export`, `list`, `init`, `keygen`, `encrypt`, `decrypt`, `completion`) before
+`export`, `list`, `add`, `keygen`, `encrypt`, `decrypt`, `completion`) before
 being treated as a profile, so a profile that shares one of those names must be
 run via the explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 

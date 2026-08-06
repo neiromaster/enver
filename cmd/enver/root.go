@@ -28,7 +28,7 @@ environment injected, without mutating any tool's own config.
   enver show <profile>                  preview resolved env (masked)
   enver export <profile>                print ` + "`export K=V`" + ` for eval
   enver list                            list profiles
-  enver init [name]                     create a profile interactively
+  enver add [name]                      create a profile interactively
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
@@ -45,7 +45,7 @@ func init() {
 	pf.StringVar(&globalFlags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 
-	rootCmd.AddCommand(xCmd, showCmd, exportCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, initCmd, defaultCmd, validateCmd)
+	rootCmd.AddCommand(xCmd, showCmd, exportCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd)
 }
 
 func main() {
