@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type filterState struct {
@@ -19,6 +20,7 @@ type selectModel struct {
 	cursor    int
 	selected  map[int]bool
 	filter    filterState
+	width     int
 	height    int
 	submitted bool
 	canceled  bool
@@ -32,6 +34,7 @@ func newSelectModel(title string, options []Option, multi bool) *selectModel {
 		multi:    multi,
 		theme:    defaultTheme(),
 		selected: map[int]bool{},
+		chosen:   -1,
 	}
 }
 
@@ -78,6 +81,7 @@ func (m *selectModel) isCancel(k tea.KeyPressMsg) bool {
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch k := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = k.Width
 		m.height = k.Height
 		return m, nil
 	case tea.KeyPressMsg:
@@ -90,10 +94,8 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case k.Code == tea.KeyEnter:
 			m.submitted = true
-			if !m.multi {
-				if nav := m.nav(); len(nav) > 0 {
-					m.chosen = nav[m.cursor]
-				}
+			if nav := m.nav(); len(nav) > 0 {
+				m.chosen = nav[m.cursor]
 			}
 			return m, tea.Quit
 		case k.Code == tea.KeyDown, k.Text == "j":
@@ -108,10 +110,7 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.page(k.Code)
 		}
 		if k.Mod == tea.ModCtrl && (k.Code == 'u' || k.Code == 'd') {
-			step := m.pageHeight() / 2
-			if step < 1 {
-				step = 1
-			}
+			step := max(m.viewport()/2, 1)
 			if k.Code == 'u' {
 				m.move(-step)
 			} else {
@@ -131,13 +130,13 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *selectModel) applyFilterKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case k.Code == tea.KeyEsc:
+	switch k.Code {
+	case tea.KeyEsc:
 		m.filter.active = false
 		m.filter.value = ""
-	case k.Code == tea.KeyEnter:
+	case tea.KeyEnter:
 		m.filter.active = false
-	case k.Code == tea.KeyBackspace:
+	case tea.KeyBackspace:
 		if len(m.filter.value) > 0 {
 			m.filter.value = m.filter.value[:len(m.filter.value)-1]
 		}
@@ -151,10 +150,7 @@ func (m *selectModel) applyFilterKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *selectModel) page(code rune) {
-	step := m.pageHeight()
-	if step < 1 {
-		step = 1
-	}
+	step := m.viewport()
 	if code == tea.KeyPgDown {
 		m.move(step)
 	} else {
@@ -162,11 +158,31 @@ func (m *selectModel) page(code rune) {
 	}
 }
 
-func (m *selectModel) pageHeight() int {
+// viewport is the number of list rows to render and to page by. It follows the
+// terminal height but never collapses below floor, so navigation stays usable on
+// small terminals.
+func (m *selectModel) viewport() int {
+	const floor = 10
 	if m.height <= 0 {
-		return len(m.nav())
+		return floor
 	}
-	return m.height - 4
+	return max(m.height-4, floor)
+}
+
+// window returns the displayed option indices to render, centered on the cursor
+// and capped at viewport() rows so long lists scroll instead of overflowing.
+func (m *selectModel) window() []int {
+	disp := m.visibleIndices()
+	rows := m.viewport()
+	if len(disp) <= rows {
+		return disp
+	}
+	curOpt := -1
+	if nav := m.nav(); len(nav) > 0 {
+		curOpt = nav[m.cursor]
+	}
+	start := clamp(indexIn(disp, curOpt)-rows/2, 0, len(disp)-rows)
+	return disp[start : start+rows]
 }
 
 func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
@@ -177,16 +193,25 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 	switch {
 	case k.Code == tea.KeySpace, k.Text == "x":
 		idx := nav[m.cursor]
+		if m.options[idx].Action {
+			return
+		}
 		m.selected[idx] = !m.selected[idx]
 	case k.Text == "*":
-		allOn := true
+		var choices []int
 		for _, i := range nav {
+			if !m.options[i].Action {
+				choices = append(choices, i)
+			}
+		}
+		allOn := true
+		for _, i := range choices {
 			if !m.selected[i] {
 				allOn = false
 				break
 			}
 		}
-		for _, i := range nav {
+		for _, i := range choices {
 			m.selected[i] = !allOn
 		}
 	}
@@ -202,6 +227,9 @@ func (m *selectModel) singleResult() string {
 }
 
 func (m *selectModel) multiResult() []string {
+	if m.chosen >= 0 && m.chosen < len(m.options) && m.options[m.chosen].Action {
+		return []string{m.options[m.chosen].Value}
+	}
 	var out []string
 	for i, o := range m.options {
 		if m.selected[i] {
@@ -215,44 +243,63 @@ func (m *selectModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.theme.title.Render(m.title))
 	b.WriteString("\n")
-	visible := m.visibleIndices()
-	current := -1
+
+	curOpt := -1
 	if nav := m.nav(); len(nav) > 0 {
-		current = nav[m.cursor]
+		curOpt = nav[m.cursor]
 	}
-	for _, i := range visible {
+
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+
+	for _, i := range m.window() {
 		o := m.options[i]
 		if o.Separator {
 			b.WriteString(m.theme.separator.Render(strings.Repeat("─", 24)))
 			b.WriteString("\n")
 			continue
 		}
-		cursor := " "
-		if i == current {
-			cursor = m.theme.cursor
-		}
-		line := o.Label
-		if m.multi {
-			mark := m.theme.checkOff
-			if m.selected[i] {
-				mark = m.theme.checkOn
-			}
-			line = mark + " " + line
-		}
-		if i == current {
-			line = m.theme.selected.Render(cursor + " " + line)
+		line := m.rowString(i, curOpt)
+		if i == curOpt {
+			line = m.theme.rowActive.Width(width).Render(line)
 		} else {
-			line = m.theme.normal.Render(cursor + " " + line)
+			line = m.theme.normal.Render(line)
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	if m.filter.active {
-		b.WriteString(m.theme.filter.Render("/" + m.filter.value))
+
+	if m.filter.value != "" {
+		if m.filter.active {
+			b.WriteString(m.theme.filter.Render("/" + m.filter.value))
+		} else {
+			b.WriteString(m.theme.help.Render("filter: " + m.filter.value))
+		}
 		b.WriteString("\n")
 	}
 	b.WriteString(m.theme.help.Render(m.helpText()))
 	return tea.NewView(b.String())
+}
+
+// rowString builds the (unstyled) text of one option row: cursor, an optional
+// multi-select mark, and a fixed-width icon cell so labels align across rows
+// regardless of glyph width.
+func (m *selectModel) rowString(i, curOpt int) string {
+	cur := " "
+	if i == curOpt {
+		cur = m.theme.cursor
+	}
+	cell := padIcon(m.options[i].Icon)
+	if m.multi && !m.options[i].Action {
+		mark := m.theme.checkOff
+		if m.selected[i] {
+			mark = m.theme.checkOn
+		}
+		return cur + " " + mark + " " + cell + " " + m.options[i].Label
+	}
+	return cur + " " + cell + " " + m.options[i].Label
 }
 
 func (m *selectModel) visibleIndices() []int {
@@ -271,6 +318,20 @@ func (m *selectModel) helpText() string {
 		return "↑↓ move · space toggle · * all · / filter · enter confirm · esc cancel"
 	}
 	return "↑↓ move · / filter · enter select · esc cancel"
+}
+
+func padIcon(icon string) string {
+	pad := max(0, 2-lipgloss.Width(icon))
+	return icon + strings.Repeat(" ", pad)
+}
+
+func indexIn(xs []int, v int) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return 0
 }
 
 func Select(title string, options []Option) (string, error) {

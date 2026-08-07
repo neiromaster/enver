@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -124,5 +126,92 @@ func TestSelectFilterConfirmSelectsFiltered(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // select
 	if got := m.singleResult(); got != "banana" {
 		t.Fatalf("filter-confirm = %q, want banana", got)
+	}
+}
+
+func TestSelectCapturesWidthAndHeight(t *testing.T) {
+	m := newSelectModel("t", opts3(), false)
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 42, Height: 7})
+	sm := mm.(*selectModel)
+	if sm.width != 42 || sm.height != 7 {
+		t.Fatalf("width/height = %d/%d, want 42/7", sm.width, sm.height)
+	}
+}
+
+func TestSelectWindowScrollsToCursor(t *testing.T) {
+	opts := make([]Option, 30)
+	for i := range opts {
+		opts[i] = Option{Value: fmt.Sprintf("v%d", i), Label: fmt.Sprintf("item-%d", i)}
+	}
+	m := newSelectModel("t", opts, false)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 6}) // viewport = max(2, 10) = 10
+	m.cursor = 20
+	win := m.window()
+	if len(win) != 10 {
+		t.Fatalf("window len = %d, want 10", len(win))
+	}
+	seen := map[int]bool{}
+	for _, i := range win {
+		seen[i] = true
+	}
+	if !seen[20] {
+		t.Error("cursor option 20 not in window")
+	}
+	if seen[0] || seen[29] {
+		t.Error("far-away options should be scrolled out of the window")
+	}
+}
+
+func TestSelectFilterBarShownAfterEnter(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "apple", Label: "Apple"},
+		{Value: "banana", Label: "Banana"},
+	}, false)
+	m = press(m, tea.KeyPressMsg{Text: "/"})
+	m = press(m, tea.KeyPressMsg{Text: "ba"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // exit filter mode, value retained
+	if m.filter.active {
+		t.Fatal("filter still active after enter")
+	}
+	if view := m.View().Content; !strings.Contains(view, "ba") {
+		t.Fatalf("filter bar not shown after enter:\n%s", view)
+	}
+}
+
+func TestMultiSelectActionNotToggleable(t *testing.T) {
+	opts := []Option{
+		{Value: "a", Label: "A"},
+		{Value: "back", Label: "Back", Action: true},
+	}
+	m := newSelectModel("t", opts, true)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor on Back
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	if m.selected[1] {
+		t.Fatal("action option was toggled by space")
+	}
+	m = press(m, tea.KeyPressMsg{Text: "*"}) // select-all skips action rows
+	if m.selected[1] {
+		t.Fatal("action option toggled by select-all")
+	}
+	if !m.selected[0] {
+		t.Fatal("select-all did not toggle the non-action option")
+	}
+}
+
+func TestMultiSelectEnterOnActionReturnsAction(t *testing.T) {
+	opts := []Option{
+		{Value: "a", Label: "A"},
+		{Value: "back", Label: "Back", Action: true},
+	}
+	m := newSelectModel("t", opts, true)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace}) // toggle A
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})  // cursor on Back
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("not submitted")
+	}
+	got := m.multiResult()
+	if len(got) != 1 || got[0] != "back" {
+		t.Fatalf("multiResult = %v, want [back] (action cancels the checked set)", got)
 	}
 }

@@ -66,18 +66,19 @@ func (m *envCardModel) advance(delta int) {
 }
 
 func (m *envCardModel) View() tea.View {
-	var b strings.Builder
 	labels := [3]string{"Name", "Value", "Comment"}
+	blocks := make([]string, len(m.fields))
 	for i := range m.fields {
-		prefix := "  "
+		block := m.theme.title.Render(labels[i]) + "\n" + m.fields[i].View()
 		if i == m.cursor {
-			prefix = m.theme.cursor + " "
+			blocks[i] = m.theme.fieldActive.Render(block)
+		} else {
+			blocks[i] = m.theme.fieldIdle.Render(block)
 		}
-		b.WriteString(m.theme.title.Render(prefix + labels[i]))
-		b.WriteString("\n")
-		b.WriteString(m.fields[i].View())
-		b.WriteString("\n")
 	}
+	var b strings.Builder
+	b.WriteString(strings.Join(blocks, "\n\n"))
+	b.WriteString("\n")
 	b.WriteString(m.theme.help.Render("tab next · shift+tab prev · enter submit · blank name finishes · esc cancel"))
 	return tea.NewView(b.String())
 }

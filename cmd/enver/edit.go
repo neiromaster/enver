@@ -109,13 +109,14 @@ func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	for _, e := range inherited {
 		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Label: fmt.Sprintf("%s = %s (inherited)", e.Key, e.Value)})
 	}
+	opts = append(opts, ui.Separator())
 	opts = append(opts,
-		ui.Option{Value: actionAdd, Label: "＋ Add variable"},
-		ui.Option{Value: actionExtends, Label: extendsLabel(s.extends)},
-		ui.Option{Value: actionDefault, Label: defaultLabel(s.isDefault)},
-		ui.Option{Value: actionDeleteVar, Label: "🗑 Delete variable…"},
-		ui.Option{Value: actionDeleteProfile, Label: "⚠ Delete profile…"},
-		ui.Option{Value: actionDone, Label: "✓ Done"},
+		ui.Option{Value: actionAdd, Icon: ui.IconAdd, Label: "Add variable"},
+		ui.Option{Value: actionExtends, Icon: ui.IconExtends, Label: extendsLabel(s.extends)},
+		ui.Option{Value: actionDefault, Icon: ui.IconDefault, Label: defaultLabel(s.isDefault)},
+		ui.Option{Value: actionDeleteVar, Icon: ui.IconDeleteVar, Label: "Delete variable…"},
+		ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"},
+		ui.Option{Value: actionDone, Icon: ui.IconDone, Label: "Done"},
 	)
 	return opts
 }
@@ -123,7 +124,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 func pickerTail() []ui.Option {
 	return []ui.Option{
 		ui.Separator(),
-		{Value: actionCancel, Label: "↩ Back"},
+		{Value: actionCancel, Icon: ui.IconBack, Label: "Back", Action: true},
 	}
 }
 
