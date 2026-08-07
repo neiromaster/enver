@@ -46,3 +46,16 @@ func TestEnvCardCancel(t *testing.T) {
 		t.Fatal("esc did not cancel")
 	}
 }
+
+func TestEnvCardShiftTabNavigatesBack(t *testing.T) {
+	m := newEnvCardModel(EnvEntry{})
+	m = updCard(m, tea.KeyPressMsg{Text: "K"})        // type into name
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab}) // name -> value
+	if m.cursor != 1 {
+		t.Fatalf("cursor should be at value (1), got %d", m.cursor)
+	}
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // value -> name (back)
+	if m.cursor != 0 {
+		t.Fatalf("shift+tab should move cursor back to 0, got %d", m.cursor)
+	}
+}

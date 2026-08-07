@@ -46,11 +46,11 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.advance(1)
 			return m, nil
-		case k.Code == tea.KeyTab:
-			m.advance(1)
-			return m, nil
 		case k.Code == tea.KeyTab && k.Mod == tea.ModShift:
 			m.advance(-1)
+			return m, nil
+		case k.Code == tea.KeyTab:
+			m.advance(1)
 			return m, nil
 		}
 	}
