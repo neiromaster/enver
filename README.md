@@ -143,14 +143,15 @@ Env keys merge additively into an existing profile of the same name.
 variables are listed and editable, while variables inherited through `extends`
 are shown read-only (marked `(inherited)`) — change those in the profile they
 come from. Nothing is written until you select **Done**, so you can experiment
-freely:
+freely. Press **ESC** at any time to cancel the current prompt and return to
+the menu:
 
 - **Add or edit a variable** — select an existing var to change its value or
   comment, or add a new one (name, value, optional comment, as in `add`).
 - **Change extends** — repoint the profile at another profile or clear it; a
   choice that would form an `extends` cycle is rejected when you commit.
 - **Toggle default** — set or clear this profile as the default.
-- **Delete variable** — remove one of the profile's own variables.
+- **Delete variable** — remove one or more of the profile's own variables.
 - **Delete profile** — remove the whole profile. This is guarded: it is refused
   while other profiles extend it or it is the default (see `remove`).
 
