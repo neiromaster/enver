@@ -22,13 +22,6 @@ type Option struct {
 
 func Separator() Option { return Option{Separator: true} }
 
-// Input prompts for a single line of text.
-func Input(title string) (string, error) {
-	var v string
-	err := huh.NewInput().Title(title).Value(&v).Run()
-	return v, err
-}
-
 // Confirm prompts for a yes/no answer. defaultYes sets the initial selection.
 func Confirm(title string, defaultYes bool) (bool, error) {
 	v := defaultYes
