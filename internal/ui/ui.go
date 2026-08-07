@@ -15,9 +15,12 @@ type EnvEntry struct {
 
 // Option is one selectable item in a Select prompt.
 type Option struct {
-	Value string
-	Label string
+	Value     string
+	Label     string
+	Separator bool
 }
+
+func Separator() Option { return Option{Separator: true} }
 
 // Input prompts for a single line of text.
 func Input(title string) (string, error) {
