@@ -120,13 +120,9 @@ func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	return opts
 }
 
-// pickerTail is appended to modal pickers: a rule, then the menu-return
-// affordance. huh has no non-selectable separator inside a Select, so the rule
-// is its own entry — both it and Back route back to the menu (no side effect),
-// and the cursor/highlight always land on a single row.
 func pickerTail() []ui.Option {
 	return []ui.Option{
-		{Value: actionCancel, Label: "─────────────────────"},
+		ui.Separator(),
 		{Value: actionCancel, Label: "↩ Back"},
 	}
 }
@@ -198,7 +194,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	for {
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited))
 		if err != nil {
-			return nil // abort (ctrl+c): clean exit, nothing written
+			return nil // esc / ctrl+c: cancel, nothing written
 		}
 		kind, key := parseMenuChoice(choice, s)
 		switch kind {
@@ -248,14 +244,16 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					own = append(own, ui.Option{Value: e.Key, Label: e.Key})
 				}
 				own = append(own, pickerTail()...)
-				picked, err := ui.Select("Variable to delete", own)
+				picked, err := ui.MultiSelect("Variables to delete", own)
 				if err != nil {
 					continue
 				}
-				if picked == actionCancel {
-					continue
+				for _, key := range picked {
+					if key == actionCancel {
+						continue
+					}
+					s.deleteKey(key)
 				}
-				s.deleteKey(picked)
 			case actionDeleteProfile:
 				if err := guardRemovable(cfg, name); err != nil {
 					fmt.Println(" ", err)
