@@ -26,10 +26,14 @@ var validateCmd = &cobra.Command{
 			if is.Severity == "error" {
 				hasErr = true
 			}
-			fmt.Fprintf(w, "%s: %s\n", is.Severity, is)
+			if _, err := fmt.Fprintf(w, "%s: %s\n", is.Severity, is); err != nil {
+				return err
+			}
 		}
 		if len(issues) == 0 {
-			fmt.Fprintln(w, "✓ config is valid")
+			if _, err := fmt.Fprintln(w, "✓ config is valid"); err != nil {
+				return err
+			}
 		}
 		if hasErr {
 			return fmt.Errorf("config has errors")
