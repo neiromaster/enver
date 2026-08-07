@@ -18,6 +18,7 @@ const (
 	actionDeleteVar     = "action:delete-var"
 	actionDeleteProfile = "action:delete-profile"
 	actionDone          = "action:done"
+	actionCancel        = "action:cancel"
 )
 
 // editState is the in-memory working copy of the profile being edited: own env
@@ -119,6 +120,17 @@ func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	return opts
 }
 
+// pickerTail is appended to modal pickers: a rule, then the menu-return
+// affordance. huh has no non-selectable separator inside a Select, so the rule
+// is its own entry — both it and Back route back to the menu (no side effect),
+// and the cursor/highlight always land on a single row.
+func pickerTail() []ui.Option {
+	return []ui.Option{
+		{Value: actionCancel, Label: "─────────────────────"},
+		{Value: actionCancel, Label: "↩ Back"},
+	}
+}
+
 func extendsLabel(extends string) string {
 	if extends == "" {
 		return "🔗 Change extends… (none)"
@@ -186,7 +198,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	for {
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited))
 		if err != nil {
-			return nil // esc / cancel: clean exit, nothing written
+			return nil // abort (ctrl+c): clean exit, nothing written
 		}
 		kind, key := parseMenuChoice(choice, s)
 		switch kind {
@@ -216,8 +228,11 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				}
 				s.upsert(entry)
 			case actionExtends:
-				picked, err := ui.Select("Extends", extendsOptions(cfg, name))
+				picked, err := ui.Select("Extends", append(extendsOptions(cfg, name), pickerTail()...))
 				if err != nil {
+					continue
+				}
+				if picked == actionCancel {
 					continue
 				}
 				s.extends = picked
@@ -228,12 +243,16 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				own := make([]ui.Option, len(s.entries))
-				for i, e := range s.entries {
-					own[i] = ui.Option{Value: e.Key, Label: e.Key}
+				own := make([]ui.Option, 0, len(s.entries)+2)
+				for _, e := range s.entries {
+					own = append(own, ui.Option{Value: e.Key, Label: e.Key})
 				}
+				own = append(own, pickerTail()...)
 				picked, err := ui.Select("Variable to delete", own)
 				if err != nil {
+					continue
+				}
+				if picked == actionCancel {
 					continue
 				}
 				s.deleteKey(picked)
