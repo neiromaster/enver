@@ -29,17 +29,6 @@ func Input(title string) (string, error) {
 	return v, err
 }
 
-// Select prompts the user to pick one option and returns its Value.
-func Select(title string, options []Option) (string, error) {
-	var v string
-	opts := make([]huh.Option[string], len(options))
-	for i, o := range options {
-		opts[i] = huh.NewOption(o.Label, o.Value)
-	}
-	err := huh.NewSelect[string]().Title(title).Options(opts...).Value(&v).Run()
-	return v, err
-}
-
 // Confirm prompts for a yes/no answer. defaultYes sets the initial selection.
 func Confirm(title string, defaultYes bool) (bool, error) {
 	v := defaultYes
