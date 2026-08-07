@@ -22,13 +22,6 @@ type Option struct {
 
 func Separator() Option { return Option{Separator: true} }
 
-// Confirm prompts for a yes/no answer. defaultYes sets the initial selection.
-func Confirm(title string, defaultYes bool) (bool, error) {
-	v := defaultYes
-	err := huh.NewConfirm().Title(title).Value(&v).Run()
-	return v, err
-}
-
 // EnvCard prompts for one environment variable: name, value, and an optional
 // comment. entry pre-fills the fields (empty for a new variable). A blank name
 // signals "finished" to the caller.
