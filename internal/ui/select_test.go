@@ -79,3 +79,35 @@ func TestSelectNavClamps(t *testing.T) {
 		t.Fatalf("G cursor = %d, want %d", m.cursor, len(m.nav())-1)
 	}
 }
+
+func TestMultiSelectToggleAndSubmit(t *testing.T) {
+	m := newSelectModel("t", opts3(), true)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace}) // toggle Alpha
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})  // Beta
+	m = press(m, tea.KeyPressMsg{Text: "x"})          // toggle Beta
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("not submitted")
+	}
+	got := m.multiResult()
+	want := map[string]bool{"a": true, "b": true}
+	if len(got) != 2 || !want[got[0]] || !want[got[1]] {
+		t.Fatalf("multiResult = %v, want a,b", got)
+	}
+}
+
+func TestMultiSelectStarTogglesAll(t *testing.T) {
+	m := newSelectModel("t", opts3(), true)
+	m = press(m, tea.KeyPressMsg{Text: "*"}) // all on
+	for _, i := range m.nav() {
+		if !m.selected[i] {
+			t.Fatalf("option %d not selected after *", i)
+		}
+	}
+	m = press(m, tea.KeyPressMsg{Text: "*"}) // all off
+	for _, i := range m.nav() {
+		if m.selected[i] {
+			t.Fatalf("option %d still selected after second *", i)
+		}
+	}
+}

@@ -201,6 +201,16 @@ func (m *selectModel) singleResult() string {
 	return ""
 }
 
+func (m *selectModel) multiResult() []string {
+	var out []string
+	for i, o := range m.options {
+		if m.selected[i] {
+			out = append(out, o.Value)
+		}
+	}
+	return out
+}
+
 func (m *selectModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.theme.title.Render(m.title))
@@ -269,4 +279,12 @@ func Select(title string, options []Option) (string, error) {
 		return "", err
 	}
 	return out.(*selectModel).singleResult(), nil
+}
+
+func MultiSelect(title string, options []Option) ([]string, error) {
+	out, err := run(newSelectModel(title, options, true))
+	if err != nil {
+		return nil, err
+	}
+	return out.(*selectModel).multiResult(), nil
 }
