@@ -43,7 +43,7 @@ func (m *selectModel) nav() []int {
 		if o.Separator {
 			continue
 		}
-		if m.filter.active && m.filter.value != "" &&
+		if m.filter.value != "" &&
 			!strings.Contains(strings.ToLower(o.Label), strings.ToLower(m.filter.value)) {
 			continue
 		}
@@ -103,7 +103,7 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case k.Text == "g", k.Code == tea.KeyHome:
 			m.cursor = 0
 		case k.Text == "G", k.Code == tea.KeyEnd:
-			m.cursor = len(m.nav()) - 1
+			m.cursor = max(0, len(m.nav())-1)
 		case k.Code == tea.KeyPgDown, k.Code == tea.KeyPgUp:
 			m.page(k.Code)
 		}
@@ -256,7 +256,7 @@ func (m *selectModel) View() tea.View {
 }
 
 func (m *selectModel) visibleIndices() []int {
-	if m.filter.active && m.filter.value != "" {
+	if m.filter.value != "" {
 		return m.nav()
 	}
 	out := make([]int, len(m.options))

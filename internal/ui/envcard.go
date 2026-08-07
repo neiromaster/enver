@@ -92,6 +92,10 @@ func (m *envCardModel) result() EnvEntry {
 	}
 }
 
+// EnvCard prompts for a single environment variable entry (key, value, comment).
+// It returns (EnvEntry{Key:""}, nil) when the user finishes with a blank key name
+// (callers check for empty Key to detect completion without error).
+// Returns ErrCanceled if the user presses ESC or Ctrl+C.
 func EnvCard(entry EnvEntry) (EnvEntry, error) {
 	out, err := run(newEnvCardModel(entry))
 	if err != nil {

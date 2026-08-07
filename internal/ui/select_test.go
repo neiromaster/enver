@@ -111,3 +111,18 @@ func TestMultiSelectStarTogglesAll(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectFilterConfirmSelectsFiltered(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "apple", Label: "Apple"},
+		{Value: "banana", Label: "Banana"},
+		{Value: "cherry", Label: "Cherry"},
+	}, false)
+	m = press(m, tea.KeyPressMsg{Text: "/"})          // enter filter
+	m = press(m, tea.KeyPressMsg{Text: "ba"})         // narrows to Banana
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // exit filter mode (value retained)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // select
+	if got := m.singleResult(); got != "banana" {
+		t.Fatalf("filter-confirm = %q, want banana", got)
+	}
+}
