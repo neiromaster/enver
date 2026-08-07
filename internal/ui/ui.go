@@ -1,10 +1,6 @@
-// Package ui provides interactive terminal prompts built on charm.land/huh
+// Package ui provides interactive terminal prompts built on charm.land/bubbletea/v2
 // for enver's human-facing commands. All prompts are interactive (TTY) only.
 package ui
-
-import (
-	"charm.land/huh/v2"
-)
 
 // EnvEntry is one environment variable as collected or edited interactively.
 type EnvEntry struct {
@@ -21,16 +17,3 @@ type Option struct {
 }
 
 func Separator() Option { return Option{Separator: true} }
-
-// EnvCard prompts for one environment variable: name, value, and an optional
-// comment. entry pre-fills the fields (empty for a new variable). A blank name
-// signals "finished" to the caller.
-func EnvCard(entry EnvEntry) (EnvEntry, error) {
-	e := entry
-	err := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Variable name (blank to finish)").Value(&e.Key),
-		huh.NewInput().Title("Value").Value(&e.Value),
-		huh.NewInput().Title("Comment (optional)").Value(&e.Comment),
-	)).Run()
-	return e, err
-}
