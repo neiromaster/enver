@@ -107,11 +107,11 @@ func TestEditStateDirtyDetection(t *testing.T) {
 
 func TestMenuOptionsDoneMarksUnsaved(t *testing.T) {
 	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
-	if got := doneLabelOf(s.menuOptions(nil)); got != "Done" {
+	if got := doneLabelOf(s.menuOptions(nil, nil)); got != "Done" {
 		t.Fatalf("clean Done label = %q, want %q", got, "Done")
 	}
 	s.upsert(ui.EnvEntry{Key: "A", Value: "2"})
-	if got := doneLabelOf(s.menuOptions(nil)); got != "Done • unsaved changes" {
+	if got := doneLabelOf(s.menuOptions(nil, nil)); got != "Done • unsaved changes" {
 		t.Fatalf("dirty Done label = %q, want unsaved marker", got)
 	}
 }
@@ -136,7 +136,7 @@ func optionLabels(opts []ui.Option) string {
 func TestMenuOptionsContainsVarsInheritedAndActions(t *testing.T) {
 	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	inherited := []ui.EnvEntry{{Key: "INH", Value: "y"}}
-	labels := optionLabels(s.menuOptions(inherited))
+	labels := optionLabels(s.menuOptions(inherited, nil))
 	for _, want := range []string{"OWN", "INH", "Add variable", "Change extends", "Done", "Delete variable", "Delete profile", "Set as default"} {
 		if !strings.Contains(labels, want) {
 			t.Fatalf("menu missing %q: %s", want, labels)
@@ -151,6 +151,11 @@ func TestParseMenuChoice(t *testing.T) {
 	}
 	if kind, key := parseMenuChoice(actionDone, s); kind != "action" || key != actionDone {
 		t.Fatalf("action choice: kind=%q key=%q", kind, key)
+	}
+	// An override row's Value is the bare key, so it classifies as "own".
+	overrideState := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine"}}, nil, false)
+	if kind, key := parseMenuChoice("SHADOW", overrideState); kind != "own" || key != "SHADOW" {
+		t.Fatalf("override choice: kind=%q key=%q", kind, key)
 	}
 }
 
@@ -267,8 +272,15 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 }
 
 func TestMenuOptionsMarksOverrides(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"SHADOW": "from-base"}},
+	}}
 	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
-	opts := s.menuOptions([]ui.EnvEntry{{Key: "SHADOW", Value: "from-base"}})
+	// Integration reality: SHADOW is an override, so inheritedForState excludes it.
+	if got := inheritedForState(cfg, s); len(got) != 0 {
+		t.Fatalf("shadowed key leaked into inherited set: %+v", got)
+	}
+	opts := s.menuOptions(inheritedForState(cfg, s), overrideKeySet(cfg, s))
 	for _, o := range opts {
 		switch o.Value {
 		case "SHADOW":
@@ -321,8 +333,11 @@ func TestOverrideSeedFillsValueAndComment(t *testing.T) {
 }
 
 func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"SHADOW": "from-base"}},
+	}}
 	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
-	opts := deleteVarOptions(s, []ui.EnvEntry{{Key: "SHADOW", Value: "from-base"}})
+	opts := deleteVarOptions(s, overrideKeySet(cfg, s))
 	find := func(val string) ui.Option {
 		for _, o := range opts {
 			if o.Value == val {

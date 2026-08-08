@@ -133,12 +133,29 @@ func (s editState) dirty() bool {
 	return false
 }
 
-// inheritedKeySet returns the set of keys contributed by the extends chain, so a
-// caller can tell which own entries are overrides.
-func inheritedKeySet(entries []ui.EnvEntry) map[string]bool {
-	out := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		out[e.Key] = true
+// overrideKeySet returns the own keys that shadow a key contributed by the
+// extends chain (parents only), so menuOptions and deleteVarOptions can mark
+// actual overrides. The parent resolution blanks the profile's own env, so a
+// shadowed key still appears here — unlike inheritedForState, which excludes
+// own keys. A profile with no extends, or a pending extends that would cycle,
+// yields nil.
+func overrideKeySet(cfg config.Config, s editState) map[string]bool {
+	if s.extends == "" {
+		return nil
+	}
+	probe := probeConfig(cfg, s)
+	tp := probe.Profiles[s.name]
+	tp.Env = nil // resolve parents only
+	probe.Profiles[s.name] = tp
+	parentResolved, _, err := probe.ResolveProfile(s.name)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(s.entries))
+	for _, e := range s.entries {
+		if _, ok := parentResolved[e.Key]; ok {
+			out[e.Key] = true
+		}
 	}
 	return out
 }
@@ -160,12 +177,11 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 	return seed
 }
 
-func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
+func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
-	inheritedKeys := inheritedKeySet(inherited)
 	for _, e := range s.entries {
 		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
-		if inheritedKeys[e.Key] {
+		if overrideKeys[e.Key] {
 			opt.Icon = ui.IconOverride
 		}
 		opts = append(opts, opt)
@@ -195,12 +211,11 @@ func pickerTail() []ui.Option {
 // deleteVarOptions builds the delete picker: every own entry, with overrides
 // (keys that also exist in the inherited set) marked so deleting them is clearly
 // a revert to the inherited value rather than a removal, plus the Back tail.
-func deleteVarOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
-	inheritedKeys := inheritedKeySet(inherited)
+func deleteVarOptions(s editState, overrideKeys map[string]bool) []ui.Option {
 	own := make([]ui.Option, 0, len(s.entries)+2)
 	for _, e := range s.entries {
 		opt := ui.Option{Value: e.Key, Label: e.Key}
-		if inheritedKeys[e.Key] {
+		if overrideKeys[e.Key] {
 			opt.Icon = ui.IconOverride
 			opt.Label = e.Key + " (→ inherited)"
 		}
@@ -283,7 +298,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	s := newEditState(name, prof, comments, isDefault)
 	for {
 		inherited := inheritedForState(cfg, s)
-		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited))
+		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
 		if err != nil {
 			// Only a cancel with pending edits is worth confirming; any other
 			// error (no TTY, tea failure) or a clean cancel just exits.
@@ -339,7 +354,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, inheritedForState(cfg, s)))
+				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, overrideKeySet(cfg, s)))
 				if err != nil {
 					continue
 				}
