@@ -133,10 +133,25 @@ func (s editState) dirty() bool {
 	return false
 }
 
+// inheritedKeySet returns the set of keys contributed by the extends chain, so a
+// caller can tell which own entries are overrides.
+func inheritedKeySet(entries []ui.EnvEntry) map[string]bool {
+	out := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		out[e.Key] = true
+	}
+	return out
+}
+
 func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	var opts []ui.Option
+	inheritedKeys := inheritedKeySet(inherited)
 	for _, e := range s.entries {
-		opts = append(opts, ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)})
+		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
+		if inheritedKeys[e.Key] {
+			opt.Icon = ui.IconOverride
+		}
+		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
 		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Label: fmt.Sprintf("%s = %s (inherited)", e.Key, e.Value)})

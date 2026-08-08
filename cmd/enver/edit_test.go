@@ -265,3 +265,20 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 		t.Fatal("default not preserved through edit")
 	}
 }
+
+func TestMenuOptionsMarksOverrides(t *testing.T) {
+	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	opts := s.menuOptions([]ui.EnvEntry{{Key: "SHADOW", Value: "from-base"}})
+	for _, o := range opts {
+		switch o.Value {
+		case "SHADOW":
+			if o.Icon != ui.IconOverride {
+				t.Fatalf("override SHADOW should carry IconOverride, got %q", o.Icon)
+			}
+		case "OWN":
+			if o.Icon != "" {
+				t.Fatalf("non-override OWN should have no icon, got %q", o.Icon)
+			}
+		}
+	}
+}

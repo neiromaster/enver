@@ -13,6 +13,7 @@ const (
 	IconDeleteProf = "⚠"
 	IconDone       = "✓"
 	IconBack       = "←"
+	IconOverride   = "↻"
 )
 
 type theme struct {
