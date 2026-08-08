@@ -249,11 +249,6 @@ func (m *selectModel) View() tea.View {
 		curOpt = nav[m.cursor]
 	}
 
-	width := m.width
-	if width == 0 {
-		width = 80
-	}
-
 	for _, i := range m.window() {
 		o := m.options[i]
 		if o.Separator {
@@ -263,7 +258,7 @@ func (m *selectModel) View() tea.View {
 		}
 		line := m.rowString(i, curOpt)
 		if i == curOpt {
-			line = m.theme.rowActive.Width(width).Render(line)
+			line = m.theme.rowActive.Render(line)
 		} else {
 			line = m.theme.normal.Render(line)
 		}
@@ -291,7 +286,7 @@ func (m *selectModel) rowString(i, curOpt int) string {
 	if i == curOpt {
 		cur = m.theme.cursor
 	}
-	cell := padIcon(m.options[i].Icon)
+	cell := padIcon(m.theme.icon(m.options[i].Icon))
 	if m.multi && !m.options[i].Action {
 		mark := m.theme.checkOff
 		if m.selected[i] {

@@ -215,3 +215,19 @@ func TestMultiSelectEnterOnActionReturnsAction(t *testing.T) {
 		t.Fatalf("multiResult = %v, want [back] (action cancels the checked set)", got)
 	}
 }
+
+func TestSelectRendersColoredIcon(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "a", Label: "Add", Icon: IconAdd},
+		{Value: "b", Label: "Other"},
+	}, false)
+	// cursor starts on row 0 (Add) — the active row.
+	if view := m.View().Content; !strings.Contains(view, "\x1b[32m") {
+		t.Fatalf("active row missing colored (green) icon:\n%s", view)
+	}
+	// move cursor to Other; Add is now a non-active row — icon must stay colored.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if view := m.View().Content; !strings.Contains(view, "\x1b[32m") {
+		t.Fatalf("non-active row missing colored (green) icon:\n%s", view)
+	}
+}
