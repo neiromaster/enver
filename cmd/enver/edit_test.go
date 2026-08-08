@@ -282,3 +282,22 @@ func TestMenuOptionsMarksOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeConfigCarriesWorkingExtendsAndEnv(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"FROM_BASE": "b"}},
+	}}
+	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s.extends = "base" // changed in-session, not yet committed
+	probe := probeConfig(cfg, s)
+	tp := probe.Profiles["a"]
+	if tp.Extends != "base" {
+		t.Fatalf("probe extends = %q, want base", tp.Extends)
+	}
+	if tp.Env["OWN"] != "x" {
+		t.Fatalf("probe own env lost OWN: %+v", tp.Env)
+	}
+	if probe.Profiles["base"].Env["FROM_BASE"] != "b" {
+		t.Fatal("probe dropped an unrelated profile")
+	}
+}

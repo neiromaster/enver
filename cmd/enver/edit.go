@@ -408,14 +408,11 @@ func inheritedEntries(resolved map[string]string, own map[string]string) []ui.En
 	return out
 }
 
-// inheritedForState resolves the profile as it would exist if the working copy
-// were committed — the working extends plus the working own env — and returns
-// the inherited env entries contributed by the extends chain. It is recomputed
-// on every menu redraw so a freshly picked extends (or deleting a variable that
-// shadows an inherited one) shows up immediately, without committing and
-// re-entering the editor. A pending extends that would form a cycle yields no
-// inherited entries; commitValidate reports the cycle at commit time.
-func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
+// probeConfig returns a copy of cfg with profile s.name carrying the working
+// extends and working own env, so resolution reflects uncommitted edits. Used by
+// inheritedForState (values) and the override path (comments) so both track the
+// same working extends.
+func probeConfig(cfg config.Config, s editState) config.Config {
 	probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
 	for k, v := range cfg.Profiles {
 		probe.Profiles[k] = v
@@ -424,6 +421,18 @@ func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
 	tp.Extends = s.extends
 	tp.Env = s.envMap()
 	probe.Profiles[s.name] = tp
+	return probe
+}
+
+// inheritedForState resolves the profile as it would exist if the working copy
+// were committed — the working extends plus the working own env — and returns
+// the inherited env entries contributed by the extends chain. It is recomputed
+// on every menu redraw so a freshly picked extends (or deleting a variable that
+// shadows an inherited one) shows up immediately, without committing and
+// re-entering the editor. A pending extends that would form a cycle yields no
+// inherited entries; commitValidate reports the cycle at commit time.
+func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
+	probe := probeConfig(cfg, s)
 	resolved, _, err := probe.ResolveProfile(s.name)
 	if err != nil {
 		return nil
