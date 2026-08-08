@@ -160,7 +160,7 @@ func (c Config) ResolveProfile(name string) (env map[string]string, chain []stri
 // key, the comment from the nearest profile in the chain that defines the key
 // with a comment (child over parent). Keys with no commented definition are
 // absent. Comments are read from the YAML node tree at path (the HeadComment
-// above each key), so they survive encryption. A read error yields nil.
+// above each key), so they survive encryption. A read error returns (nil, err).
 func (c Config) ResolveComments(path, name string) (map[string]string, error) {
 	_, chain, err := c.ResolveProfile(name)
 	if err != nil {
