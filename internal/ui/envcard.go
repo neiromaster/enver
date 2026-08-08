@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -17,7 +16,7 @@ type envCardModel struct {
 	theme     *theme
 	submitted bool
 	canceled  bool
-	prior     []EnvEntry
+	prior     []SummaryEntry
 }
 
 func newEnvCardModel(e EnvEntry) *envCardModel {
@@ -42,7 +41,7 @@ func termWidth() int {
 	return 80
 }
 
-func newCollectingEnvCardModel(e EnvEntry, prior []EnvEntry) *envCardModel {
+func newCollectingEnvCardModel(e EnvEntry, prior []SummaryEntry) *envCardModel {
 	m := newEnvCardModel(e)
 	m.prior = prior
 	return m
@@ -98,7 +97,7 @@ func (m *envCardModel) View() tea.View {
 	}
 	var b strings.Builder
 	if len(m.prior) > 0 {
-		b.WriteString(renderPriorEntries(m.prior, termWidth()))
+		b.WriteString(renderSummary(m.theme, m.prior, termWidth()))
 		b.WriteString("\n\n")
 	}
 	b.WriteString(strings.Join(blocks, "\n\n"))
@@ -115,42 +114,6 @@ func (m *envCardModel) result() EnvEntry {
 		Value:   m.fields[1].Value(),
 		Comment: m.fields[2].Value(),
 	}
-}
-
-// renderPriorEntries builds the "Added (N):" summary shown above a collecting
-// env-card form. Output is unstyled (terminal-default weight) and ANSI-free.
-// width is the usable terminal width; values are truncated with "…" to fit.
-func renderPriorEntries(entries []EnvEntry, width int) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	keyCol := 0
-	for _, e := range entries {
-		if len(e.Key) > keyCol {
-			keyCol = len(e.Key)
-		}
-	}
-	if keyCol > 20 {
-		keyCol = 20
-	}
-	numW := len(strconv.Itoa(len(entries)))
-	valueWidth := width - (2 + numW + 2) - keyCol - len(" = ")
-	if valueWidth < 4 {
-		valueWidth = 4
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Added (%d):\n", len(entries))
-	for i, e := range entries {
-		num := fmt.Sprintf("%*s", numW, strconv.Itoa(i+1))
-		key := e.Key
-		if len(key) < keyCol {
-			key = fmt.Sprintf("%-*s", keyCol, key)
-		}
-		b.WriteString("  " + num + "  " + key + " = " + truncateRunes(e.Value, valueWidth))
-		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // truncateRunes returns s unchanged when it fits in max runes; otherwise it
@@ -233,8 +196,8 @@ func EnvCard(entry EnvEntry) (EnvEntry, error) {
 // EnvCardCollecting prompts for one variable in a multi-variable collection flow
 // (used by the add command). It renders a numbered summary of prior above the
 // form. prior is display-only and should already be masked by the caller.
-func EnvCardCollecting(entry EnvEntry, prior []EnvEntry) (EnvEntry, error) {
-	out, err := run(newCollectingEnvCardModel(entry, prior))
+func EnvCardCollecting(entry EnvEntry, summary []SummaryEntry) (EnvEntry, error) {
+	out, err := run(newCollectingEnvCardModel(entry, summary))
 	if err != nil {
 		return EnvEntry{}, err
 	}

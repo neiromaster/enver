@@ -33,17 +33,6 @@ func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[st
 	return config.Profile{Extends: extends, Env: env}, comments
 }
 
-// maskedEntries returns a display-only copy of entries with secret values
-// redacted via config.MaskValue. The input slice is not mutated; keys and
-// comments pass through unchanged.
-func maskedEntries(entries []ui.EnvEntry) []ui.EnvEntry {
-	out := make([]ui.EnvEntry, len(entries))
-	for i, e := range entries {
-		out[i] = ui.EnvEntry{Key: e.Key, Value: config.MaskValue(e.Key, e.Value), Comment: e.Comment}
-	}
-	return out
-}
-
 // buildSummary builds the display summary for the collecting env-card: own entries
 // (marked Override when they shadow an inherited key) in insertion order, then the
 // inherited keys not defined as own (sorted). Values are masked via config.MaskValue.
@@ -130,9 +119,16 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		extends = picked
 	}
 
+	parentEnv := map[string]string{}
+	if extends != "" {
+		if resolved, _, err := existing.ResolveProfile(extends); err == nil {
+			parentEnv = resolved
+		}
+	}
+
 	var entries []ui.EnvEntry
 	for {
-		entry, err := ui.EnvCardCollecting(ui.EnvEntry{}, maskedEntries(entries))
+		entry, err := ui.EnvCardCollecting(ui.EnvEntry{}, buildSummary(entries, parentEnv))
 		if err != nil {
 			return nil
 		}
@@ -144,7 +140,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 			fmt.Println("  skip: invalid key (no spaces)")
 			continue
 		}
-		entries = append(entries, entry)
+		entries = upsertEntry(entries, entry)
 	}
 	if len(entries) == 0 && extends == "" {
 		return fmt.Errorf("a profile needs at least one env var or an extends")

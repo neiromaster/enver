@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/ui"
@@ -39,30 +38,6 @@ func TestBuildProfile(t *testing.T) {
 	}
 	if _, ok := comments["MODEL"]; ok {
 		t.Fatal("empty comment should not be recorded")
-	}
-}
-
-func TestMaskedEntries(t *testing.T) {
-	src := []ui.EnvEntry{
-		{Key: "API_TOKEN", Value: "sk-abcdefghijklmnopqrstuvwxyz", Comment: "vault"},
-		{Key: "PORT", Value: "5432"},
-	}
-	got := maskedEntries(src)
-
-	if got[0].Value == src[0].Value {
-		t.Fatal("secret value must be masked")
-	}
-	if !strings.HasPrefix(got[0].Value, "sk-a") {
-		t.Fatalf("masked value should start with first 4 chars: %q", got[0].Value)
-	}
-	if got[0].Comment != "vault" {
-		t.Fatalf("comment must pass through: %q", got[0].Comment)
-	}
-	if got[1].Value != "5432" {
-		t.Fatalf("non-secret value must be unchanged: %q", got[1].Value)
-	}
-	if src[0].Value != "sk-abcdefghijklmnopqrstuvwxyz" {
-		t.Fatal("maskedEntries must not mutate its input slice")
 	}
 }
 
