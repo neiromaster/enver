@@ -13,14 +13,14 @@ func TestThemeIconSemanticColors(t *testing.T) {
 		glyph string
 		code  string // standard ANSI-16 foreground code
 	}{
-		{IconAdd, "\x1b[32m"},        // green
-		{IconDone, "\x1b[32m"},       // green
-		{IconExtends, "\x1b[34m"},    // blue
-		{IconDefault, "\x1b[33m"},    // yellow
-		{IconOverride, "\x1b[35m"},   // magenta
-		{IconDeleteVar, "\x1b[31m"},  // red
-		{IconDeleteProf, "\x1b[31m"}, // red
-		{IconBack, "\x1b[36m"},       // cyan
+		{IconAdd, "32m"},        // green
+		{IconDone, "32m"},       // green
+		{IconExtends, "34m"},    // blue
+		{IconDefault, "33m"},    // yellow
+		{IconOverride, "35m"},   // magenta
+		{IconDeleteVar, "31m"},  // red
+		{IconDeleteProf, "31m"}, // red
+		{IconBack, "36m"},       // cyan
 	}
 	for _, c := range cases {
 		got := th.icon(c.glyph)

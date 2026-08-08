@@ -222,12 +222,12 @@ func TestSelectRendersColoredIcon(t *testing.T) {
 		{Value: "b", Label: "Other"},
 	}, false)
 	// cursor starts on row 0 (Add) — the active row.
-	if view := m.View().Content; !strings.Contains(view, "\x1b[32m") {
+	if view := m.View().Content; !strings.Contains(view, "32m") {
 		t.Fatalf("active row missing colored (green) icon:\n%s", view)
 	}
 	// move cursor to Other; Add is now a non-active row — icon must stay colored.
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if view := m.View().Content; !strings.Contains(view, "\x1b[32m") {
+	if view := m.View().Content; !strings.Contains(view, "32m") {
 		t.Fatalf("non-active row missing colored (green) icon:\n%s", view)
 	}
 }

@@ -71,7 +71,7 @@ func defaultTheme() *theme {
 // uncolored so the menu still renders if a caller passes an ad-hoc icon.
 func (t *theme) icon(glyph string) string {
 	if style, ok := t.iconStyles[glyph]; ok {
-		return style.Render(glyph)
+		return style.Bold(true).Render(glyph)
 	}
 	return glyph
 }
