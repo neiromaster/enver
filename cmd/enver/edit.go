@@ -192,6 +192,23 @@ func pickerTail() []ui.Option {
 	}
 }
 
+// deleteVarOptions builds the delete picker: every own entry, with overrides
+// (keys that also exist in the inherited set) marked so deleting them is clearly
+// a revert to the inherited value rather than a removal, plus the Back tail.
+func deleteVarOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
+	inheritedKeys := inheritedKeySet(inherited)
+	own := make([]ui.Option, 0, len(s.entries)+2)
+	for _, e := range s.entries {
+		opt := ui.Option{Value: e.Key, Label: e.Key}
+		if inheritedKeys[e.Key] {
+			opt.Icon = ui.IconOverride
+			opt.Label = e.Key + " (→ inherited)"
+		}
+		own = append(own, opt)
+	}
+	return append(own, pickerTail()...)
+}
+
 func extendsLabel(extends string) string {
 	if extends == "" {
 		return "🔗 Change extends… (none)"
@@ -322,12 +339,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				own := make([]ui.Option, 0, len(s.entries)+2)
-				for _, e := range s.entries {
-					own = append(own, ui.Option{Value: e.Key, Label: e.Key})
-				}
-				own = append(own, pickerTail()...)
-				picked, err := ui.MultiSelect("Variables to delete", own)
+				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, inheritedForState(cfg, s)))
 				if err != nil {
 					continue
 				}

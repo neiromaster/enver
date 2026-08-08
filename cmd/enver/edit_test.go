@@ -319,3 +319,31 @@ func TestOverrideSeedFillsValueAndComment(t *testing.T) {
 		t.Fatalf("seed3 = %+v", seed3)
 	}
 }
+
+func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
+	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	opts := deleteVarOptions(s, []ui.EnvEntry{{Key: "SHADOW", Value: "from-base"}})
+	find := func(val string) ui.Option {
+		for _, o := range opts {
+			if o.Value == val {
+				return o
+			}
+		}
+		t.Fatalf("option %q not found", val)
+		return ui.Option{}
+	}
+	shadow := find("SHADOW")
+	if shadow.Icon != ui.IconOverride {
+		t.Fatalf("override SHADOW should carry IconOverride, got %q", shadow.Icon)
+	}
+	if !strings.Contains(shadow.Label, "→ inherited") {
+		t.Fatalf("SHADOW label should hint revert, got %q", shadow.Label)
+	}
+	own := find("OWN")
+	if own.Icon != "" {
+		t.Fatalf("non-override OWN should have no icon, got %q", own.Icon)
+	}
+	if strings.Contains(own.Label, "→ inherited") {
+		t.Fatalf("OWN label should not hint revert, got %q", own.Label)
+	}
+}
