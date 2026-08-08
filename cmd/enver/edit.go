@@ -30,6 +30,12 @@ type editState struct {
 	extends       string
 	isDefault     bool
 	deleteProfile bool
+
+	// orig* snapshot the loaded profile for unsaved-change detection on the Done
+	// row. origEntries is a copy, so in-place edits to entries never reach it.
+	origExtends   string
+	origIsDefault bool
+	origEntries   []ui.EnvEntry
 }
 
 func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
@@ -42,7 +48,15 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 	for _, k := range keys {
 		entries = append(entries, ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k]})
 	}
-	return editState{name: name, entries: entries, extends: prof.Extends, isDefault: isDefault}
+	return editState{
+		name:          name,
+		entries:       entries,
+		extends:       prof.Extends,
+		isDefault:     isDefault,
+		origExtends:   prof.Extends,
+		origIsDefault: isDefault,
+		origEntries:   append([]ui.EnvEntry(nil), entries...),
+	}
 }
 
 func (s *editState) find(key string) (ui.EnvEntry, bool) {
@@ -101,6 +115,24 @@ func (s editState) canCommit() error {
 	return nil
 }
 
+// dirty reports whether the working copy differs from the loaded profile: an
+// added, removed, or modified entry, a changed extends, a toggled default, or a
+// pending profile deletion.
+func (s editState) dirty() bool {
+	if s.extends != s.origExtends || s.isDefault != s.origIsDefault || s.deleteProfile {
+		return true
+	}
+	if len(s.entries) != len(s.origEntries) {
+		return true
+	}
+	for i := range s.entries {
+		if s.entries[i] != s.origEntries[i] {
+			return true
+		}
+	}
+	return false
+}
+
 func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
@@ -116,7 +148,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 		ui.Option{Value: actionDefault, Icon: ui.IconDefault, Label: defaultLabel(s.isDefault)},
 		ui.Option{Value: actionDeleteVar, Icon: ui.IconDeleteVar, Label: "Delete variable…"},
 		ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"},
-		ui.Option{Value: actionDone, Icon: ui.IconDone, Label: "Done"},
+		ui.Option{Value: actionDone, Icon: ui.IconDone, Label: doneLabel(s.dirty())},
 	)
 	return opts
 }
@@ -140,6 +172,16 @@ func defaultLabel(isDefault bool) string {
 		return "★ Clear default (current)"
 	}
 	return "★ Set as default"
+}
+
+// doneLabel flags the Done row when the working copy has unsaved changes, so
+// the user can tell a commit would actually write (or that cancelling drops
+// edits) without re-entering the editor.
+func doneLabel(dirty bool) string {
+	if dirty {
+		return "Done • unsaved changes"
+	}
+	return "Done"
 }
 
 // parseMenuChoice classifies a selection from menuOptions into a kind and key.
@@ -188,14 +230,22 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("profile %q not found", name)
 	}
 	wasDefault := isDefault
-	resolved, _, _ := cfg.ResolveProfile(name)
-	inherited := inheritedEntries(resolved, prof.Env)
 
 	s := newEditState(name, prof, comments, isDefault)
 	for {
+		inherited := inheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited))
 		if err != nil {
-			return nil // esc / ctrl+c: cancel, nothing written
+			// Only a cancel with pending edits is worth confirming; any other
+			// error (no TTY, tea failure) or a clean cancel just exits.
+			if err != ui.ErrCanceled || !s.dirty() {
+				return nil
+			}
+			discard, cerr := ui.Confirm("Discard unsaved changes and exit?", false)
+			if cerr != nil || !discard {
+				continue
+			}
+			return nil
 		}
 		kind, key := parseMenuChoice(choice, s)
 		switch kind {
@@ -341,6 +391,29 @@ func inheritedEntries(resolved map[string]string, own map[string]string) []ui.En
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+// inheritedForState resolves the profile as it would exist if the working copy
+// were committed — the working extends plus the working own env — and returns
+// the inherited env entries contributed by the extends chain. It is recomputed
+// on every menu redraw so a freshly picked extends (or deleting a variable that
+// shadows an inherited one) shows up immediately, without committing and
+// re-entering the editor. A pending extends that would form a cycle yields no
+// inherited entries; commitValidate reports the cycle at commit time.
+func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
+	probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
+	for k, v := range cfg.Profiles {
+		probe.Profiles[k] = v
+	}
+	tp := probe.Profiles[s.name]
+	tp.Extends = s.extends
+	tp.Env = s.envMap()
+	probe.Profiles[s.name] = tp
+	resolved, _, err := probe.ResolveProfile(s.name)
+	if err != nil {
+		return nil
+	}
+	return inheritedEntries(resolved, s.envMap())
 }
 
 // extendsOptions builds the picker for changing extends: (none) plus every other
