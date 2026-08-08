@@ -170,3 +170,53 @@ func TestTermWidthPositive(t *testing.T) {
 		t.Fatalf("termWidth = %d, want >= 1", w)
 	}
 }
+
+func TestRenderSummaryEmpty(t *testing.T) {
+	if got := renderSummary(defaultTheme(), nil, 80); got != "" {
+		t.Fatalf("nil entries should render empty, got %q", got)
+	}
+}
+
+func TestRenderSummaryKindsAndHeader(t *testing.T) {
+	entries := []SummaryEntry{
+		{Key: "PORT", Value: "5432", Kind: EntryAdded},
+		{Key: "DATABASE_URL", Value: "postgres://staging", Kind: EntryOverride},
+		{Key: "API_KEY", Value: "sk-a…(len=40)", Kind: EntryInherited},
+		{Key: "LOG_LEVEL", Value: "info", Kind: EntryInherited},
+	}
+	got := stripAnsi(renderSummary(defaultTheme(), entries, 100))
+	lines := strings.Split(got, "\n")
+	if lines[0] != "Variables (2 own · 2 inherited)" {
+		t.Fatalf("header = %q, want %q", lines[0], "Variables (2 own · 2 inherited)")
+	}
+	want := []string{
+		"  + PORT = 5432",
+		"  ↻ DATABASE_URL = postgres://staging",
+		"  ↳ API_KEY = sk-a…(len=40)",
+		"  ↳ LOG_LEVEL = info",
+	}
+	if len(lines) != 1+len(want) {
+		t.Fatalf("got %d lines, want %d: %v", len(lines), 1+len(want), lines)
+	}
+	for i, w := range want {
+		if lines[1+i] != w {
+			t.Errorf("line %d = %q, want %q", 1+i, lines[1+i], w)
+		}
+	}
+}
+
+func TestRenderSummaryAddedHeaderWhenNoInherited(t *testing.T) {
+	entries := []SummaryEntry{{Key: "PORT", Value: "5432", Kind: EntryAdded}}
+	got := stripAnsi(renderSummary(defaultTheme(), entries, 80))
+	if !strings.HasPrefix(got, "Added (1)\n  + PORT = 5432") {
+		t.Fatalf("expected Added (1) header + line, got %q", got)
+	}
+}
+
+func TestRenderSummaryTruncatesValue(t *testing.T) {
+	entries := []SummaryEntry{{Key: "K", Value: "abcdefghijklmnop", Kind: EntryAdded}}
+	got := stripAnsi(renderSummary(defaultTheme(), entries, 20))
+	if !strings.Contains(got, "abcdefghijk…") {
+		t.Fatalf("expected truncated value, got %q", got)
+	}
+}

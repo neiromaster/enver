@@ -65,3 +65,43 @@ func TestMaskedEntries(t *testing.T) {
 		t.Fatal("maskedEntries must not mutate its input slice")
 	}
 }
+
+func TestBuildSummary(t *testing.T) {
+	entries := []ui.EnvEntry{
+		{Key: "PORT", Value: "5432"},
+		{Key: "API_TOKEN", Value: "sk-abcdefghijklmnopqrstuvwxyz"},
+	}
+	parent := map[string]string{"API_TOKEN": "sk-old", "LOG_LEVEL": "info"}
+	got := buildSummary(entries, parent)
+
+	if got[0].Key != "PORT" || got[0].Kind != ui.EntryAdded {
+		t.Fatalf("got[0] = %+v, want PORT/Added", got[0])
+	}
+	if got[1].Key != "API_TOKEN" || got[1].Kind != ui.EntryOverride {
+		t.Fatalf("got[1] = %+v, want API_TOKEN/Override", got[1])
+	}
+	if got[1].Value == "sk-abcdefghijklmnopqrstuvwxyz" {
+		t.Fatal("override value must be masked")
+	}
+	if got[2].Key != "LOG_LEVEL" || got[2].Kind != ui.EntryInherited {
+		t.Fatalf("got[2] = %+v, want LOG_LEVEL/Inherited (API_TOKEN is shadowed)", got[2])
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d entries, want 3: %+v", len(got), got)
+	}
+	if entries[1].Value != "sk-abcdefghijklmnopqrstuvwxyz" {
+		t.Fatal("buildSummary must not mutate its input entries")
+	}
+}
+
+func TestUpsertEntry(t *testing.T) {
+	entries := []ui.EnvEntry{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}
+	entries = upsertEntry(entries, ui.EnvEntry{Key: "A", Value: "9"})
+	if len(entries) != 2 || entries[0].Value != "9" {
+		t.Fatalf("upsert should replace existing key: %+v", entries)
+	}
+	entries = upsertEntry(entries, ui.EnvEntry{Key: "C", Value: "3"})
+	if len(entries) != 3 || entries[2].Key != "C" {
+		t.Fatalf("upsert should append new key: %+v", entries)
+	}
+}

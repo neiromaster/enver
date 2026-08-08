@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -41,6 +42,45 @@ func maskedEntries(entries []ui.EnvEntry) []ui.EnvEntry {
 		out[i] = ui.EnvEntry{Key: e.Key, Value: config.MaskValue(e.Key, e.Value), Comment: e.Comment}
 	}
 	return out
+}
+
+// buildSummary builds the display summary for the collecting env-card: own entries
+// (marked Override when they shadow an inherited key) in insertion order, then the
+// inherited keys not defined as own (sorted). Values are masked via config.MaskValue.
+// entries is not mutated.
+func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.SummaryEntry {
+	out := make([]ui.SummaryEntry, 0, len(entries)+len(parentEnv))
+	own := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		own[e.Key] = true
+		kind := ui.EntryAdded
+		if _, ok := parentEnv[e.Key]; ok {
+			kind = ui.EntryOverride
+		}
+		out = append(out, ui.SummaryEntry{Key: e.Key, Value: config.MaskValue(e.Key, e.Value), Kind: kind})
+	}
+	inherited := make([]string, 0, len(parentEnv))
+	for k := range parentEnv {
+		if !own[k] {
+			inherited = append(inherited, k)
+		}
+	}
+	sort.Strings(inherited)
+	for _, k := range inherited {
+		out = append(out, ui.SummaryEntry{Key: k, Value: config.MaskValue(k, parentEnv[k]), Kind: ui.EntryInherited})
+	}
+	return out
+}
+
+// upsertEntry appends entry, or replaces the existing entry with the same key.
+func upsertEntry(entries []ui.EnvEntry, e ui.EnvEntry) []ui.EnvEntry {
+	for i := range entries {
+		if entries[i].Key == e.Key {
+			entries[i] = e
+			return entries
+		}
+	}
+	return append(entries, e)
 }
 
 var addCmd = &cobra.Command{

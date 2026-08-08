@@ -166,6 +166,57 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max-1]) + "…"
 }
 
+// EntryKind classifies a summary entry so the renderer can pick its icon.
+type EntryKind int
+
+const (
+	EntryAdded     EntryKind = iota // "+": own, just added
+	EntryOverride                   // "↻": own, shadows an inherited variable
+	EntryInherited                  // "↳": contributed by the extends chain
+)
+
+// SummaryEntry is one line of the collecting env-card summary: a masked key/value
+// plus the semantic kind that selects its icon.
+type SummaryEntry struct {
+	Key   string
+	Value string // already masked by the caller
+	Kind  EntryKind
+}
+
+// renderSummary builds the icon-prefixed summary shown above a collecting env-card
+// form: a count header, then one indented line per entry in the given order. Icons
+// are colored via the theme; values are truncated with "…" to the terminal width.
+func renderSummary(t *theme, entries []SummaryEntry, width int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var own, inh int
+	for _, e := range entries {
+		if e.Kind == EntryInherited {
+			inh++
+		} else {
+			own++
+		}
+	}
+	glyph := map[EntryKind]string{EntryAdded: IconAdd, EntryOverride: IconOverride, EntryInherited: IconInherited}
+
+	var b strings.Builder
+	if inh > 0 {
+		fmt.Fprintf(&b, "Variables (%d own · %d inherited)\n", own, inh)
+	} else {
+		fmt.Fprintf(&b, "Added (%d)\n", own)
+	}
+	for _, e := range entries {
+		budget := width - len("  ") - 1 - len(" ") - len(e.Key) - len(" = ")
+		if budget < 4 {
+			budget = 4
+		}
+		b.WriteString("  " + t.icon(glyph[e.Kind]) + " " + e.Key + " = " + truncateRunes(e.Value, budget))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // EnvCard prompts for a single environment variable entry (key, value, comment).
 // It returns (EnvEntry{Key:""}, nil) when the user finishes with a blank key name
 // (callers check for empty Key to detect completion without error).
