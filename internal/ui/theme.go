@@ -44,7 +44,7 @@ func defaultTheme() *theme {
 	return &theme{
 		title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Cyan),
 		cursor:      cyan.Render("▸"),
-		rowActive:   lipgloss.NewStyle().Bold(true),
+		rowActive:   cyan.Bold(true),
 		selected:    cyan.Bold(true),
 		normal:      lipgloss.NewStyle(),
 		separator:   faint,

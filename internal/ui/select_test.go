@@ -232,16 +232,15 @@ func TestSelectRendersColoredIcon(t *testing.T) {
 	}
 }
 
-func TestSelectActiveLabelBold(t *testing.T) {
+func TestSelectActiveLabelCyan(t *testing.T) {
 	m := newSelectModel("t", []Option{
 		{Value: "a", Label: "Add", Icon: IconAdd},
 	}, false)
 	// cursor starts on row 0 (Add) — the active row.
 	view := m.View().Content
-	// The active label should be wrapped in bold (\x1b[1m). The title uses
-	// bold+cyan (\x1b[1;36m), so we check for bold-only to target the label.
-	// Pattern: \x1b[1mAdd\x1b[m (bold on, label, reset)
-	if !strings.Contains(view, "\x1b[1mAdd\x1b[m") {
-		t.Fatalf("active label not bold-wrapped; expected \\x1b[1mAdd\\x1b[m in view:\n%s", view)
+	// The active label is highlighted bold+cyan (cyan = 36m). The title is also
+	// cyan but its text differs, so "36mAdd" targets the active label.
+	if !strings.Contains(view, "36mAdd") {
+		t.Fatalf("active label not cyan-highlighted; expected cyan on \"Add\" in view:\n%s", view)
 	}
 }
