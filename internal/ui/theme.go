@@ -42,18 +42,18 @@ func defaultTheme() *theme {
 	cyan := lipgloss.NewStyle().Foreground(lipgloss.Cyan)
 
 	return &theme{
-		title:       lipgloss.NewStyle().Bold(true),
-		cursor:      "▸",
-		rowActive:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237")),
-		selected:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
+		title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Cyan),
+		cursor:      cyan.Render("▸"),
+		rowActive:   lipgloss.NewStyle().Bold(true),
+		selected:    cyan.Bold(true),
 		normal:      lipgloss.NewStyle(),
 		separator:   faint,
 		help:        faint,
-		filter:      lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-		fieldActive: lipgloss.NewStyle().BorderStyle(lipgloss.ThickBorder()).BorderLeft(true).BorderForeground(lipgloss.Color("4")).PaddingLeft(1),
+		filter:      yellow,
+		fieldActive: lipgloss.NewStyle().BorderStyle(lipgloss.ThickBorder()).BorderLeft(true).BorderForeground(lipgloss.Blue).PaddingLeft(1),
 		fieldIdle:   lipgloss.NewStyle().Faint(true).PaddingLeft(2),
-		checkOn:     "●",
-		checkOff:    "○",
+		checkOn:     green.Render("●"),
+		checkOff:    faint.Render("○"),
 		iconStyles: map[string]lipgloss.Style{
 			IconAdd:        green,
 			IconDone:       green,

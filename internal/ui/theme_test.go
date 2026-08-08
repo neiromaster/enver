@@ -39,3 +39,35 @@ func TestThemeIconUnknownPassthrough(t *testing.T) {
 		t.Errorf("icon(\"?\") = %q, want passthrough \"?\"", got)
 	}
 }
+
+func TestThemeStaticGlyphColors(t *testing.T) {
+	th := defaultTheme()
+	if !strings.Contains(th.cursor, "\x1b[36m") || !strings.Contains(th.cursor, "▸") {
+		t.Errorf("cursor = %q, want cyan ▸", th.cursor)
+	}
+	if !strings.Contains(th.checkOn, "\x1b[32m") {
+		t.Errorf("checkOn = %q, want green ●", th.checkOn)
+	}
+	if !strings.Contains(th.checkOff, "\x1b[2m") {
+		t.Errorf("checkOff = %q, want faint ○", th.checkOff)
+	}
+}
+
+func TestThemeTitleAndSelectedAreCyanBold(t *testing.T) {
+	th := defaultTheme()
+	for _, out := range []string{th.title.Render("X"), th.selected.Render("Y")} {
+		if !strings.Contains(out, "36m") {
+			t.Errorf("want cyan foreground, got %q", out)
+		}
+	}
+}
+
+// rowActive must NOT set a background: a fixed background (e.g. the old
+// Color("237") grey) ignores the terminal theme and breaks on some themes.
+func TestThemeRowActiveHasNoBackground(t *testing.T) {
+	th := defaultTheme()
+	out := th.rowActive.Render("row")
+	if strings.Contains(out, "\x1b[48") { // 48 = set background color (256/truecolor)
+		t.Errorf("rowActive must not set a background (cross-theme safe): %q", out)
+	}
+}
