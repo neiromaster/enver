@@ -143,6 +143,23 @@ func inheritedKeySet(entries []ui.EnvEntry) map[string]bool {
 	return out
 }
 
+// overrideSeed builds the EnvEntry used to seed EnvCard when overriding an
+// inherited variable: the inherited value (drawn from the menu's inherited set)
+// plus its resolved comment, so the user sees what they are deviating from.
+func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key string) ui.EnvEntry {
+	seed := ui.EnvEntry{Key: key}
+	for _, e := range inherited {
+		if e.Key == key {
+			seed.Value = e.Value
+			break
+		}
+	}
+	if c, ok := comments[key]; ok {
+		seed.Comment = c
+	}
+	return seed
+}
+
 func (s editState) menuOptions(inherited []ui.EnvEntry) []ui.Option {
 	var opts []ui.Option
 	inheritedKeys := inheritedKeySet(inherited)
@@ -346,7 +363,16 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			}
 			s.upsert(edited)
 		case "inherited":
-			fmt.Println("  inherited variable — view only")
+			probe := probeConfig(cfg, s)
+			comments, _ := probe.ResolveComments(path, s.name)
+			edited, err := ui.EnvCard(overrideSeed(inherited, comments, key))
+			if err != nil {
+				continue
+			}
+			if edited.Key = strings.TrimSpace(edited.Key); edited.Key == "" {
+				continue
+			}
+			s.upsert(edited)
 		}
 	}
 }

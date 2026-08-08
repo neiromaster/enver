@@ -301,3 +301,21 @@ func TestProbeConfigCarriesWorkingExtendsAndEnv(t *testing.T) {
 		t.Fatal("probe dropped an unrelated profile")
 	}
 }
+
+func TestOverrideSeedFillsValueAndComment(t *testing.T) {
+	inherited := []ui.EnvEntry{{Key: "FOO", Value: "inherited"}}
+	seed := overrideSeed(inherited, map[string]string{"FOO": "the comment"}, "FOO")
+	if seed.Key != "FOO" || seed.Value != "inherited" || seed.Comment != "the comment" {
+		t.Fatalf("seed = %+v", seed)
+	}
+	// No comment resolved → empty comment, value still filled.
+	seed2 := overrideSeed(inherited, nil, "FOO")
+	if seed2.Value != "inherited" || seed2.Comment != "" {
+		t.Fatalf("seed2 = %+v", seed2)
+	}
+	// Unknown key → no value filled.
+	seed3 := overrideSeed(inherited, nil, "MISSING")
+	if seed3.Value != "" {
+		t.Fatalf("seed3 = %+v", seed3)
+	}
+}
