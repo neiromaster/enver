@@ -165,7 +165,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, comments); err != nil {
 		return err
 	}
-	fmt.Printf("✓ wrote profile %q to %s\n", name, cfgPath)
+	fmt.Printf("\n✓ wrote profile %q to %s\n", name, cfgPath)
 	if setDefault {
 		fmt.Printf("✓ set as default\n")
 	}

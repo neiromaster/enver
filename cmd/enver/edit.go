@@ -320,9 +320,9 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					return err
 				}
 				if s.deleteProfile {
-					fmt.Printf("✓ removed profile %q\n", s.name)
+					fmt.Printf("\n✓ removed profile %q\n", s.name)
 				} else {
-					fmt.Printf("✓ updated profile %q\n", s.name)
+					fmt.Printf("\n✓ updated profile %q\n", s.name)
 				}
 				return nil
 			case actionAdd:

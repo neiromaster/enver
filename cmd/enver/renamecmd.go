@@ -56,7 +56,7 @@ var renameCmd = &cobra.Command{
 		if err := config.RenameProfile(path, oldName, newName); err != nil {
 			return err
 		}
-		fmt.Printf("✓ renamed %q → %q\n", oldName, newName)
+		fmt.Printf("\n✓ renamed %q → %q\n", oldName, newName)
 		return nil
 	},
 }

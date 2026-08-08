@@ -41,7 +41,7 @@ var removeCmd = &cobra.Command{
 		if !removeYes {
 			ans, err := ui.Confirm(fmt.Sprintf("Delete profile %q?", name), false)
 			if err != nil || !ans {
-				fmt.Println("aborted")
+				fmt.Println("\naborted")
 				return nil
 			}
 		}
@@ -49,7 +49,7 @@ var removeCmd = &cobra.Command{
 		if err := config.DeleteProfile(path, name); err != nil {
 			return err
 		}
-		fmt.Printf("✓ removed profile %q\n", name)
+		fmt.Printf("\n✓ removed profile %q\n", name)
 		return nil
 	},
 }
