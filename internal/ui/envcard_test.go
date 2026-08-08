@@ -150,3 +150,23 @@ func TestTruncateRunes(t *testing.T) {
 		t.Fatalf("over-length string should truncate with ellipsis: %q", got)
 	}
 }
+
+func TestNewCollectingEnvCardModelStoresPrior(t *testing.T) {
+	prior := []EnvEntry{
+		{Key: "A", Value: "1"},
+		{Key: "B", Value: "2"},
+	}
+	m := newCollectingEnvCardModel(EnvEntry{}, prior)
+	if len(m.prior) != 2 {
+		t.Fatalf("prior length = %d, want 2", len(m.prior))
+	}
+	if m.prior[1].Key != "B" {
+		t.Fatalf("prior[1].Key = %q, want B", m.prior[1].Key)
+	}
+}
+
+func TestTermWidthPositive(t *testing.T) {
+	if w := termWidth(); w < 1 {
+		t.Fatalf("termWidth = %d, want >= 1", w)
+	}
+}

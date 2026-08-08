@@ -2,11 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"golang.org/x/term"
 )
 
 type envCardModel struct {
@@ -15,6 +17,7 @@ type envCardModel struct {
 	theme     *theme
 	submitted bool
 	canceled  bool
+	prior     []EnvEntry
 }
 
 func newEnvCardModel(e EnvEntry) *envCardModel {
@@ -27,6 +30,21 @@ func newEnvCardModel(e EnvEntry) *envCardModel {
 		m.fields[i] = ti
 	}
 	m.fields[0].Focus()
+	return m
+}
+
+// termWidth returns the usable terminal width, falling back to 80 when the
+// width cannot be determined (e.g. non-terminal stdout).
+func termWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 80
+}
+
+func newCollectingEnvCardModel(e EnvEntry, prior []EnvEntry) *envCardModel {
+	m := newEnvCardModel(e)
+	m.prior = prior
 	return m
 }
 
@@ -79,6 +97,10 @@ func (m *envCardModel) View() tea.View {
 		}
 	}
 	var b strings.Builder
+	if len(m.prior) > 0 {
+		b.WriteString(renderPriorEntries(m.prior, termWidth()))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(strings.Join(blocks, "\n\n"))
 	b.WriteString("\n")
 	b.WriteString(m.theme.help.Render("tab next · shift+tab prev · enter submit · blank name finishes · esc cancel"))
@@ -155,4 +177,15 @@ func EnvCard(entry EnvEntry) (EnvEntry, error) {
 	}
 	m := out.(*envCardModel)
 	return m.result(), nil
+}
+
+// EnvCardCollecting prompts for one variable in a multi-variable collection flow
+// (used by the add command). It renders a numbered summary of prior above the
+// form. prior is display-only and should already be masked by the caller.
+func EnvCardCollecting(entry EnvEntry, prior []EnvEntry) (EnvEntry, error) {
+	out, err := run(newCollectingEnvCardModel(entry, prior))
+	if err != nil {
+		return EnvEntry{}, err
+	}
+	return out.(*envCardModel).result(), nil
 }
