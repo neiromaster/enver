@@ -20,7 +20,6 @@ type selectModel struct {
 	cursor    int
 	selected  map[int]bool
 	filter    filterState
-	width     int
 	height    int
 	submitted bool
 	canceled  bool
@@ -81,7 +80,6 @@ func (m *selectModel) isCancel(k tea.KeyPressMsg) bool {
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch k := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = k.Width
 		m.height = k.Height
 		return m, nil
 	case tea.KeyPressMsg:
@@ -257,11 +255,7 @@ func (m *selectModel) View() tea.View {
 			continue
 		}
 		line := m.rowString(i, curOpt)
-		if i == curOpt {
-			line = m.theme.rowActive.Render(line)
-		} else {
-			line = m.theme.normal.Render(line)
-		}
+		line = m.theme.normal.Render(line)
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -287,14 +281,18 @@ func (m *selectModel) rowString(i, curOpt int) string {
 		cur = m.theme.cursor
 	}
 	cell := padIcon(m.theme.icon(m.options[i].Icon))
+	label := m.options[i].Label
+	if i == curOpt {
+		label = m.theme.rowActive.Render(label)
+	}
 	if m.multi && !m.options[i].Action {
 		mark := m.theme.checkOff
 		if m.selected[i] {
 			mark = m.theme.checkOn
 		}
-		return cur + " " + mark + " " + cell + " " + m.options[i].Label
+		return cur + " " + mark + " " + cell + " " + label
 	}
-	return cur + " " + cell + " " + m.options[i].Label
+	return cur + " " + cell + " " + label
 }
 
 func (m *selectModel) visibleIndices() []int {

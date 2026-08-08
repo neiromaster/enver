@@ -129,12 +129,12 @@ func TestSelectFilterConfirmSelectsFiltered(t *testing.T) {
 	}
 }
 
-func TestSelectCapturesWidthAndHeight(t *testing.T) {
+func TestSelectCapturesHeight(t *testing.T) {
 	m := newSelectModel("t", opts3(), false)
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 42, Height: 7})
 	sm := mm.(*selectModel)
-	if sm.width != 42 || sm.height != 7 {
-		t.Fatalf("width/height = %d/%d, want 42/7", sm.width, sm.height)
+	if sm.height != 7 {
+		t.Fatalf("height = %d, want 7", sm.height)
 	}
 }
 
@@ -229,5 +229,19 @@ func TestSelectRendersColoredIcon(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if view := m.View().Content; !strings.Contains(view, "\x1b[32m") {
 		t.Fatalf("non-active row missing colored (green) icon:\n%s", view)
+	}
+}
+
+func TestSelectActiveLabelBold(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "a", Label: "Add", Icon: IconAdd},
+	}, false)
+	// cursor starts on row 0 (Add) — the active row.
+	view := m.View().Content
+	// The active label should be wrapped in bold (\x1b[1m). The title uses
+	// bold+cyan (\x1b[1;36m), so we check for bold-only to target the label.
+	// Pattern: \x1b[1mAdd\x1b[m (bold on, label, reset)
+	if !strings.Contains(view, "\x1b[1mAdd\x1b[m") {
+		t.Fatalf("active label not bold-wrapped; expected \\x1b[1mAdd\\x1b[m in view:\n%s", view)
 	}
 }
