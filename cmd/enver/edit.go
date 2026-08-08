@@ -187,7 +187,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
-		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Label: fmt.Sprintf("%s = %s (inherited)", e.Key, e.Value)})
+		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)})
 	}
 	opts = append(opts, ui.Separator())
 	opts = append(opts,

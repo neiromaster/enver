@@ -362,3 +362,21 @@ func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
 		t.Fatalf("OWN label should not hint revert, got %q", own.Label)
 	}
 }
+
+func TestMenuOptionsInheritedUsesIcon(t *testing.T) {
+	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	inherited := []ui.EnvEntry{{Key: "INH", Value: "y"}}
+	opts := s.menuOptions(inherited, nil)
+	for _, o := range opts {
+		if o.Value == "inherited:INH" {
+			if o.Icon != ui.IconInherited {
+				t.Fatalf("inherited option icon = %q, want %q", o.Icon, ui.IconInherited)
+			}
+			if strings.Contains(o.Label, "(inherited)") {
+				t.Fatalf("inherited label should drop the suffix: %q", o.Label)
+			}
+			return
+		}
+	}
+	t.Fatal("inherited option not found in menu")
+}
