@@ -29,10 +29,18 @@ type theme struct {
 	fieldIdle   lipgloss.Style
 	checkOn     string
 	checkOff    string
+	iconStyles  map[string]lipgloss.Style
 }
 
 func defaultTheme() *theme {
 	faint := lipgloss.NewStyle().Faint(true)
+	green := lipgloss.NewStyle().Foreground(lipgloss.Green)
+	red := lipgloss.NewStyle().Foreground(lipgloss.Red)
+	yellow := lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	blue := lipgloss.NewStyle().Foreground(lipgloss.Blue)
+	magenta := lipgloss.NewStyle().Foreground(lipgloss.Magenta)
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Cyan)
+
 	return &theme{
 		title:       lipgloss.NewStyle().Bold(true),
 		cursor:      "▸",
@@ -46,5 +54,24 @@ func defaultTheme() *theme {
 		fieldIdle:   lipgloss.NewStyle().Faint(true).PaddingLeft(2),
 		checkOn:     "●",
 		checkOff:    "○",
+		iconStyles: map[string]lipgloss.Style{
+			IconAdd:        green,
+			IconDone:       green,
+			IconExtends:    blue,
+			IconDefault:    yellow,
+			IconOverride:   magenta,
+			IconDeleteVar:  red,
+			IconDeleteProf: red,
+			IconBack:       cyan,
+		},
 	}
+}
+
+// icon renders an icon glyph in its semantic color. Unknown glyphs pass through
+// uncolored so the menu still renders if a caller passes an ad-hoc icon.
+func (t *theme) icon(glyph string) string {
+	if style, ok := t.iconStyles[glyph]; ok {
+		return style.Render(glyph)
+	}
+	return glyph
 }
