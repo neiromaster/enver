@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -91,6 +93,55 @@ func (m *envCardModel) result() EnvEntry {
 		Value:   m.fields[1].Value(),
 		Comment: m.fields[2].Value(),
 	}
+}
+
+// renderPriorEntries builds the "Added (N):" summary shown above a collecting
+// env-card form. Output is unstyled (terminal-default weight) and ANSI-free.
+// width is the usable terminal width; values are truncated with "…" to fit.
+func renderPriorEntries(entries []EnvEntry, width int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	keyCol := 0
+	for _, e := range entries {
+		if len(e.Key) > keyCol {
+			keyCol = len(e.Key)
+		}
+	}
+	if keyCol > 20 {
+		keyCol = 20
+	}
+	numW := len(strconv.Itoa(len(entries)))
+	valueWidth := width - (2 + numW + 2) - keyCol - len(" = ")
+	if valueWidth < 4 {
+		valueWidth = 4
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Added (%d):\n", len(entries))
+	for i, e := range entries {
+		num := fmt.Sprintf("%*s", numW, strconv.Itoa(i+1))
+		key := e.Key
+		if len(key) < keyCol {
+			key = fmt.Sprintf("%-*s", keyCol, key)
+		}
+		b.WriteString("  " + num + "  " + key + " = " + truncateRunes(e.Value, valueWidth))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// truncateRunes returns s unchanged when it fits in max runes; otherwise it
+// returns the first max-1 runes followed by "…" (total max runes).
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 // EnvCard prompts for a single environment variable entry (key, value, comment).
