@@ -226,16 +226,16 @@ func deleteVarOptions(s editState, overrideKeys map[string]bool) []ui.Option {
 
 func extendsLabel(extends string) string {
 	if extends == "" {
-		return "🔗 Change extends… (none)"
+		return "Change extends… (none)"
 	}
-	return fmt.Sprintf("🔗 Change extends… (%s)", extends)
+	return fmt.Sprintf("Change extends… (%s)", extends)
 }
 
 func defaultLabel(isDefault bool) string {
 	if isDefault {
-		return "★ Clear default (current)"
+		return "Clear default (current)"
 	}
-	return "★ Set as default"
+	return "Set as default"
 }
 
 // doneLabel flags the Done row when the working copy has unsaved changes, so
