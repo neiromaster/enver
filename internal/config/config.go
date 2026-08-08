@@ -156,6 +156,50 @@ func (c Config) ResolveProfile(name string) (env map[string]string, chain []stri
 	return env, chain, nil
 }
 
+// ResolveComments walks name's extends chain and returns, for each resolved env
+// key, the comment from the nearest profile in the chain that defines the key
+// with a comment (child over parent). Keys with no commented definition are
+// absent. Comments are read from the YAML node tree at path (the HeadComment
+// above each key), so they survive encryption. A read error yields nil.
+func (c Config) ResolveComments(path, name string) (map[string]string, error) {
+	_, chain, err := c.ResolveProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	root, err := loadNode(path)
+	if err != nil {
+		return nil, err
+	}
+	comments := map[string]string{}
+	pm := profilesMapping(root.Content[0])
+	if pm == nil {
+		return comments, nil
+	}
+	// chain is name→…→root; walk root→child so a nearer definer overwrites.
+	for i := len(chain) - 1; i >= 0; i-- {
+		idx := findIndex(pm, chain[i])
+		if idx < 0 {
+			continue
+		}
+		env := envMapping(pm.Content[idx])
+		if env == nil {
+			continue
+		}
+		for j := 0; j+1 < len(env.Content); j += 2 {
+			keyNode := env.Content[j]
+			c := keyNode.HeadComment
+			if c == "" {
+				continue
+			}
+			if len(c) >= 2 && c[0] == '#' && c[1] == ' ' {
+				c = c[2:]
+			}
+			comments[keyNode.Value] = c
+		}
+	}
+	return comments, nil
+}
+
 // ProfileNames returns the profile names sorted alphabetically.
 func (c Config) ProfileNames() []string {
 	names := make([]string, 0, len(c.Profiles))

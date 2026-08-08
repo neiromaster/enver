@@ -223,3 +223,48 @@ func TestExtendedBy(t *testing.T) {
 		t.Fatalf("ExtendedBy(leaf) = %v, want none", got)
 	}
 }
+
+func TestResolveComments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	const yamlDoc = "profiles:\n" +
+		"  base:\n" +
+		"    env:\n" +
+		"      # base foo\n" +
+		"      FOO: base\n" +
+		"      BAR: base\n" +
+		"  mid:\n" +
+		"    extends: base\n" +
+		"    env:\n" +
+		"      # mid foo\n" +
+		"      FOO: mid\n" +
+		"  leaf:\n" +
+		"    extends: mid\n" +
+		"    env:\n" +
+		"      OWN: x\n"
+	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"FOO": "base", "BAR": "base"}},
+		"mid":  {Extends: "base", Env: map[string]string{"FOO": "mid"}},
+		"leaf": {Extends: "mid", Env: map[string]string{"OWN": "x"}},
+	}}
+	got, err := cfg.ResolveComments(path, "leaf")
+	if err != nil {
+		t.Fatalf("ResolveComments: %v", err)
+	}
+	// FOO: base comments first, mid overwrites (nearest-with-comment), leaf does
+	// not define FOO — so the nearest commented definer is mid.
+	if got["FOO"] != "mid foo" {
+		t.Fatalf("FOO comment = %q, want %q", got["FOO"], "mid foo")
+	}
+	// BAR: defined only by base, with no comment → absent.
+	if _, ok := got["BAR"]; ok {
+		t.Fatalf("BAR should be absent (no comment), got %q", got["BAR"])
+	}
+	// OWN: defined by leaf, no comment → absent.
+	if _, ok := got["OWN"]; ok {
+		t.Fatalf("OWN should be absent (no comment), got %q", got["OWN"])
+	}
+}
