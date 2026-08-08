@@ -194,8 +194,9 @@ func EnvCard(entry EnvEntry) (EnvEntry, error) {
 }
 
 // EnvCardCollecting prompts for one variable in a multi-variable collection flow
-// (used by the add command). It renders a numbered summary of prior above the
-// form. prior is display-only and should already be masked by the caller.
+// (used by the add command). It renders an icon-prefixed summary of the already
+// collected variables above the form. summary is display-only and should already
+// be masked by the caller.
 func EnvCardCollecting(entry EnvEntry, summary []SummaryEntry) (EnvEntry, error) {
 	out, err := run(newCollectingEnvCardModel(entry, summary))
 	if err != nil {
