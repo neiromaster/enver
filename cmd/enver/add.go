@@ -32,6 +32,17 @@ func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[st
 	return config.Profile{Extends: extends, Env: env}, comments
 }
 
+// maskedEntries returns a display-only copy of entries with secret values
+// redacted via config.MaskValue. The input slice is not mutated; keys and
+// comments pass through unchanged.
+func maskedEntries(entries []ui.EnvEntry) []ui.EnvEntry {
+	out := make([]ui.EnvEntry, len(entries))
+	for i, e := range entries {
+		out[i] = ui.EnvEntry{Key: e.Key, Value: config.MaskValue(e.Key, e.Value), Comment: e.Comment}
+	}
+	return out
+}
+
 var addCmd = &cobra.Command{
 	Use:   "add [name]",
 	Short: "Interactively add a profile",
@@ -81,7 +92,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 
 	var entries []ui.EnvEntry
 	for {
-		entry, err := ui.EnvCard(ui.EnvEntry{})
+		entry, err := ui.EnvCardCollecting(ui.EnvEntry{}, maskedEntries(entries))
 		if err != nil {
 			return nil
 		}
