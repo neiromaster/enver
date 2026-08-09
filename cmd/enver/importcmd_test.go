@@ -179,3 +179,28 @@ func TestImportExtendsReplacePreserved(t *testing.T) {
 		t.Errorf("replace should add NEW: %+v", prof.Env)
 	}
 }
+
+func TestImportEmptyErrors(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := runImport(bytes.NewReader([]byte("")), cfgPath, "p", false, false, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "no variables to import") {
+		t.Fatalf("expected no-variables error, got: %v", err)
+	}
+	if _, _, _, ok, _ := config.ReadProfile(cfgPath, "p"); ok {
+		t.Error("empty import must not create a profile")
+	}
+}
+
+func TestImportEmptyWithExtendsOK(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"X": "1"}}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runImport(bytes.NewReader([]byte("")), cfgPath, "child", false, false, "base", nil); err != nil {
+		t.Fatalf("empty import with --extends should succeed: %v", err)
+	}
+	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
+	if prof.Extends != "base" {
+		t.Errorf("child.Extends = %q, want base", prof.Extends)
+	}
+}

@@ -118,6 +118,10 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		extendsToWrite = existingProf.Extends
 	}
 
+	if len(imported) == 0 && extendsToWrite == "" {
+		return "", fmt.Errorf("no variables to import")
+	}
+
 	if exists && replace {
 		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, false, comments); err != nil {
 			return "", err
