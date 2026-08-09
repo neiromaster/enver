@@ -82,7 +82,14 @@ func Parse(data []byte) ([]Entry, error) {
 			key = strings.TrimSpace(k)
 			comment = strings.Join(pending, "\n")
 			pending = nil
-			q, err := beginValue(&val, strings.TrimLeft(rest, " \t"))
+			trimmed := strings.TrimLeft(rest, " \t")
+			// If there was leading whitespace and the first non-whitespace char is #,
+			// it's an empty value with an inline comment (dotenvx behavior).
+			if trimmed != rest && len(trimmed) > 0 && trimmed[0] == '#' {
+				closeEntry()
+				continue
+			}
+			q, err := beginValue(&val, trimmed)
 			if err != nil {
 				return nil, err
 			}

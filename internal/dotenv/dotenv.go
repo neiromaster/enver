@@ -27,13 +27,6 @@ func needsQuote(v string) bool {
 	return false
 }
 
-// quote wraps v in single quotes (literal — no $VAR expansion) and escapes any
-// embedded single quote using the POSIX backslash sequence, matching enver's
-// existing export quoting so enver's own outputs stay internally consistent.
-func quote(v string) string {
-	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
-}
-
 // formatExpandable emits a value containing $ as a dotenvx double-quoted string:
 // $$ becomes \$ (literal $ in double quotes), \ and " are escaped, and $VAR/${...}
 // are left intact so the consumer expands them. This is the reverse of Parse's
@@ -89,12 +82,8 @@ func Format(env map[string]string, comments map[string]string, opts Options) []b
 	sort.Strings(keys)
 	for _, k := range keys {
 		b.WriteString(formatComment(comments[k]))
-		if strings.Contains(env[k], "$") {
-			b.WriteString(k + "=" + formatExpandable(env[k]) + "\n")
-			continue
-		}
 		if needsQuote(env[k]) {
-			b.WriteString(k + "=" + quote(env[k]) + "\n")
+			b.WriteString(k + "=" + formatExpandable(env[k]) + "\n")
 		} else {
 			b.WriteString(k + "=" + env[k] + "\n")
 		}

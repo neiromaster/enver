@@ -1,7 +1,6 @@
 package dotenv
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -37,25 +36,6 @@ func TestNeedsQuote(t *testing.T) {
 	}
 }
 
-func TestQuote(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"plain", "'plain'"},
-		{"", "''"},
-		{"has space", "'has space'"},
-		// "it's" -> wrap, and replace the embedded ' with '\''  =>  'it'\''s'
-		{"it's", "'it'\\''s'"},
-		{"a'b'c", "'a'\\''b'\\''c'"},
-		{"dollar$5", "'dollar$5'"},
-	}
-	for _, c := range cases {
-		if got := quote(c.in); got != c.want {
-			t.Errorf("quote(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestFormatPlain(t *testing.T) {
 	got := string(Format(
 		map[string]string{"DB_HOST": "db.example.com", "API_TOKEN": "sk-live"},
@@ -73,7 +53,7 @@ func TestFormatQuoting(t *testing.T) {
 		map[string]string{"APP_NAME": "My App", "GREETING": "Cost: $5", "EMPTY": ""},
 		nil, Options{Header: false},
 	))
-	want := "APP_NAME='My App'\nEMPTY=''\nGREETING=\"Cost: $5\"\n"
+	want := "APP_NAME=\"My App\"\nEMPTY=\"\"\nGREETING=\"Cost: $5\"\n"
 	if got != want {
 		t.Errorf("Format quoting:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -126,7 +106,7 @@ func TestFormatMultilineValue(t *testing.T) {
 		nil,
 		Options{Header: false},
 	))
-	want := "MULTI='line1\nline2'\n"
+	want := "MULTI=\"line1\nline2\"\n"
 	if got != want {
 		t.Errorf("Format multiline value:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -141,23 +121,6 @@ func TestFormatEmptyEnv(t *testing.T) {
 		"# Chain: p. Values decrypted — do not commit this file.\n\n"
 	if got != want {
 		t.Errorf("empty env, header:\ngot:  %q\nwant: %q", got, want)
-	}
-}
-
-// TestFormatRoundTrip asserts the future import can recover each value: strip
-// the optional surrounding single quotes from the rendered value.
-func TestFormatRoundTrip(t *testing.T) {
-	env := map[string]string{"PLAIN": "x", "SPACED": "a b", "HASH": "a#b"}
-	out := string(Format(env, nil, Options{Header: false}))
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		parts := strings.SplitN(line, "=", 2)
-		key, val := parts[0], parts[1]
-		if len(val) >= 2 && val[0] == '\'' && val[len(val)-1] == '\'' {
-			val = val[1 : len(val)-1]
-		}
-		if val != env[key] {
-			t.Errorf("round-trip %s: got %q, want %q", key, val, env[key])
-		}
 	}
 }
 
@@ -178,6 +141,61 @@ func TestFormatExpansionBridge(t *testing.T) {
 		"URL=\"postgres://$HOST/db\"\n"
 	if got != want {
 		t.Errorf("Format bridge:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// TestFormatRoundTripApostrophe is a regression test for I-1: ensures values with
+// apostrophes round-trip correctly through Format->Parse (no data loss).
+func TestFormatRoundTripApostrophe(t *testing.T) {
+	env := map[string]string{
+		"BAKERY":  "Bob's Bakery",
+		"QUOTE":   `He said "hello"`,
+		"COMPLEX": `It's "awesome"`,
+	}
+	out := Format(env, nil, Options{Header: false})
+	got, err := Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := map[string]string{}
+	for _, e := range got {
+		back[e.Key] = e.Value
+	}
+	for k, v := range env {
+		if back[k] != v {
+			t.Errorf("round-trip %s: got %q, want %q", k, back[k], v)
+		}
+	}
+}
+
+// TestParseInlineCommentSpace covers M1: dotenvx behavior where `KEY= # comment`
+// (with space) is an empty value with inline comment, but `KEY=#literal` (no space)
+// is the literal value `#literal`.
+func TestParseInlineCommentSpace(t *testing.T) {
+	cases := []struct {
+		in   string
+		key  string
+		want string
+	}{
+		{"KEY= # comment", "KEY", ""},
+		{"KEY=#literal", "KEY", "#literal"},
+		{"KEY=  # multi-space comment", "KEY", ""},
+		{"KEY=\t#tab-comment", "KEY", ""},
+	}
+	for _, c := range cases {
+		got, err := Parse([]byte(c.in))
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", c.in, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d entries, want 1", c.in, len(got))
+		}
+		if got[0].Key != c.key {
+			t.Errorf("Parse(%q): key = %q, want %q", c.in, got[0].Key, c.key)
+		}
+		if got[0].Value != c.want {
+			t.Errorf("Parse(%q): value = %q, want %q", c.in, got[0].Value, c.want)
+		}
 	}
 }
 

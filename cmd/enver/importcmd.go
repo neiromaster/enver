@@ -90,7 +90,10 @@ func runImport(r io.Reader, cfgPath, name string, replace bool) (string, error) 
 		}
 	}
 
-	existing, _ := app.Load(app.Options{ConfigPath: cfgPath, NoLocal: true})
+	existing, err := app.Load(app.Options{ConfigPath: cfgPath, NoLocal: true})
+	if err != nil {
+		return "", err
+	}
 	_, exists := existing.Profiles[name]
 	mode := "created"
 	if exists {
@@ -110,5 +113,11 @@ func runImport(r io.Reader, cfgPath, name string, replace bool) (string, error) 
 }
 
 func summary(name string, n int, mode string) string {
-	return fmt.Sprintf("\n✓ imported %d var(s) into %q — %s\nRun `enver encrypt %s` to encrypt secrets.\n", n, name, mode, name)
+	var vars string
+	if n == 1 {
+		vars = "1 var"
+	} else {
+		vars = fmt.Sprintf("%d vars", n)
+	}
+	return fmt.Sprintf("\n✓ imported %s into %q — %s\nRun `enver encrypt %s` to encrypt secrets.\n", vars, name, mode, name)
 }
