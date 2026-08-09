@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/spf13/cobra"
 )
 
 func TestImportMergeCreate(t *testing.T) {
@@ -76,5 +77,40 @@ func TestImportReplaceKeepsDefault(t *testing.T) {
 	}
 	if prof.Env["NEW"] != "2" {
 		t.Errorf("replace should add NEW: %+v", prof.Env)
+	}
+}
+
+func TestCompleteImport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	for _, p := range []string{"prod", "dev", "stage"} {
+		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().Bool("no-local", false, "")
+	_ = cmd.Flags().Set("config", path)
+	_ = cmd.Flags().Set("no-local", "true")
+
+	// arg 0 is a file path: defer to the shell, no suggestions.
+	got, dir := completeImport(cmd, nil, "")
+	if dir != cobra.ShellCompDirectiveDefault || len(got) != 0 {
+		t.Errorf("arg0: got %v (dir=%v), want Default with no suggestions", got, dir)
+	}
+
+	// arg 1 is a profile name: list profiles, no file completion.
+	got, dir = completeImport(cmd, []string{"file.env"}, "")
+	if dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("arg1: dir=%v, want NoFileComp", dir)
+	}
+	if len(got) != 3 {
+		t.Errorf("arg1: got %v, want 3 profiles", got)
+	}
+
+	// prefix filtering: "d" matches only dev.
+	got, _ = completeImport(cmd, []string{"file.env"}, "d")
+	if len(got) != 1 || got[0] != "dev" {
+		t.Errorf("arg1 prefix \"d\": got %v, want [dev]", got)
 	}
 }

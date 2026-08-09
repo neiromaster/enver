@@ -11,6 +11,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// completeImport drives shell completion for `enver import`: the first positional
+// argument is a .env file path (default file completion), the second is a profile
+// name (profile completion). This inverts completeProfile, which assumes arg 0 is
+// a profile and is wrong for import.
+func completeImport(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	cfgPath, _ := cmd.Flags().GetString("config")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
 var importReplace bool
 
 var importCmd = &cobra.Command{
@@ -19,7 +32,7 @@ var importCmd = &cobra.Command{
 	Args:              cobra.RangeArgs(1, 2),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeImport,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := args[0]
 		name := ""
