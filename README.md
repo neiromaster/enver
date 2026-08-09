@@ -174,6 +174,32 @@ an `extends`, so **Done** is rejected on an empty profile.
   cycles (errors), and profiles with no env and no extends (warnings). Exits
   non-zero if any error is found.
 
+## Exporting and importing `.env`
+
+`enver dotenv` writes a profile as a standard `.env` file — values decrypted
+and unmasked, per-key comments preserved — and `enver import` reads one back
+into a profile. They round-trip: hand a profile to any tool that expects `.env`,
+then bring the result back.
+
+```sh
+enver dotenv prod -o prod.env          # export profile prod to prod.env
+enver import prod.env staging          # import into a new profile (merged)
+enver import prod.env prod --replace   # reset prod to exactly prod.env (confirms)
+```
+
+Imported values are stored **raw** — `$VAR` references stay as templates, not
+expanded — so layered profiles survive the round-trip. `import` **merges** by
+default (imported keys override existing same-named keys); `--replace` wipes the
+profile's own env first and confirms when it would remove keys (decline to abort;
+`--force` skips the prompt; a non-interactive pipe without `--force` errors).
+`--extends <profile>` sets or overrides `extends` (otherwise it is preserved,
+including across `--replace`); an empty import without `--extends` is refused.
+The summary prints a masked diff of what changed: `+` added, `~` overridden,
+`-` removed (secret-looking values masked as in `enver show`).
+
+> `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
+> file. Mind where it lands; keep values at rest encrypted with `enver encrypt`.
+
 ## Encrypting secrets
 
 Secrets in the config can be encrypted at rest so the config is safe to commit
@@ -207,6 +233,8 @@ enverx [profile] -- <command> [args...]   Run command with the profile's env (de
 enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the detached form)
 enver show [profile] [--no-mask]          Preview resolved env (masked by default)
 enver export [profile]                    Print `export K=V` (unmasked, for eval)
+enver dotenv [profile] [-o file]          Export a profile to a .env file (with comments)
+enver import <file> [profile] [--replace] Import a .env file into a profile (--extends, --force)
 enver list                                List profiles
 enver add [name]                          Interactively add a profile
 enver edit [profile]                      Interactively edit a profile
@@ -234,8 +262,9 @@ With no profile, the config's `default` is used. `enver show <profile>` previews
 the resolved env (masked by default); `enver list` lists profiles.
 
 The first positional token is matched against subcommand names (`x`, `show`,
-`export`, `list`, `add`, `edit`, `remove`, `rename`, `duplicate`, `default`,
-`validate`, `keygen`, `encrypt`, `decrypt`, `completion`) before being treated
+`export`, `dotenv`, `import`, `list`, `add`, `edit`, `remove`, `rename`,
+`duplicate`, `default`, `validate`, `keygen`, `encrypt`, `decrypt`,
+`completion`) before being treated
 as a profile, so a profile that shares one of those names must be run via the
 explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 
