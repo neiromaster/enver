@@ -8,6 +8,7 @@ import (
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
+	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +25,11 @@ func completeImport(cmd *cobra.Command, args []string, toComplete string) ([]str
 	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
-var importReplace bool
+var (
+	importReplace bool
+	importForce   bool
+	importExtends string
+)
 
 var importCmd = &cobra.Command{
 	Use:               "import <file> [profile]",
@@ -59,7 +64,7 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
-		summary, err := runImport(r, config.GlobalPath(globalFlags.configPath), name, importReplace)
+		summary, err := runImport(r, config.GlobalPath(globalFlags.configPath), name, importReplace, importForce, importExtends, ui.Confirm)
 		if err != nil {
 			return err
 		}
@@ -70,12 +75,16 @@ var importCmd = &cobra.Command{
 
 func init() {
 	importCmd.Flags().BoolVar(&importReplace, "replace", false, "wipe the profile's own env before importing")
+	importCmd.Flags().BoolVar(&importForce, "force", false, "skip the --replace removal confirmation")
+	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends")
 }
 
-// runImport parses .env data from r into profile name at cfgPath. When the profile
-// exists it merges (imported keys override, others kept) unless replace is true,
-// in which case it is overwritten wholesale. Returns a one-line summary.
-func runImport(r io.Reader, cfgPath, name string, replace bool) (string, error) {
+// runImport parses .env data from r into profile name at cfgPath. Imported keys
+// override existing same-named keys (merge); when replace is true the profile's
+// own env is wiped first. The extends value is preserved unless extendsFlag is
+// non-empty, in which case it is set (and the parent must already exist). force
+// and confirm gate destructive replaces (Task 6). Returns a one-line summary.
+func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFlag string, confirm confirmFunc) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
@@ -84,10 +93,10 @@ func runImport(r io.Reader, cfgPath, name string, replace bool) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	env := make(map[string]string, len(entries))
+	imported := make(map[string]string, len(entries))
 	comments := map[string]string{}
 	for _, e := range entries {
-		env[e.Key] = e.Value
+		imported[e.Key] = e.Value
 		if e.Comment != "" {
 			comments[e.Key] = e.Comment
 		}
@@ -97,22 +106,32 @@ func runImport(r io.Reader, cfgPath, name string, replace bool) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	_, exists := existing.Profiles[name]
+	existingProf, exists := existing.Profiles[name]
+
+	extendsToWrite := ""
+	if extendsFlag != "" {
+		if _, ok := existing.Profiles[extendsFlag]; !ok {
+			return "", fmt.Errorf("extends profile %q does not exist", extendsFlag)
+		}
+		extendsToWrite = extendsFlag
+	} else if exists {
+		extendsToWrite = existingProf.Extends
+	}
+
+	if exists && replace {
+		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, false, comments); err != nil {
+			return "", err
+		}
+		return summary(name, len(imported), "replaced"), nil
+	}
+	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, comments); err != nil {
+		return "", err
+	}
 	mode := "created"
 	if exists {
 		mode = "merge"
-		if replace {
-			mode = "replaced"
-			if err := config.WriteProfile(cfgPath, name, config.Profile{Env: env}, false, false, comments); err != nil {
-				return "", err
-			}
-			return summary(name, len(entries), mode), nil
-		}
 	}
-	if err := config.UpsertProfile(cfgPath, name, config.Profile{Env: env}, false, comments); err != nil {
-		return "", err
-	}
-	return summary(name, len(entries), mode), nil
+	return summary(name, len(imported), mode), nil
 }
 
 func summary(name string, n int, mode string) string {
