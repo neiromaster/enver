@@ -1,0 +1,100 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/dotenv"
+	"github.com/neiromaster/enver/internal/ui"
+	"github.com/spf13/cobra"
+)
+
+var (
+	dotenvOut      string
+	dotenvNoHeader bool
+	dotenvForce    bool
+)
+
+// confirmFunc mirrors ui.Confirm so the overwrite prompt can be stubbed in tests.
+type confirmFunc func(string, bool) (bool, error)
+
+var dotenvCmd = &cobra.Command{
+	Use:               "dotenv [profile]",
+	Short:             "Export a profile to a .env file (with comments)",
+	Args:              cobra.MaximumNArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: completeProfile,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		profile := ""
+		if len(args) > 0 {
+			profile = args[0]
+		}
+		return runDotenv(cmd.OutOrStdout(), profile, dotenvOut, dotenvNoHeader, dotenvForce, ui.Confirm)
+	},
+}
+
+func init() {
+	dotenvCmd.Flags().StringVarP(&dotenvOut, "out", "o", "", "write to <file> instead of stdout")
+	dotenvCmd.Flags().BoolVar(&dotenvNoHeader, "no-header", false, "omit the generated-by header")
+	dotenvCmd.Flags().BoolVar(&dotenvForce, "force", false, "overwrite --out target without prompting")
+}
+
+// runDotenv resolves the profile, formats it as a .env document, and writes the
+// result to stdout (outPath == "") or to outPath. confirm is consulted only when
+// outPath exists and force is false. A comment-resolution error is non-fatal:
+// the file is still produced, with fewer or no comments.
+func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, confirm confirmFunc) error {
+	cfg, err := app.Load(appOpts())
+	if err != nil {
+		return err
+	}
+	if profile == "" {
+		profile = cfg.Default
+	}
+	if profile == "" {
+		return fmt.Errorf("no profile specified and no `default` set in config")
+	}
+	env, chain, err := app.Resolve(cfg, profile, appOpts())
+	if err != nil {
+		return err
+	}
+	comments, _ := cfg.ResolveComments(config.GlobalPath(globalFlags.configPath), profile)
+
+	out := dotenv.Format(env, comments, dotenv.Options{Header: !noHeader, Profile: profile, Chain: chain})
+
+	if outPath == "" {
+		_, err = stdout.Write(out)
+		return err
+	}
+	return writeDotenvFile(stdout, outPath, out, force, confirm, len(env))
+}
+
+// writeDotenvFile writes content to path with mode 0600 (it holds decrypted
+// secrets). If path already exists and force is false, the caller is prompted via
+// confirm; a refused or failed prompt aborts silently (no error, no write). On
+// success, a one-line plaintext confirmation is written to stdout.
+func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, confirm confirmFunc, n int) error {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			ok, cerr := confirm(fmt.Sprintf("Overwrite %s?", path), false)
+			if cerr != nil || !ok {
+				return nil
+			}
+		}
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "✓ wrote %s (%d vars) — secrets stored in plaintext.\n", filepath.Base(path), n); err != nil {
+		return err
+	}
+	return nil
+}
