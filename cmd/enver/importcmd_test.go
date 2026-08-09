@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,5 +250,77 @@ func TestImportDiffReplaceRemoves(t *testing.T) {
 		if !strings.Contains(summary, want) {
 			t.Errorf("missing %q in:\n%s", want, summary)
 		}
+	}
+}
+
+func TestImportReplaceConfirmDeclined(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, nil)
+	refuse := func(string, bool) (bool, error) { return false, nil }
+	summary, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", refuse)
+	if err != nil {
+		t.Fatalf("declined confirm should not error: %v", err)
+	}
+	if summary != "" {
+		t.Errorf("declined confirm should print nothing, got: %q", summary)
+	}
+	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	if _, ok := prof.Env["OLD"]; !ok {
+		t.Error("declined confirm must not remove OLD")
+	}
+	if _, ok := prof.Env["NEW"]; ok {
+		t.Error("declined confirm must not add NEW")
+	}
+}
+
+func TestImportReplaceConfirmAccepted(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, nil)
+	accept := func(msg string, _ bool) (bool, error) {
+		if !strings.Contains(msg, "remove 1 keys") || !strings.Contains(msg, "OLD") {
+			t.Errorf("confirm prompt missing count/key: %q", msg)
+		}
+		return true, nil
+	}
+	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", accept); err != nil {
+		t.Fatal(err)
+	}
+	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	if _, ok := prof.Env["OLD"]; ok {
+		t.Error("accepted confirm should remove OLD")
+	}
+	if prof.Env["NEW"] != "2" {
+		t.Error("accepted confirm should add NEW")
+	}
+}
+
+func TestImportReplaceConfirmNonInteractive(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, nil)
+	broken := func(string, bool) (bool, error) { return false, io.EOF }
+	_, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", broken)
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("expected --force hint on failed confirm, got: %v", err)
+	}
+	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	if _, ok := prof.Env["OLD"]; !ok {
+		t.Error("failed confirm must not remove OLD")
+	}
+}
+
+func TestImportReplaceForceSkipsConfirm(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, nil)
+	called := false
+	never := func(string, bool) (bool, error) { called = true; return false, nil }
+	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", never); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Error("confirm must not be called under --force")
+	}
+	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	if _, ok := prof.Env["OLD"]; ok {
+		t.Error("--force should still remove OLD")
 	}
 }

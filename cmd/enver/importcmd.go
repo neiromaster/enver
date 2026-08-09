@@ -134,6 +134,15 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 
 	if exists && replace {
 		d.removed = removedKeys(oldEnv, imported)
+		if !force && len(d.removed) > 0 {
+			ok, cerr := confirm(replaceConfirmMsg(name, d.removed), false)
+			if cerr != nil {
+				return "", fmt.Errorf("--replace would remove %d key(s) from %q; rerun with --force", len(d.removed), name)
+			}
+			if !ok {
+				return "", nil
+			}
+		}
 		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, false, comments); err != nil {
 			return "", err
 		}
@@ -190,6 +199,22 @@ func removedKeys(oldEnv, imported map[string]string) []diffEntry {
 		out = append(out, diffEntry{k, oldEnv[k]})
 	}
 	return out
+}
+
+// replaceConfirmMsg builds the --replace confirmation prompt: the number of keys
+// to remove and their names (capped to the first five).
+func replaceConfirmMsg(name string, removed []diffEntry) string {
+	keys := make([]string, len(removed))
+	for i, e := range removed {
+		keys[i] = e.key
+	}
+	shown := keys
+	tail := ""
+	if len(keys) > 5 {
+		shown = keys[:5]
+		tail = fmt.Sprintf(", ... and %d more", len(keys)-5)
+	}
+	return fmt.Sprintf("Replace will remove %d keys from %q: %s%s. Continue?", len(keys), name, strings.Join(shown, ", "), tail)
 }
 
 func extLabel(s string) string {
