@@ -34,6 +34,35 @@ func quote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
+// formatExpandable emits a value containing $ as a dotenvx double-quoted string:
+// $$ becomes \$ (literal $ in double quotes), \ and " are escaped, and $VAR/${...}
+// are left intact so the consumer expands them. This is the reverse of Parse's
+// double-quote bridge, making dotenv output round-trip through import.
+func formatExpandable(v string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch c {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '$':
+			if i+1 < len(v) && v[i+1] == '$' {
+				b.WriteString(`\$`)
+				i++
+			} else {
+				b.WriteByte('$')
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 // Options controls .env rendering.
 type Options struct {
 	Header  bool     // emit the 2-line origin/secrets header
@@ -60,6 +89,10 @@ func Format(env map[string]string, comments map[string]string, opts Options) []b
 	sort.Strings(keys)
 	for _, k := range keys {
 		b.WriteString(formatComment(comments[k]))
+		if strings.Contains(env[k], "$") {
+			b.WriteString(k + "=" + formatExpandable(env[k]) + "\n")
+			continue
+		}
 		if needsQuote(env[k]) {
 			b.WriteString(k + "=" + quote(env[k]) + "\n")
 		} else {

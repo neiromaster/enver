@@ -73,7 +73,7 @@ func TestFormatQuoting(t *testing.T) {
 		map[string]string{"APP_NAME": "My App", "GREETING": "Cost: $5", "EMPTY": ""},
 		nil, Options{Header: false},
 	))
-	want := "APP_NAME='My App'\nEMPTY=''\nGREETING='Cost: $5'\n"
+	want := "APP_NAME='My App'\nEMPTY=''\nGREETING=\"Cost: $5\"\n"
 	if got != want {
 		t.Errorf("Format quoting:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -157,6 +157,44 @@ func TestFormatRoundTrip(t *testing.T) {
 		}
 		if val != env[key] {
 			t.Errorf("round-trip %s: got %q, want %q", key, val, env[key])
+		}
+	}
+}
+
+func TestFormatExpansionBridge(t *testing.T) {
+	// $-values double-quoted: $$ -> \$, $VAR left intact; no-$ value stays bare/quoted.
+	got := string(Format(
+		map[string]string{
+			"URL":   "postgres://$HOST/db",
+			"COST":  "price$$5",
+			"MIX":   "$A and $$B",
+			"PLAIN": "hello",
+		},
+		nil, Options{Header: false},
+	))
+	want := "COST=\"price\\$5\"\n" +
+		"MIX=\"$A and \\$B\"\n" +
+		"PLAIN=hello\n" +
+		"URL=\"postgres://$HOST/db\"\n"
+	if got != want {
+		t.Errorf("Format bridge:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestFormatRoundTripThroughParse(t *testing.T) {
+	env := map[string]string{"URL": "postgres://$HOST/db", "COST": "price$$5", "PLAIN": "hi"}
+	out := Format(env, nil, Options{Header: false})
+	got, err := Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := map[string]string{}
+	for _, e := range got {
+		back[e.Key] = e.Value
+	}
+	for k, v := range env {
+		if back[k] != v {
+			t.Errorf("round-trip %s: got %q, want %q", k, back[k], v)
 		}
 	}
 }
