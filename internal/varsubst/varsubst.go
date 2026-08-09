@@ -107,3 +107,37 @@ func evalBraced(expr string, lookup func(name string) (string, bool)) string {
 		return "${" + expr + "}"
 	}
 }
+
+// Expand resolves references across env. Each value is expanded depth-first
+// against the profile's own values first, then osEnv; osEnv values are leaves
+// (not re-expanded). A reference that forms a cycle (including self-reference)
+// is treated as unset and so resolves to empty. The result is a new map; env and
+// osEnv are not mutated.
+func Expand(env, osEnv map[string]string) map[string]string {
+	out := make(map[string]string, len(env))
+	var resolve func(s string, visited map[string]bool) string
+	lookup := func(name string, visited map[string]bool) (string, bool) {
+		if v, ok := env[name]; ok {
+			if visited[name] {
+				return "", false // cycle: act as unset
+			}
+			visited[name] = true
+			r := resolve(v, visited)
+			delete(visited, name)
+			return r, true
+		}
+		if v, ok := osEnv[name]; ok {
+			return v, true
+		}
+		return "", false
+	}
+	resolve = func(s string, visited map[string]bool) string {
+		return expandValue(s, func(name string) (string, bool) {
+			return lookup(name, visited)
+		})
+	}
+	for k, v := range env {
+		out[k] = resolve(v, map[string]bool{k: true})
+	}
+	return out
+}

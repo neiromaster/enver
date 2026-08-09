@@ -51,3 +51,47 @@ func TestExpandValueBraced(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandPrecedenceAndRefs(t *testing.T) {
+	env := map[string]string{
+		"DB_HOST": "localhost",
+		"DB_URL":  "postgres://$DB_HOST/db", // intra-profile ref
+		"TOKEN":   "$SECRET",                // resolves from osEnv
+	}
+	osEnv := map[string]string{"SECRET": "sk-live", "DB_HOST": "ignored"}
+	out := Expand(env, osEnv)
+	if out["DB_URL"] != "postgres://localhost/db" {
+		t.Errorf("DB_URL = %q, want postgres://localhost/db (profile wins)", out["DB_URL"])
+	}
+	if out["TOKEN"] != "sk-live" {
+		t.Errorf("TOKEN = %q, want sk-live (osEnv fallback)", out["TOKEN"])
+	}
+	if out["DB_HOST"] != "localhost" {
+		t.Errorf("DB_HOST = %q, want localhost", out["DB_HOST"])
+	}
+}
+
+func TestExpandForwardRefAndFixpoint(t *testing.T) {
+	// DB_URL references DB_HOST which sorts after it; depth-first must still resolve.
+	env := map[string]string{"DB_URL": "$DB_HOST/db", "DB_HOST": "h"}
+	if out := Expand(env, nil); out["DB_URL"] != "h/db" {
+		t.Errorf("forward ref: DB_URL = %q, want h/db", out["DB_URL"])
+	}
+}
+
+func TestExpandCyclesAndSelfEmpty(t *testing.T) {
+	out := Expand(map[string]string{"A": "$B", "B": "$A"}, nil) // 2-key cycle
+	if out["A"] != "" || out["B"] != "" {
+		t.Errorf("cycle should resolve empty: A=%q B=%q", out["A"], out["B"])
+	}
+	out = Expand(map[string]string{"A": "$A"}, nil) // self-ref
+	if out["A"] != "" {
+		t.Errorf("self-ref should resolve empty: A=%q", out["A"])
+	}
+}
+
+func TestExpandUndefinedEmpty(t *testing.T) {
+	if out := Expand(map[string]string{"A": "$NOPE"}, nil); out["A"] != "" {
+		t.Errorf("undefined should be empty: A=%q", out["A"])
+	}
+}
