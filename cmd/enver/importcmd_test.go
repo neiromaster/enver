@@ -121,8 +121,12 @@ func TestImportExtendsCreate(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"ROOT": "1"}}, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runImport(bytes.NewReader([]byte("OWN=2\n")), cfgPath, "child", false, false, "base", nil); err != nil {
+	summary, err := runImport(bytes.NewReader([]byte("OWN=2\n")), cfgPath, "child", false, false, "base", nil)
+	if err != nil {
 		t.Fatalf("runImport: %v", err)
+	}
+	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ base") {
+		t.Errorf("create with --extends should report the extends change: %q", summary)
 	}
 	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
 	if prof.Extends != "base" {
@@ -213,12 +217,11 @@ func TestImportDiffMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := summary
-	if !strings.Contains(s, "— merge") || !strings.Contains(s, "~ B = new") || !strings.Contains(s, "+ C = 2") {
-		t.Errorf("merge diff missing lines:\n%s", s)
+	if !strings.Contains(summary, "— merge") || !strings.Contains(summary, "~ B = new") || !strings.Contains(summary, "+ C = 2") {
+		t.Errorf("merge diff missing lines:\n%s", summary)
 	}
-	if strings.Contains(s, "+ A") {
-		t.Errorf("unchanged/inherited A should not appear:\n%s", s)
+	if strings.Contains(summary, "+ A") {
+		t.Errorf("unchanged/inherited A should not appear:\n%s", summary)
 	}
 }
 
@@ -277,7 +280,7 @@ func TestImportReplaceConfirmAccepted(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, nil)
 	accept := func(msg string, _ bool) (bool, error) {
-		if !strings.Contains(msg, "remove 1 keys") || !strings.Contains(msg, "OLD") {
+		if !strings.Contains(msg, "remove 1 key") || !strings.Contains(msg, "OLD") {
 			t.Errorf("confirm prompt missing count/key: %q", msg)
 		}
 		return true, nil

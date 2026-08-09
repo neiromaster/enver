@@ -214,7 +214,11 @@ func replaceConfirmMsg(name string, removed []diffEntry) string {
 		shown = keys[:5]
 		tail = fmt.Sprintf(", ... and %d more", len(keys)-5)
 	}
-	return fmt.Sprintf("Replace will remove %d keys from %q: %s%s. Continue?", len(keys), name, strings.Join(shown, ", "), tail)
+	noun := "keys"
+	if len(keys) == 1 {
+		noun = "key"
+	}
+	return fmt.Sprintf("Replace will remove %d %s from %q: %s%s. Continue?", len(keys), noun, name, strings.Join(shown, ", "), tail)
 }
 
 func extLabel(s string) string {
@@ -246,6 +250,6 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	if extendsToWrite != oldExtends {
 		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))
 	}
-	b.WriteString("Run `enver encrypt " + name + "` to encrypt secrets.\n")
+	fmt.Fprintf(&b, "Run `enver encrypt %s` to encrypt secrets.\n", name)
 	return b.String()
 }
