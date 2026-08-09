@@ -199,3 +199,16 @@ func TestWriteDotenvFileEnforces0600OnOverwrite(t *testing.T) {
 		t.Errorf("file mode after overwrite = %o, want 0o600", perm)
 	}
 }
+
+func TestRunDotenvDoesNotExpand(t *testing.T) {
+	path := writeTempConfig(t, "p", map[string]string{"URL": "$HOST/x"}, nil, true)
+	withGlobalConfig(t, path)
+	t.Setenv("HOST", "h")
+	var out bytes.Buffer
+	if err := runDotenv(&out, "", "", false, false, nil); err != nil {
+		t.Fatalf("runDotenv: %v", err)
+	}
+	if !strings.Contains(out.String(), "$HOST/x") || strings.Contains(out.String(), "h/x") {
+		t.Errorf("dotenv should not expand $HOST; got:\n%s", out.String())
+	}
+}

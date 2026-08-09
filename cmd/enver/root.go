@@ -13,6 +13,7 @@ var globalFlags struct {
 	configPath string
 	keyPath    string
 	noLocal    bool
+	noExpand   bool
 }
 
 var rootCmd = &cobra.Command{
@@ -57,6 +58,7 @@ func init() {
 	pf.StringVar(&globalFlags.configPath, "config", "", "override the global config file")
 	pf.StringVar(&globalFlags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
+	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
 }
@@ -73,6 +75,7 @@ func appOpts() app.Options {
 		ConfigPath: globalFlags.configPath,
 		KeyPath:    globalFlags.keyPath,
 		NoLocal:    globalFlags.noLocal,
+		NoExpand:   globalFlags.noExpand,
 	}
 }
 

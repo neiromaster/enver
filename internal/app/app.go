@@ -5,10 +5,12 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/runner"
+	"github.com/neiromaster/enver/internal/varsubst"
 )
 
 // Options carries the flags shared by every enver/enverx entry point.
@@ -16,6 +18,7 @@ type Options struct {
 	ConfigPath string
 	KeyPath    string
 	NoLocal    bool
+	NoExpand   bool   // skip $VAR interpolation
 	Name       string // invocation label ("enverx" / "enver x") for error messages
 }
 
@@ -32,6 +35,9 @@ func Resolve(cfg config.Config, profile string, opts Options) (map[string]string
 		return nil, chain, err
 	}
 	if !hasEncrypted(env) {
+		if !opts.NoExpand {
+			env = varsubst.Expand(env, osEnvMap())
+		}
 		return env, chain, nil
 	}
 	key, err := ResolveKey(opts)
@@ -49,6 +55,9 @@ func Resolve(cfg config.Config, profile string, opts Options) (map[string]string
 			}
 			env[k] = plain
 		}
+	}
+	if !opts.NoExpand {
+		env = varsubst.Expand(env, osEnvMap())
 	}
 	return env, chain, nil
 }
@@ -146,4 +155,15 @@ func fileExists(p string) bool {
 
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// osEnvMap snapshots the process environment as a map for varsubst.Expand.
+func osEnvMap() map[string]string {
+	m := make(map[string]string)
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
 }

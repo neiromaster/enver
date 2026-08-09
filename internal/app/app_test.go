@@ -109,6 +109,30 @@ func TestResolveLazyKey(t *testing.T) {
 	}
 }
 
+func TestResolveExpandsAndNoExpand(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"HOST": "h", "URL": "$HOST/x", "SEC": "$S"}},
+	}}
+	t.Setenv("S", "sec")
+
+	// default: expanded.
+	got, _, err := Resolve(cfg, "p", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["URL"] != "h/x" || got["SEC"] != "sec" {
+		t.Errorf("Resolve did not expand: %+v", got)
+	}
+	// NoExpand: raw templates preserved.
+	got, _, err = Resolve(cfg, "p", Options{NoExpand: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["URL"] != "$HOST/x" || got["SEC"] != "$S" {
+		t.Errorf("NoExpand should keep raw: %+v", got)
+	}
+}
+
 func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

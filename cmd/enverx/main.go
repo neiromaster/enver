@@ -15,6 +15,7 @@ var flags struct {
 	configPath string
 	keyPath    string
 	noLocal    bool
+	noExpand   bool
 }
 
 var rootCmd = &cobra.Command{
@@ -30,6 +31,7 @@ var rootCmd = &cobra.Command{
 			ConfigPath: flags.configPath,
 			KeyPath:    flags.keyPath,
 			NoLocal:    flags.noLocal,
+			NoExpand:   flags.noExpand,
 			Name:       "enverx",
 		}
 		return app.Run(args, cmd.ArgsLenAtDash(), opts)
@@ -41,6 +43,7 @@ func init() {
 	pf.StringVar(&flags.configPath, "config", "", "override the global config file")
 	pf.StringVar(&flags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&flags.noLocal, "no-local", false, "ignore .enver.yaml layers")
+	pf.BoolVar(&flags.noExpand, "no-expand", false, "do not expand $VAR references")
 }
 
 func main() {
