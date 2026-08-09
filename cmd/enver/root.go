@@ -29,6 +29,7 @@ environment injected, without mutating any tool's own config.
   enver show <profile>                  preview resolved env (masked)
   enver export <profile>                print ` + "`export K=V`" + ` for eval
   enver dotenv <profile>                export a profile to a .env file (with comments)
+  enver import <file> [profile]         import a .env file into a profile
   enver list                            list profiles
   enver add [name]                      interactively add a profile
   enver edit [profile]                  edit a profile (vars, extends, default)
@@ -40,7 +41,7 @@ environment injected, without mutating any tool's own config.
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
 The first positional token is matched against subcommand names before being
-treated as a profile. Reserved: x, show, export, dotenv, list, add, edit, remove,
+treated as a profile. Reserved: x, show, export, dotenv, import, list, add, edit, remove,
 rename, duplicate, default, validate, keygen, encrypt, decrypt, completion.
 Use the explicit verb for a profile sharing one: enverx <profile> -- <command>
 (or enver x ...).
@@ -60,7 +61,7 @@ func init() {
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 
-	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
+	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
 }
 
 func main() {
