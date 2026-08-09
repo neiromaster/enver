@@ -21,6 +21,24 @@ func validateProfileName(name string) error {
 	return nil
 }
 
+// promptProfileName reads a profile name interactively, re-prompting on invalid
+// input. It returns the trimmed name and ok=true, or ok=false when the input
+// prompt fails (for example EOF), in which case the caller aborts silently.
+func promptProfileName() (string, bool) {
+	for {
+		n, err := ui.Input("Profile name")
+		if err != nil {
+			return "", false
+		}
+		n = strings.TrimSpace(n)
+		if err := validateProfileName(n); err != nil {
+			fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
+			continue
+		}
+		return n, true
+	}
+}
+
 func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[string]string) {
 	env := make(map[string]string, len(entries))
 	comments := map[string]string{}
@@ -89,19 +107,11 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		name = args[0]
 	}
 	if name == "" {
-		for {
-			n, err := ui.Input("Profile name")
-			if err != nil {
-				return nil
-			}
-			n = strings.TrimSpace(n)
-			if err := validateProfileName(n); err != nil {
-				fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
-				continue
-			}
-			name = n
-			break
+		n, ok := promptProfileName()
+		if !ok {
+			return nil
 		}
+		name = n
 	} else if err := validateProfileName(name); err != nil {
 		return err
 	}

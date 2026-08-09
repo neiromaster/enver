@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
-	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -40,19 +38,11 @@ var importCmd = &cobra.Command{
 			r = f
 		}
 		if name == "" {
-			for {
-				n, err := ui.Input("Profile name")
-				if err != nil {
-					return nil
-				}
-				n = strings.TrimSpace(n)
-				if err := validateProfileName(n); err != nil {
-					fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
-					continue
-				}
-				name = n
-				break
+			n, ok := promptProfileName()
+			if !ok {
+				return nil
 			}
+			name = n
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
