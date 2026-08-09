@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -122,11 +124,20 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		return "", fmt.Errorf("no variables to import")
 	}
 
+	oldEnv := map[string]string{}
+	oldExtends := ""
+	if exists {
+		oldEnv = existingProf.Env
+		oldExtends = existingProf.Extends
+	}
+	d := computeImportDiff(oldEnv, imported)
+
 	if exists && replace {
+		d.removed = removedKeys(oldEnv, imported)
 		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, false, comments); err != nil {
 			return "", err
 		}
-		return summary(name, len(imported), "replaced"), nil
+		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends), nil
 	}
 	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, comments); err != nil {
 		return "", err
@@ -135,15 +146,81 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 	if exists {
 		mode = "merge"
 	}
-	return summary(name, len(imported), mode), nil
+	return formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends), nil
 }
 
-func summary(name string, n int, mode string) string {
-	var vars string
-	if n == 1 {
-		vars = "1 var"
-	} else {
+type diffEntry struct{ key, val string }
+
+type importDiff struct{ added, overridden, removed []diffEntry }
+
+// computeImportDiff classifies imported keys against the profile's existing env
+// as added (absent) or overridden (present, different). Unchanged keys are
+// omitted. Returned slices are sorted by key for stable output.
+func computeImportDiff(oldEnv, imported map[string]string) importDiff {
+	var d importDiff
+	keys := make([]string, 0, len(imported))
+	for k := range imported {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := imported[k]
+		old, ok := oldEnv[k]
+		if !ok {
+			d.added = append(d.added, diffEntry{k, v})
+		} else if old != v {
+			d.overridden = append(d.overridden, diffEntry{k, v})
+		}
+	}
+	return d
+}
+
+// removedKeys returns existing keys absent from imported, sorted by key, for the
+// --replace path.
+func removedKeys(oldEnv, imported map[string]string) []diffEntry {
+	keys := make([]string, 0, len(oldEnv))
+	for k := range oldEnv {
+		if _, ok := imported[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]diffEntry, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, diffEntry{k, oldEnv[k]})
+	}
+	return out
+}
+
+func extLabel(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}
+
+// formatImportSummary renders the import result: a header line, then per-key diff
+// lines (added +, overridden ~, removed -) with values masked, and an extends
+// line when the value changed.
+func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends string) string {
+	var b strings.Builder
+	vars := "1 var"
+	if n != 1 {
 		vars = fmt.Sprintf("%d vars", n)
 	}
-	return fmt.Sprintf("\n✓ imported %s into %q — %s\nRun `enver encrypt %s` to encrypt secrets.\n", vars, name, mode, name)
+	fmt.Fprintf(&b, "\n✓ imported %s into %q — %s\n", vars, name, mode)
+	for _, e := range d.added {
+		fmt.Fprintf(&b, "  + %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+	}
+	for _, e := range d.overridden {
+		fmt.Fprintf(&b, "  ~ %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+	}
+	for _, e := range d.removed {
+		fmt.Fprintf(&b, "  - %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+	}
+	if extendsToWrite != oldExtends {
+		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))
+	}
+	b.WriteString("Run `enver encrypt " + name + "` to encrypt secrets.\n")
+	return b.String()
 }

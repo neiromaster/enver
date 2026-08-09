@@ -204,3 +204,50 @@ func TestImportEmptyWithExtendsOK(t *testing.T) {
 		t.Errorf("child.Extends = %q, want base", prof.Extends)
 	}
 }
+
+func TestImportDiffMerge(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1", "B": "old"}}, false, nil)
+	summary, err := runImport(bytes.NewReader([]byte("B=new\nC=2\n")), cfgPath, "p", false, false, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := summary
+	if !strings.Contains(s, "— merge") || !strings.Contains(s, "~ B = new") || !strings.Contains(s, "+ C = 2") {
+		t.Errorf("merge diff missing lines:\n%s", s)
+	}
+	if strings.Contains(s, "+ A") {
+		t.Errorf("unchanged/inherited A should not appear:\n%s", s)
+	}
+}
+
+func TestImportDiffCreateMasks(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	summary, err := runImport(bytes.NewReader([]byte("API_TOKEN=sk-live-secret\nA=1\n")), cfgPath, "p", false, false, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(summary, "sk-live-secret") {
+		t.Errorf("secret value should be masked:\n%s", summary)
+	}
+	if !strings.Contains(summary, "+ A = 1") {
+		t.Errorf("non-secret value should show in full:\n%s", summary)
+	}
+	if !strings.Contains(summary, "+ API_TOKEN = ") {
+		t.Errorf("secret key line missing:\n%s", summary)
+	}
+}
+
+func TestImportDiffReplaceRemoves(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, false, nil)
+	summary, err := runImport(bytes.NewReader([]byte("C=3\n")), cfgPath, "p", true, true, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"- A = 1", "- B = 2", "+ C = 3", "— replaced"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("missing %q in:\n%s", want, summary)
+		}
+	}
+}
