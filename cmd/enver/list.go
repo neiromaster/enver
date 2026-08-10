@@ -41,7 +41,14 @@ func doList(w io.Writer) error {
 		if extends == "" {
 			extends = "-"
 		}
-		if _, err := fmt.Fprintf(w, "%-4s %-20s %-16s %d\n", marker, n, extends, len(p.Env)); err != nil {
+		own := len(p.Env)
+		varsCell := fmt.Sprintf("%d", own)
+		if p.Extends != "" {
+			if resolved, _, err := cfg.ResolveProfile(n); err == nil {
+				varsCell = fmt.Sprintf("%d (→%d)", own, len(resolved))
+			}
+		}
+		if _, err := fmt.Fprintf(w, "%-4s %-20s %-16s %s\n", marker, n, extends, varsCell); err != nil {
 			return err
 		}
 	}

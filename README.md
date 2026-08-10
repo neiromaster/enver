@@ -249,6 +249,7 @@ enver decrypt [profile]                   Decrypt values back to plaintext
 enver --config <path>                     Override global config file
 enver --key <path>                        Key file (or ENVER_KEY env)
 enver --no-local                          Ignore .enver.yaml layers
+enver --no-expand                         Do not expand $VAR references
 enver --version / enverx --version / -h, --help
 ```
 
