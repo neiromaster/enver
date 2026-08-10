@@ -151,6 +151,20 @@ func TestRunNoProfileNoDefault(t *testing.T) {
 	}
 }
 
+func TestProfileOrDefault(t *testing.T) {
+	if p, err := ProfileOrDefault("", ""); err == nil {
+		t.Fatal("empty profile and empty default should error")
+	} else if p != "" {
+		t.Fatalf("got profile %q on error, want empty", p)
+	}
+	if p, err := ProfileOrDefault("", "dev"); err != nil || p != "dev" {
+		t.Fatalf("empty profile should fall back to default: p=%q err=%v", p, err)
+	}
+	if p, err := ProfileOrDefault("prod", "dev"); err != nil || p != "prod" {
+		t.Fatalf("explicit profile should win over default: p=%q err=%v", p, err)
+	}
+}
+
 func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

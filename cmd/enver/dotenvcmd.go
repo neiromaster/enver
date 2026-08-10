@@ -53,11 +53,9 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 	if err != nil {
 		return err
 	}
-	if profile == "" {
-		profile = cfg.Default
-	}
-	if profile == "" {
-		return fmt.Errorf("no profile specified and no `default` set in config")
+	profile, err = app.ProfileOrDefault(profile, cfg.Default)
+	if err != nil {
+		return err
 	}
 	resolveOpts := appOpts()
 	resolveOpts.NoExpand = true // dotenv emits raw templates, not expanded values

@@ -74,11 +74,9 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if profile == "" {
-		profile = cfg.Default
-	}
-	if profile == "" {
-		return fmt.Errorf("no profile specified and no default set in config")
+	profile, err = ProfileOrDefault(profile, cfg.Default)
+	if err != nil {
+		return err
 	}
 	env, _, err := Resolve(cfg, profile, opts)
 	if err != nil {
@@ -88,6 +86,19 @@ func Run(args []string, dashAt int, opts Options) error {
 		os.Exit(code)
 	}
 	return nil
+}
+
+// ProfileOrDefault applies the config default to an empty profile name and
+// errors when no profile is selectable. Centralizes the guard shared by Run,
+// show, export, and dotenv so the fallback and message stay consistent.
+func ProfileOrDefault(profile, def string) (string, error) {
+	if profile == "" {
+		profile = def
+	}
+	if profile == "" {
+		return "", fmt.Errorf("no profile specified and no default set in config")
+	}
+	return profile, nil
 }
 
 // ParseProfileAndCmd splits args at the `--` separator (cobra's ArgsLenAtDash).

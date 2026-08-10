@@ -25,11 +25,9 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if profile == "" {
-			profile = cfg.Default
-		}
-		if profile == "" {
-			return fmt.Errorf("no profile specified and no `default` set in config")
+		profile, err = app.ProfileOrDefault(profile, cfg.Default)
+		if err != nil {
+			return err
 		}
 		env, chain, err := app.Resolve(cfg, profile, appOpts())
 		if err != nil {
@@ -53,11 +51,9 @@ var exportCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if profile == "" {
-			profile = cfg.Default
-		}
-		if profile == "" {
-			return fmt.Errorf("no profile specified and no `default` set in config")
+		profile, err = app.ProfileOrDefault(profile, cfg.Default)
+		if err != nil {
+			return err
 		}
 		env, chain, err := app.Resolve(cfg, profile, appOpts())
 		if err != nil {
