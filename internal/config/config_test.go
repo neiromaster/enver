@@ -268,3 +268,113 @@ func TestResolveComments(t *testing.T) {
 		t.Fatalf("OWN should be absent (no comment), got %q", got["OWN"])
 	}
 }
+
+// TestResolveCommentsMergedGlobalOnly mirrors TestResolveComments but through the
+// merged resolver with local layering disabled: a regression guard that the
+// single-file behavior is preserved.
+func TestResolveCommentsMergedGlobalOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	const yamlDoc = "profiles:\n" +
+		"  base:\n" +
+		"    env:\n" +
+		"      # base foo\n" +
+		"      FOO: base\n" +
+		"      BAR: base\n" +
+		"  mid:\n" +
+		"    extends: base\n" +
+		"    env:\n" +
+		"      # mid foo\n" +
+		"      FOO: mid\n" +
+		"  leaf:\n" +
+		"    extends: mid\n" +
+		"    env:\n" +
+		"      OWN: x\n"
+	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveCommentsMerged(path, false, "leaf")
+	if err != nil {
+		t.Fatalf("ResolveCommentsMerged: %v", err)
+	}
+	if got["FOO"] != "mid foo" {
+		t.Fatalf("FOO comment = %q, want %q", got["FOO"], "mid foo")
+	}
+	if _, ok := got["BAR"]; ok {
+		t.Fatalf("BAR should be absent (no comment), got %q", got["BAR"])
+	}
+	if _, ok := got["OWN"]; ok {
+		t.Fatalf("OWN should be absent (no comment), got %q", got["OWN"])
+	}
+}
+
+// TestResolveCommentsMergedLocalWins verifies a comment from a closer .enver.yaml
+// overlay overrides the global file's comment for the same key, matching how env
+// values merge under LoadMerged.
+func TestResolveCommentsMergedLocalWins(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	mkFile := func(rel, content string) {
+		p := filepath.Join(home, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkFile(".config/enver/config.yaml",
+		"profiles:\n"+
+			"  p:\n"+
+			"    env:\n"+
+			"      # global-cmt\n"+
+			"      K: global\n")
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkFile("proj/.enver.yaml",
+		"profiles:\n"+
+			"  p:\n"+
+			"    env:\n"+
+			"      # local-cmt\n"+
+			"      K: local\n")
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	restore := chdir(t, proj)
+	defer restore()
+
+	got, err := ResolveCommentsMerged("", true, "p")
+	if err != nil {
+		t.Fatalf("ResolveCommentsMerged: %v", err)
+	}
+	if got["K"] != "local-cmt" {
+		t.Fatalf("K comment = %q, want %q (closer layer should win)", got["K"], "local-cmt")
+	}
+
+	// With local layering disabled, the global comment is used.
+	gotGlobal, err := ResolveCommentsMerged("", false, "p")
+	if err != nil {
+		t.Fatalf("ResolveCommentsMerged (no-local): %v", err)
+	}
+	if gotGlobal["K"] != "global-cmt" {
+		t.Fatalf("K comment = %q, want %q (global only)", gotGlobal["K"], "global-cmt")
+	}
+}
+
+// TestResolveCommentsMergedMissingConfig verifies a missing global file does not
+// panic: LoadMerged yields an empty Config and ResolveProfile reports the
+// missing profile as an error.
+func TestResolveCommentsMergedMissingConfig(t *testing.T) {
+	got, err := ResolveCommentsMerged(filepath.Join(t.TempDir(), "missing.yaml"), false, "p")
+	if err == nil {
+		t.Fatalf("expected profile-not-found error for missing config, got map %v", got)
+	}
+	if got != nil {
+		t.Fatalf("expected nil map on error, got %v", got)
+	}
+}

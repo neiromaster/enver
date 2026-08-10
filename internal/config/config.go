@@ -200,6 +200,58 @@ func (c Config) ResolveComments(path, name string) (map[string]string, error) {
 	return comments, nil
 }
 
+// ResolveCommentsMerged resolves the comments for profile name's env across the
+// global config file and any local .enver.yaml layers (closer layer wins per
+// key, matching LoadMerged). Keys with no commented definition are absent.
+func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (map[string]string, error) {
+	cfg, err := LoadMerged(globalOverride, useLocal)
+	if err != nil {
+		return nil, err
+	}
+	_, chain, err := cfg.ResolveProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	files := []string{GlobalPath(globalOverride)}
+	if useLocal {
+		files = append(files, findLocal()...) // home-side first, cwd last
+	}
+	comments := map[string]string{}
+	for _, f := range files {
+		root, err := loadNode(f)
+		if err != nil {
+			continue // missing/non-mapping file contributes nothing
+		}
+		body := root.Content[0]
+		pm := profilesMapping(body)
+		if pm == nil {
+			continue
+		}
+		for i := len(chain) - 1; i >= 0; i-- { // root -> child within this file
+			idx := findIndex(pm, chain[i])
+			if idx < 0 {
+				continue
+			}
+			env := envMapping(pm.Content[idx])
+			if env == nil {
+				continue
+			}
+			for j := 0; j+1 < len(env.Content); j += 2 {
+				keyNode := env.Content[j]
+				c := keyNode.HeadComment
+				if c == "" {
+					continue
+				}
+				if len(c) >= 2 && c[0] == '#' && c[1] == ' ' {
+					c = c[2:]
+				}
+				comments[keyNode.Value] = c
+			}
+		}
+	}
+	return comments, nil
+}
+
 // ProfileNames returns the profile names sorted alphabetically.
 func (c Config) ProfileNames() []string {
 	names := make([]string, 0, len(c.Profiles))

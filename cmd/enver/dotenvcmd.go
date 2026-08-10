@@ -65,7 +65,7 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 	if err != nil {
 		return err
 	}
-	comments, _ := cfg.ResolveComments(config.GlobalPath(globalFlags.configPath), profile)
+	comments, _ := config.ResolveCommentsMerged(globalFlags.configPath, !globalFlags.noLocal, profile)
 
 	out := dotenv.Format(env, comments, dotenv.Options{Header: !noHeader, Profile: profile, Chain: chain})
 
