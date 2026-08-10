@@ -51,6 +51,58 @@ func TestDoListVarsColumn(t *testing.T) {
 	}
 }
 
+func TestDoListAlignsLongProfileNames(t *testing.T) {
+	const long = "a-very-long-profile-name-thirty-chars"
+	path := writeTempConfig(t, long, map[string]string{"X": "1"}, nil, true)
+	if err := config.UpsertProfile(path, "base", config.Profile{Env: map[string]string{"Y": "2"}}, false, nil); err != nil {
+		t.Fatalf("upsert base: %v", err)
+	}
+	if err := config.UpsertProfile(path, "child", config.Profile{Extends: "base", Env: map[string]string{"Z": "3"}}, false, nil); err != nil {
+		t.Fatalf("upsert child: %v", err)
+	}
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := doList(&out); err != nil {
+		t.Fatalf("doList: %v", err)
+	}
+
+	lines := strings.Split(out.String(), "\n")
+	header := lines[0]
+	extCol := strings.Index(header, "EXTENDS")
+	varsCol := strings.Index(header, "VARS")
+	if extCol < 0 || varsCol < 0 {
+		t.Fatalf("missing EXTENDS/VARS in header:\n%s", out.String())
+	}
+
+	rows := []struct {
+		name, extends, vars string
+	}{
+		{long, "-", "1"},
+		{"base", "-", "1"},
+		{"child", "base", "1 (→2)"},
+	}
+	for _, r := range rows {
+		line := findListLine(out.String(), r.name)
+		if line == "" {
+			t.Fatalf("row %q not found:\n%s", r.name, out.String())
+		}
+		if !strings.Contains(line, r.name) {
+			t.Errorf("row %q truncated (line: %q)", r.name, line)
+		}
+		if got := line[extCol : extCol+len(r.extends)]; got != r.extends {
+			t.Errorf("row %q EXTENDS at col %d = %q, want %q (line: %q)", r.name, extCol, got, r.extends, line)
+		}
+		if got := strings.TrimRight(line[varsCol:], " "); got != r.vars {
+			t.Errorf("row %q VARS at col %d = %q, want %q (line: %q)", r.name, varsCol, got, r.vars, line)
+		}
+	}
+
+	if !strings.Contains(out.String(), "* = default") {
+		t.Errorf("missing default footer:\n%s", out.String())
+	}
+}
+
 func findListLine(out, profile string) string {
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)

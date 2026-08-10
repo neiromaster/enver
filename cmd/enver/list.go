@@ -28,9 +28,11 @@ func doList(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "(no profiles defined)\n\nCreate one at: %s\n", config.GlobalPath(globalFlags.configPath))
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "%-4s %-20s %-16s %s\n", "", "PROFILE", "EXTENDS", "VARS"); err != nil {
-		return err
+	type listRow struct {
+		marker, name, extends, vars string
 	}
+	rows := make([]listRow, 0, len(names))
+	profWidth, extWidth := len("PROFILE"), len("EXTENDS")
 	for _, n := range names {
 		p := cfg.Profiles[n]
 		marker := " "
@@ -48,7 +50,17 @@ func doList(w io.Writer) error {
 				varsCell = fmt.Sprintf("%d (→%d)", own, len(resolved))
 			}
 		}
-		if _, err := fmt.Fprintf(w, "%-4s %-20s %-16s %s\n", marker, n, extends, varsCell); err != nil {
+		rows = append(rows, listRow{marker, n, extends, varsCell})
+		profWidth = max(profWidth, len(n))
+		extWidth = max(extWidth, len(extends))
+	}
+
+	format := fmt.Sprintf("%%-4s %%-%ds %%-%ds %%s\n", profWidth, extWidth)
+	if _, err := fmt.Fprintf(w, format, "", "PROFILE", "EXTENDS", "VARS"); err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintf(w, format, r.marker, r.name, r.extends, r.vars); err != nil {
 			return err
 		}
 	}
