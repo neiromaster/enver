@@ -162,3 +162,27 @@ func TestDuplicateNonInteractiveWorks(t *testing.T) {
 		t.Fatal("profile q should exist after duplicate")
 	}
 }
+
+// TestDuplicateNonInteractiveCopiesExtends pins that duplicating a profile which
+// extends another preserves the copy's extends — the forceExtends=true set-path
+// in UpsertProfile that TestDuplicateNonInteractiveWorks (extends-free source)
+// and TestUpsertForceExtendsClearsExisting (clear half) leave uncovered.
+func TestDuplicateNonInteractiveCopiesExtends(t *testing.T) {
+	setNonInteractive(t)
+	path := writeTempConfig(t, "base", map[string]string{"A": "1"}, nil, false)
+	if err := config.UpsertProfile(path, "dev", config.Profile{Extends: "base", Env: map[string]string{"B": "2"}}, false, false, nil); err != nil {
+		t.Fatalf("upsert dev: %v", err)
+	}
+	withGlobalConfig(t, path)
+
+	if err := duplicateCmd.RunE(&cobra.Command{}, []string{"dev", "dev-copy"}); err != nil {
+		t.Fatalf("duplicate dev: %v", err)
+	}
+	prof, _, _, ok, _ := config.ReadProfile(path, "dev-copy")
+	if !ok {
+		t.Fatal("dev-copy should exist after duplicate")
+	}
+	if prof.Extends != "base" {
+		t.Fatalf("dev-copy extends = %q, want %q (duplicate must copy extends)", prof.Extends, "base")
+	}
+}
