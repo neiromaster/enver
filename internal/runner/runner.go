@@ -34,12 +34,13 @@ func MergedEnv(profileEnv map[string]string) []string {
 	return res
 }
 
-// Run execs cmdArgs with the given environment, wiring stdio through. It
-// returns the child's exit code (127 if the command is not found).
-func Run(cmdArgs []string, env []string) int {
+// Run execs cmdArgs with the given environment, wiring stdio through. name is
+// the invocation label ("enver x" or "enverx") used to prefix stderr messages.
+// It returns the child's exit code (127 if the command is not found).
+func Run(cmdArgs []string, env []string, name string) int {
 	path, err := exec.LookPath(cmdArgs[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "enver: command not found: %s\n", cmdArgs[0])
+		fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
 		return 127
 	}
 	cmd := exec.Command(path, cmdArgs[1:]...)
@@ -51,7 +52,7 @@ func Run(cmdArgs []string, env []string) int {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
 		}
-		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 		return 1
 	}
 	return 0

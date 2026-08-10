@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -46,6 +47,17 @@ func TestMergedEnvDoesNotMutateOsEnviron(t *testing.T) {
 	_ = MergedEnv(map[string]string{"ENVER_TEST_KEEP": "profile"})
 	if v, ok := os.LookupEnv("ENVER_TEST_KEEP"); !ok || v != "shell" {
 		t.Fatalf("os.Environ mutated: got %q", v)
+	}
+}
+
+func TestRunMissingCommandReturns127(t *testing.T) {
+	missing := "enver-definitely-not-a-real-command-xyz"
+	if _, err := exec.LookPath(missing); err == nil {
+		t.Fatalf("precondition failed: %q unexpectedly resolves on PATH", missing)
+	}
+	code := Run([]string{missing}, MergedEnv(nil), "enverx")
+	if code != 127 {
+		t.Fatalf("expected exit code 127 for missing command, got %d", code)
 	}
 }
 
