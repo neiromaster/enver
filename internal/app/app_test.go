@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -130,6 +131,23 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 	}
 	if got["URL"] != "$HOST/x" || got["SEC"] != "$S" {
 		t.Errorf("NoExpand should keep raw: %+v", got)
+	}
+}
+
+func TestRunNoProfileNoDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "profiles:\n  dev:\n    env:\n      FOO: bar\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true, Name: "enver x"}
+	err := Run([]string{"--", "echo", "hi"}, 0, opts)
+	if err == nil {
+		t.Fatal("Run returned nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "no profile specified and no default set") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

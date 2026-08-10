@@ -77,6 +77,9 @@ func Run(args []string, dashAt int, opts Options) error {
 	if profile == "" {
 		profile = cfg.Default
 	}
+	if profile == "" {
+		return fmt.Errorf("no profile specified and no default set in config")
+	}
 	env, _, err := Resolve(cfg, profile, opts)
 	if err != nil {
 		return err
