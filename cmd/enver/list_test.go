@@ -23,6 +23,11 @@ func TestDoListVarsColumn(t *testing.T) {
 	if err := config.UpsertProfile(path, "broken", config.Profile{Extends: "ghost"}, false, false, nil); err != nil {
 		t.Fatalf("upsert broken: %v", err)
 	}
+	// basedata extends base: its name contains the extends string, which tripped
+	// the old substring-based cell helper.
+	if err := config.UpsertProfile(path, "basedata", config.Profile{Extends: "base", Env: map[string]string{"Y": "2"}}, false, false, nil); err != nil {
+		t.Fatalf("upsert basedata: %v", err)
+	}
 	withGlobalConfig(t, path)
 
 	var out bytes.Buffer
@@ -30,18 +35,24 @@ func TestDoListVarsColumn(t *testing.T) {
 		t.Fatalf("doList: %v", err)
 	}
 
-	cases := []struct{ profile, extends, want string }{
-		{"base", "-", "1"},
-		{"child", "base", "0 (→1)"},
-		{"mix", "base", "2 (→3)"},
-		{"broken", "ghost", "0"},
+	header := strings.Split(out.String(), "\n")[0]
+	varsCol := strings.Index(header, "VARS")
+	if varsCol < 0 {
+		t.Fatalf("missing VARS column in header:\n%s", out.String())
+	}
+	cases := []struct{ profile, want string }{
+		{"base", "1"},
+		{"child", "0 (→1)"},
+		{"mix", "2 (→3)"},
+		{"broken", "0"},
+		{"basedata", "1 (→2)"},
 	}
 	for _, c := range cases {
 		line := findListLine(out.String(), c.profile)
 		if line == "" {
 			t.Fatalf("profile %q not found in output:\n%s", c.profile, out.String())
 		}
-		if got := varsCellAfter(line, c.extends); got != c.want {
+		if got := strings.TrimRight(line[varsCol:], " "); got != c.want {
 			t.Errorf("profile %q vars cell = %q, want %q (line: %q)", c.profile, got, c.want, line)
 		}
 	}
@@ -118,14 +129,4 @@ func findListLine(out, profile string) string {
 		}
 	}
 	return ""
-}
-
-// varsCellAfter returns the trimmed text following the extends display value,
-// i.e. the VARS cell at the end of a list data row.
-func varsCellAfter(line, extends string) string {
-	idx := strings.Index(line, extends)
-	if idx < 0 {
-		return ""
-	}
-	return strings.TrimSpace(line[idx+len(extends):])
 }
