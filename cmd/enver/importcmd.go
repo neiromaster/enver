@@ -73,7 +73,11 @@ var importCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Print(summary)
+		if summary != "" {
+			fmt.Print(summary)
+		} else {
+			fmt.Println("aborted")
+		}
 		return nil
 	},
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,8 +158,31 @@ func TestWriteDotenvFileOverwriteRefused(t *testing.T) {
 	if string(got) != "OLD=1\n" {
 		t.Errorf("file overwritten after refuse:\n%s", string(got))
 	}
+	if !strings.Contains(out.String(), "aborted") {
+		t.Errorf("declined overwrite should print aborted:\n%s", out.String())
+	}
 	if strings.Contains(out.String(), "✓ wrote") {
 		t.Error("confirmation printed after refuse")
+	}
+}
+
+func TestWriteDotenvFileOverwriteNonInteractive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "e.env")
+	if err := os.WriteFile(path, []byte("OLD=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	broken := func(string, bool) (bool, error) { return false, io.EOF }
+	err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, broken, 1)
+	if err == nil || !strings.Contains(err.Error(), "force") {
+		t.Fatalf("non-interactive refusal should error with --force hint, got: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "OLD=1\n" {
+		t.Errorf("file changed after non-interactive refusal:\n%s", string(got))
+	}
+	if strings.Contains(out.String(), "✓ wrote") {
+		t.Error("confirmation printed after failed prompt")
 	}
 }
 

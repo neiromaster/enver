@@ -78,13 +78,20 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 
 // writeDotenvFile writes content to path with mode 0600 (it holds decrypted
 // secrets). If path already exists and force is false, the caller is prompted via
-// confirm; a refused or failed prompt aborts silently (no error, no write). On
-// success, a one-line plaintext confirmation is written to stdout.
+// confirm; a declined prompt prints "aborted" and returns nil, while a failed
+// prompt (e.g. non-interactive shell) errors with a --force hint. On success, a
+// one-line plaintext confirmation is written to stdout.
 func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, confirm confirmFunc, n int) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			ok, cerr := confirm(fmt.Sprintf("Overwrite %s?", path), false)
-			if cerr != nil || !ok {
+			if cerr != nil {
+				return fmt.Errorf("output file %q exists; pass --force to overwrite", path)
+			}
+			if !ok {
+				if _, err := fmt.Fprintln(stdout, "aborted"); err != nil {
+					return err
+				}
 				return nil
 			}
 		}

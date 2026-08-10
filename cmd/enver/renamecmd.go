@@ -58,6 +58,10 @@ var renameCmd = &cobra.Command{
 				return fmt.Errorf("profile %q already exists", newName)
 			}
 		}
+		if newName == oldName {
+			fmt.Printf("%q is already named that; nothing to rename\n", newName)
+			return nil
+		}
 		path := config.GlobalPath(globalFlags.configPath)
 		if err := config.RenameProfile(path, oldName, newName); err != nil {
 			return err
