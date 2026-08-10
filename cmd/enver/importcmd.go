@@ -155,7 +155,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		}
 		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends), nil
 	}
-	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, comments); err != nil {
+	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported}, false, false, comments); err != nil {
 		return "", err
 	}
 	mode := "created"

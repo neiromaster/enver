@@ -175,7 +175,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	profile, comments := buildProfile(extends, entries)
-	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, comments); err != nil {
+	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, true, comments); err != nil {
 		return err
 	}
 	fmt.Printf("\n✓ wrote profile %q to %s\n", name, cfgPath)

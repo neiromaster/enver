@@ -12,15 +12,15 @@ func TestDoListVarsColumn(t *testing.T) {
 	// base: 1 own var; also the default.
 	path := writeTempConfig(t, "base", map[string]string{"X": "1"}, nil, true)
 	// child extends base, 0 own vars → resolved total 1.
-	if err := config.UpsertProfile(path, "child", config.Profile{Extends: "base"}, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "child", config.Profile{Extends: "base"}, false, false, nil); err != nil {
 		t.Fatalf("upsert child: %v", err)
 	}
 	// mix extends base, 2 own vars (A, B) → resolved total 3 (X + A + B).
-	if err := config.UpsertProfile(path, "mix", config.Profile{Extends: "base", Env: map[string]string{"A": "1", "B": "2"}}, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "mix", config.Profile{Extends: "base", Env: map[string]string{"A": "1", "B": "2"}}, false, false, nil); err != nil {
 		t.Fatalf("upsert mix: %v", err)
 	}
 	// broken extends ghost (undefined) → resolve error, must fall back to own count.
-	if err := config.UpsertProfile(path, "broken", config.Profile{Extends: "ghost"}, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "broken", config.Profile{Extends: "ghost"}, false, false, nil); err != nil {
 		t.Fatalf("upsert broken: %v", err)
 	}
 	withGlobalConfig(t, path)
@@ -54,10 +54,10 @@ func TestDoListVarsColumn(t *testing.T) {
 func TestDoListAlignsLongProfileNames(t *testing.T) {
 	const long = "a-very-long-profile-name-thirty-chars"
 	path := writeTempConfig(t, long, map[string]string{"X": "1"}, nil, true)
-	if err := config.UpsertProfile(path, "base", config.Profile{Env: map[string]string{"Y": "2"}}, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "base", config.Profile{Env: map[string]string{"Y": "2"}}, false, false, nil); err != nil {
 		t.Fatalf("upsert base: %v", err)
 	}
-	if err := config.UpsertProfile(path, "child", config.Profile{Extends: "base", Env: map[string]string{"Z": "3"}}, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "child", config.Profile{Extends: "base", Env: map[string]string{"Z": "3"}}, false, false, nil); err != nil {
 		t.Fatalf("upsert child: %v", err)
 	}
 	withGlobalConfig(t, path)

@@ -51,11 +51,17 @@ func setScalar(mapping *yaml.Node, key, val string) {
 // existing structure and comments via the YAML node tree. Creates the file (and
 // parent dirs) if absent.
 //
-// Env keys merge additively (new values override existing same keys). Extends is
-// set only when non-empty. setDefault updates the top-level `default` key.
-// comments[key] (non-empty) sets/overrides the comment above that env entry;
-// empty/missing leaves any existing comment untouched.
-func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[string]string) error {
+// Env keys merge additively (new values override existing same keys). setDefault
+// updates the top-level `default` key. comments[key] (non-empty) sets/overrides
+// the comment above that env entry; empty/missing leaves any existing comment
+// untouched.
+//
+// forceExtends governs how extends is written. When false, extends is set only
+// when p.Extends is non-empty, so an existing extends is never cleared (import's
+// preserve contract). When true, extends is set to exactly p.Extends: empty
+// removes the key, clearing it (mirrors WriteProfile), so callers like add and
+// duplicate honor an explicit (none) choice.
+func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool, comments map[string]string) error {
 	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err
@@ -64,7 +70,13 @@ func UpsertProfile(path, name string, p Profile, setDefault bool, comments map[s
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
 
-	if p.Extends != "" {
+	if forceExtends {
+		if p.Extends == "" {
+			removeKey(prof, "extends")
+		} else {
+			setScalar(prof, "extends", p.Extends)
+		}
+	} else if p.Extends != "" {
 		setScalar(prof, "extends", p.Extends)
 	}
 	if len(p.Env) > 0 {

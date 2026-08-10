@@ -35,7 +35,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func TestRenameSameNameNoOp(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1"}}, false, nil); err != nil {
+	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	withGlobalConfig(t, cfgPath)

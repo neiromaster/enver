@@ -14,7 +14,7 @@ func TestCompleteProfileForCryptAndDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	want := []string{"dev", "prod", "stage"}
 	for _, p := range want {
-		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, nil); err != nil {
+		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
