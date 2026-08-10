@@ -125,7 +125,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		for _, n := range names {
 			opts = append(opts, ui.Option{Value: n, Label: n})
 		}
-		picked, err := ui.Select("Extends", opts)
+		picked, err := ui.SelectDefault("Extends", opts, existing.Profiles[name].Extends)
 		if err != nil {
 			return nil
 		}

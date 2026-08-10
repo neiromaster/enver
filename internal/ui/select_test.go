@@ -232,6 +232,46 @@ func TestSelectRendersColoredIcon(t *testing.T) {
 	}
 }
 
+func TestSelectDefaultPositionsCursor(t *testing.T) {
+	m := newSelectModel("t", opts3(), false) // a, b, c
+	m.setDefault("c")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.singleResult(); got != "c" {
+		t.Fatalf("def=c submitted %q, want c", got)
+	}
+}
+
+func TestSelectDefaultEmptyStaysAtTop(t *testing.T) {
+	m := newSelectModel("t", opts3(), false)
+	m.setDefault("")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.singleResult(); got != "a" {
+		t.Fatalf("empty def submitted %q, want a (top)", got)
+	}
+}
+
+func TestSelectDefaultUnknownStaysAtTop(t *testing.T) {
+	m := newSelectModel("t", opts3(), false)
+	m.setDefault("zzz")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.singleResult(); got != "a" {
+		t.Fatalf("unknown def submitted %q, want a (top)", got)
+	}
+}
+
+func TestSelectDefaultSkipsSeparator(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "", Label: "(none)"},
+		Separator(),
+		{Value: "base", Label: "base"},
+	}, false)
+	m.setDefault("base")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.singleResult(); got != "base" {
+		t.Fatalf("def=base submitted %q, want base", got)
+	}
+}
+
 func TestSelectActiveLabelCyan(t *testing.T) {
 	m := newSelectModel("t", []Option{
 		{Value: "a", Label: "Add", Icon: IconAdd},

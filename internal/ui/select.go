@@ -63,6 +63,21 @@ func (m *selectModel) move(delta int) {
 	m.cursor = clamp(m.cursor+delta, 0, len(nav)-1)
 }
 
+// setDefault moves the cursor onto the option whose Value matches def, so the
+// default action (enter) keeps that option. An empty or unmatched def leaves the
+// cursor at the top.
+func (m *selectModel) setDefault(def string) {
+	if def == "" {
+		return
+	}
+	for pos, idx := range m.nav() {
+		if m.options[idx].Value == def {
+			m.cursor = pos
+			return
+		}
+	}
+}
+
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -329,6 +344,21 @@ func indexIn(xs []int, v int) int {
 
 func Select(title string, options []Option) (string, error) {
 	out, err := run(newSelectModel(title, options, false))
+	if err != nil {
+		return "", err
+	}
+	return out.(*selectModel).singleResult(), nil
+}
+
+// SelectDefault is Select with the cursor initially on the option whose Value
+// matches def (the top option when def is empty or unmatched). Use it to
+// preserve a current value as the default accepted choice, e.g. re-running add
+// on a profile that already extends another keeps that extends unless the user
+// explicitly moves to (none).
+func SelectDefault(title string, options []Option, def string) (string, error) {
+	m := newSelectModel(title, options, false)
+	m.setDefault(def)
+	out, err := run(m)
 	if err != nil {
 		return "", err
 	}
