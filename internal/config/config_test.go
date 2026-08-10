@@ -366,6 +366,55 @@ func TestResolveCommentsMergedLocalWins(t *testing.T) {
 	}
 }
 
+// TestResolveCommentsAcrossUsesReceiverChain verifies the method resolves
+// comments along the receiver's chain (edit-aware), not the on-disk chain. This
+// is what lets an in-progress edit see its own uncommitted extends change when
+// seeding an override, while still spanning merged layers like dotenv.
+func TestResolveCommentsAcrossUsesReceiverChain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	const yamlDoc = "profiles:\n" +
+		"  base:\n" +
+		"    env:\n" +
+		"      # base cmt\n" +
+		"      FOO: bv\n" +
+		"  other:\n" +
+		"    env:\n" +
+		"      # other cmt\n" +
+		"      FOO: ov\n" +
+		"  dev:\n" +
+		"    extends: base\n" +
+		"    env:\n" +
+		"      OWN: x\n"
+	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Receiver simulates an in-progress edit: dev now extends other, not base.
+	cfg := Config{Profiles: map[string]Profile{
+		"base":  {Env: map[string]string{"FOO": "bv"}},
+		"other": {Env: map[string]string{"FOO": "ov"}},
+		"dev":   {Extends: "other", Env: map[string]string{"OWN": "x"}},
+	}}
+	got, err := cfg.ResolveCommentsAcross(path, false, "dev")
+	if err != nil {
+		t.Fatalf("ResolveCommentsAcross: %v", err)
+	}
+	if got["FOO"] != "other cmt" {
+		t.Fatalf("FOO comment = %q, want %q (receiver chain dev→other)", got["FOO"], "other cmt")
+	}
+
+	// The free function, using the on-disk chain (dev→base), disagrees —
+	// confirming the method is edit-aware, not a duplicate of the disk resolver.
+	disk, err := ResolveCommentsMerged(path, false, "dev")
+	if err != nil {
+		t.Fatalf("ResolveCommentsMerged: %v", err)
+	}
+	if disk["FOO"] != "base cmt" {
+		t.Fatalf("disk FOO comment = %q, want %q", disk["FOO"], "base cmt")
+	}
+}
+
 // TestResolveCommentsMergedMissingConfig verifies a missing global file does not
 // panic: LoadMerged yields an empty Config and ResolveProfile reports the
 // missing profile as an error.

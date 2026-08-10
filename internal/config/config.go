@@ -201,14 +201,26 @@ func (c Config) ResolveComments(path, name string) (map[string]string, error) {
 }
 
 // ResolveCommentsMerged resolves the comments for profile name's env across the
-// global config file and any local .enver.yaml layers (closer layer wins per
-// key, matching LoadMerged). Keys with no commented definition are absent.
+// global config file and any local .enver.yaml layers: a comment from a nearer
+// file overrides one from a farther file for the same key, and a key whose
+// nearer definition carries no comment keeps the farther comment. It loads a
+// fresh merged config, so it reflects the on-disk state. Keys with no commented
+// definition are absent.
 func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (map[string]string, error) {
 	cfg, err := LoadMerged(globalOverride, useLocal)
 	if err != nil {
 		return nil, err
 	}
-	_, chain, err := cfg.ResolveProfile(name)
+	return cfg.ResolveCommentsAcross(globalOverride, useLocal, name)
+}
+
+// ResolveCommentsAcross is the merged-layer counterpart of ResolveComments: it
+// resolves comments for name across the global file and any local .enver.yaml
+// layers, but walks the receiver's resolved chain rather than reloading. This
+// lets an in-progress edit (whose chain reflects uncommitted extends changes)
+// share dotenv's merged comment provenance.
+func (c Config) ResolveCommentsAcross(globalOverride string, useLocal bool, name string) (map[string]string, error) {
+	_, chain, err := c.ResolveProfile(name)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +228,15 @@ func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (m
 	if useLocal {
 		files = append(files, findLocal()...) // home-side first, cwd last
 	}
+	return commentsFromChain(chain, files), nil
+}
+
+// commentsFromChain collects, for each env key, the comment on its nearest
+// commented definer: files are walked outer-to-inner and the chain root-to-
+// child within each file, so a nearer definition overwrites a farther one. A
+// key with no commented definition is absent; a missing file contributes
+// nothing.
+func commentsFromChain(chain, files []string) map[string]string {
 	comments := map[string]string{}
 	for _, f := range files {
 		root, err := loadNode(f)
@@ -249,7 +270,7 @@ func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (m
 			}
 		}
 	}
-	return comments, nil
+	return comments
 }
 
 // ProfileNames returns the profile names sorted alphabetically.

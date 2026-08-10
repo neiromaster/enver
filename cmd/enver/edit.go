@@ -394,7 +394,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			s.upsert(edited)
 		case "inherited":
 			probe := probeConfig(cfg, s)
-			comments, _ := probe.ResolveComments(path, s.name)
+			comments, _ := probe.ResolveCommentsAcross(globalFlags.configPath, !globalFlags.noLocal, s.name)
 			edited, err := ui.EnvCard(overrideSeed(inherited, comments, key))
 			if err != nil {
 				continue
