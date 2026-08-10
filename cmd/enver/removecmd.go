@@ -29,6 +29,9 @@ var removeCmd = &cobra.Command{
 			name = args[0]
 		}
 		if name == "" {
+			if err := requireInteractive("profile name"); err != nil {
+				return err
+			}
 			picked, err := pickProfile(cfg, "Profile to remove", "")
 			if err != nil || picked == "" {
 				return nil
@@ -39,6 +42,9 @@ var removeCmd = &cobra.Command{
 			return err
 		}
 		if !removeYes {
+			if !ui.Interactive() {
+				return fmt.Errorf("non-interactive; pass --yes to confirm removal")
+			}
 			ans, err := ui.Confirm(fmt.Sprintf("Delete profile %q?", name), false)
 			if err != nil || !ans {
 				fmt.Println("\naborted")

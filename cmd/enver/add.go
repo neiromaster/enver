@@ -98,6 +98,9 @@ var addCmd = &cobra.Command{
 }
 
 func doAdd(cmd *cobra.Command, args []string) error {
+	if err := interactiveOnly("add"); err != nil {
+		return err
+	}
 	cfgPath := config.GlobalPath(globalFlags.configPath)
 	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})
 	names := existing.ProfileNames()

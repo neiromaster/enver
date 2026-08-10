@@ -10,8 +10,13 @@ import (
 
 var ErrCanceled = errors.New("canceled")
 
+// Interactive is a var so tests can force the non-TTY path without a pty.
+var Interactive = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
 func run(m tea.Model) (tea.Model, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !Interactive() {
 		return m, errors.New("interactive prompt requires a terminal")
 	}
 	// Each prompt is its own tea.Program, whose last frame stays on screen after

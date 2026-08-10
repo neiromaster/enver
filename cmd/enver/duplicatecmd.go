@@ -27,6 +27,9 @@ var duplicateCmd = &cobra.Command{
 			src = args[0]
 		}
 		if src == "" {
+			if err := requireInteractive("profile name"); err != nil {
+				return err
+			}
 			picked, err := pickProfile(cfg, "Profile to duplicate", "")
 			if err != nil || picked == "" {
 				return nil
@@ -38,6 +41,9 @@ var duplicateCmd = &cobra.Command{
 			newName = args[1]
 		}
 		if newName == "" {
+			if err := requireInteractive("new name"); err != nil {
+				return err
+			}
 			in, err := ui.Input("New profile name")
 			if err != nil {
 				return nil

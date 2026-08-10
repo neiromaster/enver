@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/ui"
 	"github.com/neiromaster/enver/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +79,20 @@ func appOpts() app.Options {
 		NoLocal:    globalFlags.noLocal,
 		NoExpand:   globalFlags.noExpand,
 	}
+}
+
+func requireInteractive(what string) error {
+	if ui.Interactive() {
+		return nil
+	}
+	return fmt.Errorf("%s required; pass it as an argument (stdin is not a terminal)", what)
+}
+
+func interactiveOnly(name string) error {
+	if ui.Interactive() {
+		return nil
+	}
+	return fmt.Errorf("%s is interactive; run it in a terminal", name)
 }
 
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

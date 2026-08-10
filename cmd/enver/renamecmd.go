@@ -27,6 +27,9 @@ var renameCmd = &cobra.Command{
 			oldName = args[0]
 		}
 		if oldName == "" {
+			if err := requireInteractive("profile name"); err != nil {
+				return err
+			}
 			picked, err := pickProfile(cfg, "Profile to rename", "")
 			if err != nil || picked == "" {
 				return nil
@@ -38,6 +41,9 @@ var renameCmd = &cobra.Command{
 			newName = args[1]
 		}
 		if newName == "" {
+			if err := requireInteractive("new name"); err != nil {
+				return err
+			}
 			in, err := ui.Input("New name")
 			if err != nil {
 				return nil

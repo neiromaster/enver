@@ -270,6 +270,9 @@ var editCmd = &cobra.Command{
 }
 
 func doEdit(cmd *cobra.Command, args []string) error {
+	if err := interactiveOnly("edit"); err != nil {
+		return err
+	}
 	cfg, err := app.Load(appOpts())
 	if err != nil {
 		return err
