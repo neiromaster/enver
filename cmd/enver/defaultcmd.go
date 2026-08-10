@@ -11,11 +11,12 @@ import (
 var defaultClear bool
 
 var defaultCmd = &cobra.Command{
-	Use:           "default [profile]",
-	Short:         "Set or show the default profile",
-	Args:          cobra.MaximumNArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Use:               "default [profile]",
+	Short:             "Set or show the default profile",
+	Args:              cobra.MaximumNArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := config.GlobalPath(globalFlags.configPath)
 		if defaultClear {

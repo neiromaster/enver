@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -27,9 +26,12 @@ var keygenCmd = &cobra.Command{
 }
 
 var encryptCmd = &cobra.Command{
-	Use:   "encrypt [profile]",
-	Short: "Encrypt secret values in the config",
-	Args:  cobra.MaximumNArgs(1),
+	Use:               "encrypt [profile]",
+	Short:             "Encrypt secret values in the config",
+	Args:              cobra.MaximumNArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		all, _ := cmd.Flags().GetBool("all")
 		profile := ""
@@ -38,7 +40,6 @@ var encryptCmd = &cobra.Command{
 		}
 		key, err := requireKey()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "run `enver keygen` first")
 			return err
 		}
 		path := config.GlobalPath(globalFlags.configPath)
@@ -52,9 +53,12 @@ var encryptCmd = &cobra.Command{
 }
 
 var decryptCmd = &cobra.Command{
-	Use:   "decrypt [profile]",
-	Short: "Decrypt values back to plaintext",
-	Args:  cobra.MaximumNArgs(1),
+	Use:               "decrypt [profile]",
+	Short:             "Decrypt values back to plaintext",
+	Args:              cobra.MaximumNArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		profile := ""
 		if len(args) > 0 {
