@@ -22,9 +22,7 @@ func completeImport(cmd *cobra.Command, args []string, toComplete string) ([]str
 	if len(args) == 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
-	cfgPath, _ := cmd.Flags().GetString("config")
-	noLocal, _ := cmd.Flags().GetBool("no-local")
-	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return targetProfiles(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 var (

@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/neiromaster/enver/internal/version"
 	"github.com/spf13/cobra"
@@ -15,6 +17,7 @@ var globalFlags struct {
 	keyPath    string
 	noLocal    bool
 	noExpand   bool
+	global     bool
 }
 
 var rootCmd = &cobra.Command{
@@ -48,7 +51,8 @@ Use the explicit verb for a profile sharing one: enverx <profile> -- <command>
 (or enver x ...).
 
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
-layered with .enver.yaml walked from cwd up to $HOME.`,
+plus a local .enver.yaml in the current directory. Mutating commands write to
+the local file by default; pass --global (-g) to write the user config.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -61,6 +65,7 @@ func init() {
 	pf.StringVar(&globalFlags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
+	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
 }
@@ -95,11 +100,70 @@ func interactiveOnly(name string) error {
 	return fmt.Errorf("%s is interactive; run it in a terminal", name)
 }
 
+// writeTarget is the file mutating commands write to: the local .enver.yaml in
+// the current directory by default, or the global config when --global is set.
+func writeTarget() string {
+	if globalFlags.global {
+		return config.GlobalPath(globalFlags.configPath)
+	}
+	return config.LocalPath()
+}
+
+// pickerConfig is the profile set offered when authoring extends: the merged
+// global+local config by default (a local profile may extend a global one), or
+// the global file alone under --global (a global profile must not extend a
+// local one, which would break outside this directory).
+func pickerConfig() (config.Config, error) {
+	if globalFlags.global {
+		return config.LoadFile(config.GlobalPath(globalFlags.configPath))
+	}
+	return app.Load(appOpts())
+}
+
+// notFoundInTarget errors helpfully when a profile is not in the write target,
+// suggesting --global (or running without it) when the profile exists in the
+// other layer.
+func notFoundInTarget(name, target string) error {
+	other := config.LocalPath()
+	if target == other {
+		other = config.GlobalPath(globalFlags.configPath)
+	}
+	if c, err := config.LoadFile(other); err == nil {
+		if _, ok := c.Profiles[name]; ok {
+			if globalFlags.global {
+				return fmt.Errorf("profile %q not found in global config; it is local — run without --global", name)
+			}
+			return fmt.Errorf("profile %q not found in local .enver.yaml; it is global — pass --global (-g)", name)
+		}
+	}
+	return fmt.Errorf("profile %q not found", name)
+}
+
+// targetProfiles completes profile names defined in the write target (the local
+// file by default, the global file under --global), filtered by prefix.
+func targetProfiles(cmd *cobra.Command, toComplete string) []string {
+	g, _ := cmd.Flags().GetBool("global")
+	cfgPath, _ := cmd.Flags().GetString("config")
+	target := config.LocalPath()
+	if g {
+		target = config.GlobalPath(cfgPath)
+	}
+	cfg, err := config.LoadFile(target)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Profiles))
+	for _, n := range cfg.ProfileNames() {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
-	cfgPath, _ := cmd.Flags().GetString("config")
-	noLocal, _ := cmd.Flags().GetBool("no-local")
-	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return targetProfiles(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
 }

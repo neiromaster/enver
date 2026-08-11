@@ -289,24 +289,29 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	path := writeTarget()
+	targetCfg, _ := config.LoadFile(path)
+	pickerCfg := cfg
+	if globalFlags.global {
+		pickerCfg, _ = config.LoadFile(config.GlobalPath(globalFlags.configPath))
+	}
 	name := ""
 	if len(args) > 0 {
 		name = args[0]
 	}
 	if name == "" {
-		picked, err := pickProfile(cfg, "Profile to edit", "")
+		picked, err := pickProfile(targetCfg, "Profile to edit", "")
 		if err != nil || picked == "" {
 			return nil
 		}
 		name = picked
 	}
-	path := config.GlobalPath(globalFlags.configPath)
 	prof, comments, isDefault, ok, err := config.ReadProfile(path, name)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("profile %q not found", name)
+		return notFoundInTarget(name, path)
 	}
 	wasDefault := isDefault
 
@@ -354,7 +359,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				}
 				s.upsert(entry)
 			case actionExtends:
-				picked, err := ui.Select("Extends", append(extendsOptions(cfg, name), pickerTail()...))
+				picked, err := ui.Select("Extends", append(extendsOptions(pickerCfg, name), pickerTail()...))
 				if err != nil {
 					continue
 				}

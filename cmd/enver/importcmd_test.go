@@ -90,9 +90,9 @@ func TestCompleteImport(t *testing.T) {
 	}
 	cmd := &cobra.Command{}
 	cmd.Flags().String("config", "", "")
-	cmd.Flags().Bool("no-local", false, "")
+	cmd.Flags().Bool("global", false, "")
 	_ = cmd.Flags().Set("config", path)
-	_ = cmd.Flags().Set("no-local", "true")
+	_ = cmd.Flags().Set("global", "true")
 
 	// arg 0 is a file path: defer to the shell, no suggestions.
 	got, dir := completeImport(cmd, nil, "")

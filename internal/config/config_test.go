@@ -257,6 +257,29 @@ func mapEq(a, b map[string]string) bool {
 	return true
 }
 
+func TestLoadFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(p, []byte("default: a\nprofiles:\n  a:\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Default != "a" || cfg.Profiles["a"].Env["K"] != "v" {
+		t.Fatalf("LoadFile parsed wrong: %+v", cfg)
+	}
+	// Missing file → empty Config, no error.
+	cfg2, err := LoadFile(filepath.Join(dir, "missing.yaml"))
+	if err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+	if len(cfg2.Profiles) != 0 || cfg2.Default != "" {
+		t.Fatalf("missing file should yield empty Config: %+v", cfg2)
+	}
+}
+
 func TestExtendedBy(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"base":  {},

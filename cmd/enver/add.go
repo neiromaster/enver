@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -101,9 +100,13 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	if err := interactiveOnly("add"); err != nil {
 		return err
 	}
-	cfgPath := config.GlobalPath(globalFlags.configPath)
-	existing, _ := app.Load(app.Options{ConfigPath: globalFlags.configPath, NoLocal: true})
-	names := existing.ProfileNames()
+	cfgPath := writeTarget()
+	targetCfg, _ := config.LoadFile(cfgPath)
+	pickerCfg, err := pickerConfig()
+	if err != nil {
+		return err
+	}
+	names := pickerCfg.ProfileNames()
 
 	name := ""
 	if len(args) > 0 {
@@ -126,7 +129,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 			opts = append(opts, ui.Option{Value: n, Label: n})
 		}
 		defaultExtends := ""
-		if e := existing.Profiles[name].Extends; len(e) > 0 {
+		if e := targetCfg.Profiles[name].Extends; len(e) > 0 {
 			defaultExtends = e[0]
 		}
 		picked, err := ui.SelectDefault("Extends", opts, defaultExtends)
@@ -138,7 +141,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 
 	parentEnv := map[string]string{}
 	if extends != "" {
-		if resolved, _, err := existing.ResolveProfile(extends); err == nil {
+		if resolved, _, err := pickerCfg.ResolveProfile(extends); err == nil {
 			parentEnv = resolved
 		}
 	}
@@ -164,14 +167,14 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	setDefault := false
-	if existing.Default == "" {
+	if targetCfg.Default == "" {
 		ans, err := ui.Confirm(fmt.Sprintf("Set %q as the default profile?", name), true)
 		if err != nil {
 			return nil
 		}
 		setDefault = ans
 	} else {
-		ans, err := ui.Confirm(fmt.Sprintf("Set %q as the default? (current: %s)", name, existing.Default), false)
+		ans, err := ui.Confirm(fmt.Sprintf("Set %q as the default? (current: %s)", name, targetCfg.Default), false)
 		if err != nil {
 			return nil
 		}

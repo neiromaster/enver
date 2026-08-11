@@ -21,9 +21,9 @@ func TestCompleteProfileForCryptAndDefault(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("config", "", "")
-	cmd.Flags().Bool("no-local", false, "")
+	cmd.Flags().Bool("global", false, "")
 	_ = cmd.Flags().Set("config", path)
-	_ = cmd.Flags().Set("no-local", "true")
+	_ = cmd.Flags().Set("global", "true")
 
 	for _, c := range []*cobra.Command{encryptCmd, decryptCmd, defaultCmd} {
 		got, dir := c.ValidArgsFunction(cmd, nil, "")

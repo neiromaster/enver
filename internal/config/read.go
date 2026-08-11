@@ -3,10 +3,9 @@ package config
 import "os"
 
 // ReadProfile loads one profile's own env (values and the HeadComment above each
-// key), its extends, and whether the GLOBAL FILE names it as the default. A local
-// .enver.yaml layer may shadow the global default; this reflects only what is in
-// the file at path (the file edit commands can change). ok is false (with no
-// error) when the file or profile is absent.
+// key), its extends, and whether the file at path names it as the default. It
+// reflects only what is in that one file. ok is false (with no error) when the
+// file or profile is absent.
 func ReadProfile(path, name string) (p Profile, comments map[string]string, isDefault bool, ok bool, err error) {
 	root, err := loadNode(path)
 	if err != nil {
