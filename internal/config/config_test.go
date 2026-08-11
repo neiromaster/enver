@@ -495,3 +495,33 @@ func TestExtendsYAMLScalarAndList(t *testing.T) {
 		t.Fatalf("scalar extends = %v, want [a]", got)
 	}
 }
+
+func TestResolveCommentsMixinOverlap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yml := "profiles:\n" +
+		"  a:\n    env:\n      # from a\n      K: av\n" +
+		"  b:\n    env:\n      # from b\n      K: bv\n" +
+		"  self:\n    extends: [a, b]\n"
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := cfg.ResolveProfile("self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := env["K"], "bv"; got != want {
+		t.Fatalf("value K = %q, want %q", got, want)
+	}
+	comments, err := cfg.ResolveComments(path, "self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := comments["K"], "from b"; got != want {
+		t.Fatalf("comment K = %q, want %q (value source is b)", got, want)
+	}
+}

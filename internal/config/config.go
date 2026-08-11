@@ -188,13 +188,30 @@ func (c Config) chainOf(name string, seen map[string]bool) []string {
 	return out
 }
 
+// resolutionOrder returns name's profiles in the order resolveEnv applies them:
+// each parent's subtree (recursively) in listed order, then name last. Walking
+// it forward and overwriting reproduces value precedence, so comment
+// provenance matches value provenance. dedup via seen also bounds recursion;
+// the caller must have already rejected cycles (ResolveProfile does).
+func (c Config) resolutionOrder(name string, seen map[string]bool) []string {
+	if seen[name] {
+		return nil
+	}
+	seen[name] = true
+	var out []string
+	for _, parent := range c.Profiles[name].Extends {
+		out = append(out, c.resolutionOrder(parent, seen)...)
+	}
+	return append(out, name)
+}
+
 // ResolveComments walks name's extends chain and returns, for each resolved env
 // key, the comment from the nearest profile in the chain that defines the key
 // with a comment (child over parent). Keys with no commented definition are
 // absent. Comments are read from the YAML node tree at path (the HeadComment
 // above each key), so they survive encryption. A read error returns (nil, err).
 func (c Config) ResolveComments(path, name string) (map[string]string, error) {
-	_, chain, err := c.ResolveProfile(name)
+	_, _, err := c.ResolveProfile(name)
 	if err != nil {
 		return nil, err
 	}
@@ -207,9 +224,9 @@ func (c Config) ResolveComments(path, name string) (map[string]string, error) {
 	if pm == nil {
 		return comments, nil
 	}
-	// chain is name→…→root; walk root→child so a nearer definer overwrites.
-	for i := len(chain) - 1; i >= 0; i-- {
-		idx := findIndex(pm, chain[i])
+	order := c.resolutionOrder(name, map[string]bool{})
+	for _, p := range order {
+		idx := findIndex(pm, p)
 		if idx < 0 {
 			continue
 		}
@@ -252,7 +269,7 @@ func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (m
 // lets an in-progress edit (whose chain reflects uncommitted extends changes)
 // share dotenv's merged comment provenance.
 func (c Config) ResolveCommentsAcross(globalOverride string, useLocal bool, name string) (map[string]string, error) {
-	_, chain, err := c.ResolveProfile(name)
+	_, _, err := c.ResolveProfile(name)
 	if err != nil {
 		return nil, err
 	}
@@ -260,15 +277,16 @@ func (c Config) ResolveCommentsAcross(globalOverride string, useLocal bool, name
 	if useLocal {
 		files = append(files, findLocal()...) // home-side first, cwd last
 	}
-	return commentsFromChain(chain, files), nil
+	order := c.resolutionOrder(name, map[string]bool{})
+	return commentsFromChain(order, files), nil
 }
 
 // commentsFromChain collects, for each env key, the comment on its nearest
-// commented definer: files are walked outer-to-inner and the chain root-to-
-// child within each file, so a nearer definition overwrites a farther one. A
-// key with no commented definition is absent; a missing file contributes
-// nothing.
-func commentsFromChain(chain, files []string) map[string]string {
+// commented definer: files are walked outer-to-inner and the resolution order
+// (lowest precedence first) within each file, so a higher-precedence definer's
+// comment overwrites a lower-precedence one. A key with no commented definition
+// is absent; a missing file contributes nothing.
+func commentsFromChain(order, files []string) map[string]string {
 	comments := map[string]string{}
 	for _, f := range files {
 		root, err := loadNode(f)
@@ -280,8 +298,8 @@ func commentsFromChain(chain, files []string) map[string]string {
 		if pm == nil {
 			continue
 		}
-		for i := len(chain) - 1; i >= 0; i-- { // root -> child within this file
-			idx := findIndex(pm, chain[i])
+		for _, p := range order {
+			idx := findIndex(pm, p)
 			if idx < 0 {
 				continue
 			}
