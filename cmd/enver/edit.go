@@ -277,7 +277,7 @@ var editCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE:              doEdit,
 }
 

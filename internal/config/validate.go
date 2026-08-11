@@ -55,10 +55,8 @@ func Validate(cfg Config) []Issue {
 	return issues
 }
 
-// ValidateGlobal audits the global config in isolation (no local layer), stamping
-// each issue File="global". It catches a global profile that extends a local-only
-// name — which resolves fine when the local file is present but would break
-// anywhere that file is absent.
+// ValidateGlobal audits the global config in isolation (File="global"), catching
+// a global profile that extends a local-only name.
 func ValidateGlobal(globalPath string) []Issue {
 	cfg, err := LoadFile(globalPath)
 	if err != nil {

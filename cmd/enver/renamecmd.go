@@ -15,7 +15,7 @@ var renameCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(2),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := writeTarget()
 		targetCfg, err := config.LoadFile(path)

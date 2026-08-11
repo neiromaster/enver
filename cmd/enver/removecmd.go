@@ -18,7 +18,7 @@ var removeCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := writeTarget()
 		targetCfg, err := config.LoadFile(path)
@@ -67,11 +67,9 @@ var removeCmd = &cobra.Command{
 	},
 }
 
-// guardRemovable refuses to delete a profile that other profiles extend or that
-// is the target file's default. ExtendedBy is checked against the merged config
-// (a local child can depend on a global parent); the default check is against
-// the target file, since that is the file being mutated. Existence is assumed —
-// callers check the target file first so DeleteProfile's missing-file no-op
+// guardRemovable blocks deletion when other profiles extend name (merged view —
+// a local child can depend on a global parent) or name is the target file's
+// default. Callers pre-check existence so DeleteProfile's missing-file no-op
 // cannot mask a wrong scope.
 func guardRemovable(merged, target config.Config, name string) error {
 	var blocks []string

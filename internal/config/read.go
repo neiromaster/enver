@@ -2,10 +2,9 @@ package config
 
 import "os"
 
-// ReadProfile loads one profile's own env (values and the HeadComment above each
-// key), its extends, and whether the file at path names it as the default. It
-// reflects only what is in that one file. ok is false (with no error) when the
-// file or profile is absent.
+// ReadProfile loads one profile's own env, comments, extends, and whether the
+// file at path names it default. ok is false (no error) if file or profile is
+// absent.
 func ReadProfile(path, name string) (p Profile, comments map[string]string, isDefault bool, ok bool, err error) {
 	root, err := loadNode(path)
 	if err != nil {

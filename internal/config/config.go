@@ -56,18 +56,14 @@ func load(path string) (Config, error) {
 	return c, nil
 }
 
-// LoadFile reads and parses one YAML config file. A missing file yields an empty
-// Config, no error. It is the public entry point for loading a single arbitrary
-// file (the local layer, or the global file in isolation).
+// LoadFile parses one YAML config file; a missing file yields an empty Config.
 func LoadFile(path string) (Config, error) {
 	return load(path)
 }
 
-// LocalFilename is the per-project config file enver looks for in cwd.
 const LocalFilename = ".enver.yaml"
 
-// LocalPath is the local layer: LocalFilename in the current working directory.
-// There is no walk-up — only this one file participates.
+// LocalPath is the local layer: LocalFilename in cwd. No walk-up.
 func LocalPath() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -76,9 +72,7 @@ func LocalPath() string {
 	return filepath.Join(cwd, LocalFilename)
 }
 
-// findLocal reports the local layer, if any: LocalPath when that file exists.
-// The model is exactly two layers — global plus this one cwd file — so the
-// result is 0 or 1 entry, and both callers iterate it unchanged.
+// findLocal reports the local layer as a 0-or-1-element slice for LoadMerged.
 func findLocal() []string {
 	p := LocalPath()
 	if _, err := os.Stat(p); err != nil {
@@ -87,11 +81,9 @@ func findLocal() []string {
 	return []string{p}
 }
 
-// Merge folds override into base. Override wins for `default` and for per-key
-// env values; profiles union; `extends` lists concatenate as [base…, override…]
-// with first-occurrence dedup, so override (local) mixins compose with rather
-// than replace base (global) ones. In LoadMerged, base is global and override is
-// the cwd local file, so a profile's effective extends is [global…, local…].
+// Merge folds override into base: override wins for default and per-key env;
+// extends concatenates as [base…, override…] deduped, so local mixins compose
+// with rather than replace global ones.
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
@@ -114,8 +106,6 @@ func Merge(base, override Config) Config {
 	return out
 }
 
-// mergeExtends appends add's entries to base, skipping any already present, so
-// the result is [base…, add…] with first-occurrence dedup.
 func mergeExtends(base, add Extends) Extends {
 	out := append(Extends(nil), base...)
 	for _, x := range add {

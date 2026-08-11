@@ -17,9 +17,7 @@ func TestGuardRemovable(t *testing.T) {
 			"local": {Extends: config.Extends{"anth"}},
 		},
 	}
-	// "anth" is both the default and extended by local -> refused with dependents.
-	// ExtendedBy uses the merged config; the default check uses the target file;
-	// here they are the same cfg.
+	// "anth" is the default and extended by local -> refused.
 	if err := guardRemovable(cfg, cfg, "anth"); err == nil || !strings.Contains(err.Error(), "extended by") {
 		t.Fatalf("default+extended profile should be refused with dependents: %v", err)
 	}
@@ -29,9 +27,7 @@ func TestGuardRemovable(t *testing.T) {
 	}
 }
 
-// TestNotFoundInTarget covers the cross-layer hint: when the profile lives in
-// the other file, the error points at --global (or its absence); when it lives
-// nowhere, a plain not-found.
+// TestNotFoundInTarget covers the cross-layer --global hint vs plain not-found.
 func TestNotFoundInTarget(t *testing.T) {
 	saved := globalFlags
 	t.Cleanup(func() { globalFlags = saved })

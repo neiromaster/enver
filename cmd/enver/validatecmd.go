@@ -21,9 +21,7 @@ var validateCmd = &cobra.Command{
 			return err
 		}
 		w := cmd.OutOrStdout()
-		// Merged view catches cycles and dangling refs that show up once the
-		// layers combine; the isolated-global pass catches a global profile that
-		// extends a local-only name (fine here, broken elsewhere).
+		// Isolated-global catches a global profile extending a local-only name.
 		issues := dedupIssues(append(
 			config.Validate(cfg),
 			config.ValidateGlobal(config.GlobalPath(globalFlags.configPath))...,
@@ -56,8 +54,7 @@ var validateCmd = &cobra.Command{
 }
 
 // dedupIssues collapses findings both passes report, preferring the file-scoped
-// variant so a global-only problem is attributed to the global file. Output is
-// sorted by file then profile for stable review.
+// variant; sorted by file then profile.
 func dedupIssues(issues []config.Issue) []config.Issue {
 	type key struct{ profile, kind, target string }
 	best := map[key]config.Issue{}

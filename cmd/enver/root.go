@@ -100,8 +100,7 @@ func interactiveOnly(name string) error {
 	return fmt.Errorf("%s is interactive; run it in a terminal", name)
 }
 
-// writeTarget is the file mutating commands write to: the local .enver.yaml in
-// the current directory by default, or the global config when --global is set.
+// writeTarget is the file mutators write: local by default, global under --global.
 func writeTarget() string {
 	if globalFlags.global {
 		return config.GlobalPath(globalFlags.configPath)
@@ -109,10 +108,8 @@ func writeTarget() string {
 	return config.LocalPath()
 }
 
-// pickerConfig is the profile set offered when authoring extends: the merged
-// global+local config by default (a local profile may extend a global one), or
-// the global file alone under --global (a global profile must not extend a
-// local one, which would break outside this directory).
+// pickerConfig is the extends-picker set: merged by default (a local profile may
+// extend a global one), global-only under --global.
 func pickerConfig() (config.Config, error) {
 	if globalFlags.global {
 		return config.LoadFile(config.GlobalPath(globalFlags.configPath))
@@ -120,9 +117,7 @@ func pickerConfig() (config.Config, error) {
 	return app.Load(appOpts())
 }
 
-// notFoundInTarget errors helpfully when a profile is not in the write target,
-// suggesting --global (or running without it) when the profile exists in the
-// other layer.
+// notFoundInTarget hints at --global when the profile lives in the other layer.
 func notFoundInTarget(name, target string) error {
 	other := config.LocalPath()
 	if target == other {
@@ -139,8 +134,6 @@ func notFoundInTarget(name, target string) error {
 	return fmt.Errorf("profile %q not found", name)
 }
 
-// targetProfiles completes profile names defined in the write target (the local
-// file by default, the global file under --global), filtered by prefix.
 func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 	g, _ := cmd.Flags().GetBool("global")
 	cfgPath, _ := cmd.Flags().GetString("config")
@@ -161,7 +154,18 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 	return out
 }
 
+// completeProfile backs read commands: merged-config completion.
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	cfgPath, _ := cmd.Flags().GetString("config")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeProfileInTarget backs mutators: write-target-scoped completion.
+func completeProfileInTarget(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}

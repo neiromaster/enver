@@ -31,7 +31,7 @@ var encryptCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		all, _ := cmd.Flags().GetBool("all")
 		profile := ""
@@ -58,7 +58,7 @@ var decryptCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		profile := ""
 		if len(args) > 0 {

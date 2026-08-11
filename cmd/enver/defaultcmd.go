@@ -16,7 +16,7 @@ var defaultCmd = &cobra.Command{
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
-	ValidArgsFunction: completeProfile,
+	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := writeTarget()
 		if defaultClear {
