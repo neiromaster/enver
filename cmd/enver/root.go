@@ -63,7 +63,7 @@ func init() {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&globalFlags.configPath, "config", "", "override the global config file")
 	pf.StringVar(&globalFlags.keyPath, "key", "", "key file (or ENVER_KEY env)")
-	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore .enver.yaml layers")
+	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore the ./.enver.yaml layer when reading")
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 

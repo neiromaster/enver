@@ -94,22 +94,25 @@ profiles:
 
 ### Layering
 
-`enver` walks from the current directory up to (but not including) `$HOME`,
-looking for `.enver.yaml` files. They are merged **home-side first, cwd last**,
-so the closest `.enver.yaml` wins. Use this for project-local overrides without
-touching the global store:
+`enver` uses exactly two layers: the global config above plus a local
+`./.enver.yaml` in the current directory (no walk-up — only that one file). When
+both define the same profile, env keys overlay per-key (local wins) and
+`extends` lists concatenate as `[global…, local…]` (deduped), so local mixins
+compose with rather than replace global ones. Use the local file for
+project-specific overrides, or for profiles that extend global ones:
 
 ```yaml
-# ./.enver.yaml — pin a heavier model for this repo only
+# ./.enver.yaml — a project profile built on the global `anth`
 profiles:
-  anth:
+  dev:
+    extends: anth
     env:
-      ANTHROPIC_MODEL: claude-opus-5
+      ANTHROPIC_MODEL: claude-opus-5   # override just the model
 ```
 
 Merge rules: `default` is overridden when set; profiles union; per-profile env
-keys are overridden per-key; `extends` (the whole list, when non-empty) is taken
-from the closer layer.
+keys are overridden per-key; `extends` lists merge as `[global…, local…]`, so a
+local parent wins over a global parent on a shared key.
 
 ### Inheriting from multiple profiles
 
@@ -168,6 +171,14 @@ profiles:
 
 Env keys merge additively into an existing profile of the same name.
 
+Mutating commands (`add`, `edit`, `remove`, `rename`, `duplicate`, `default`,
+`import`, `encrypt`, `decrypt`) write to `./.enver.yaml` by default; pass
+`--global` (`-g`) to write the user config instead. `enver add` creates the
+local file if it is absent. When authoring locally, the `extends` picker lists
+both local and global profiles; under `--global` it lists global profiles only
+(a global profile must not extend a local one, which would break outside this
+directory).
+
 ## Editing profiles
 
 `enver edit` opens a profile in an interactive menu where the profile's own
@@ -194,16 +205,20 @@ an `extends`, so **Done** is rejected on an empty profile.
 - **`enver remove [profile]`** — delete a profile. Refused while other profiles
   extend it or while it is the default (the error names the dependents); repoint
   or remove those first. Pass `--yes` / `-y` to skip the confirmation prompt.
-- **`enver rename [old] [new]`** — rename a profile and rewrite every reference:
-  any `extends: old` in other profiles and the top-level `default` if it matches.
-  Refused if the new name already exists.
+- **`enver rename [old] [new]`** — rename a profile and rewrite every reference
+  in the same file: any `extends: old` in other profiles and the top-level
+  `default` if it matches. Refused if the new name already exists. (References
+  in the *other* layer are not rewritten; `validate` surfaces any that go
+  dangling.)
 - **`enver duplicate <src> [new]`** — make a structural copy of a profile
   (extends, env, and comments). The copy is not made the default.
 - **`enver default [profile]`** — with no argument, print the current default;
   with a name, set it; `--clear` removes the default.
 - **`enver validate`** — audit config health: dangling `extends` and `extends`
-  cycles (errors), and profiles with no env and no extends (warnings). Exits
-  non-zero if any error is found.
+  cycles (errors), and profiles with no env and no extends (warnings). It also
+  checks the global file in isolation and flags a global profile that extends a
+  local-only name (fine in this directory, broken elsewhere). Exits non-zero if
+  any error is found.
 
 ## Exporting and importing `.env`
 
@@ -277,9 +292,10 @@ enver validate                            Check config health
 enver keygen [--force]                    Generate the encryption key file
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
-enver --config <path>                     Override global config file
+enver --global / -g                       Write to the global config (default: ./.enver.yaml)
+enver --config <path>                     Override the global config file (read path; --global writes)
 enver --key <path>                        Key file (or ENVER_KEY env)
-enver --no-local                          Ignore .enver.yaml layers
+enver --no-local                          Ignore the ./.enver.yaml layer when reading
 enver --no-expand                         Do not expand $VAR references
 enver --version / enverx --version / -h, --help
 ```
