@@ -12,6 +12,7 @@ type Issue struct {
 	Severity string // "error" | "warning"
 	Target   string // dangling target
 	Detail   string // cycle detail
+	File     string // source scope when known (e.g. "global"); "" means the merged view
 }
 
 func (i Issue) String() string {
@@ -50,6 +51,22 @@ func Validate(cfg Config) []Issue {
 		if len(p.Env) == 0 && len(p.Extends) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
 		}
+	}
+	return issues
+}
+
+// ValidateGlobal audits the global config in isolation (no local layer), stamping
+// each issue File="global". It catches a global profile that extends a local-only
+// name — which resolves fine when the local file is present but would break
+// anywhere that file is absent.
+func ValidateGlobal(globalPath string) []Issue {
+	cfg, err := LoadFile(globalPath)
+	if err != nil {
+		return nil
+	}
+	issues := Validate(cfg)
+	for i := range issues {
+		issues[i].File = "global"
 	}
 	return issues
 }

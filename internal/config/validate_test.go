@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestValidateFindsDanglingAndCycle(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
@@ -57,5 +61,38 @@ func TestValidateDeepDanglingNotLabeledCycle(t *testing.T) {
 	}
 	if got["a"] == "cycle" {
 		t.Error("a mislabeled as cycle (deep dangling should not be)")
+	}
+}
+
+func TestValidateGlobalIsolated(t *testing.T) {
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global.yaml")
+	// broken extends dev, but dev is not defined in the global file.
+	if err := os.WriteFile(globalPath, []byte("profiles:\n  broken:\n    extends: dev\n    env:\n      A: \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ValidateGlobal loads the global file alone, so "dev" dangles and the issue
+	// is attributed to the global scope.
+	var found bool
+	for _, is := range ValidateGlobal(globalPath) {
+		if is.Profile == "broken" && is.Kind == "dangling-extends" && is.Target == "dev" && is.File == "global" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ValidateGlobal did not flag broken→dev in isolation")
+	}
+
+	// Over the merged config — where dev exists (e.g. from a local layer) — the
+	// same extends resolves fine and Validate must not flag it.
+	merged := Config{Profiles: map[string]Profile{
+		"broken": {Extends: Extends{"dev"}, Env: map[string]string{"A": "1"}},
+		"dev":    {Env: map[string]string{"X": "2"}},
+	}}
+	for _, is := range Validate(merged) {
+		if is.Profile == "broken" && is.Kind == "dangling-extends" {
+			t.Fatalf("merged Validate should not flag broken when dev is present: %v", is)
+		}
 	}
 }
