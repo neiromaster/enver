@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -57,32 +56,42 @@ func load(path string) (Config, error) {
 	return c, nil
 }
 
-// findLocal walks from cwd up to (but not including) $HOME, collecting
-// .enver.yaml files. Returns them ordered home-side-first so that merging in
-// order makes the nearest (cwd) override win.
-func findLocal() []string {
-	home := os.Getenv("HOME")
+// LoadFile reads and parses one YAML config file. A missing file yields an empty
+// Config, no error. It is the public entry point for loading a single arbitrary
+// file (the local layer, or the global file in isolation).
+func LoadFile(path string) (Config, error) {
+	return load(path)
+}
+
+// LocalFilename is the per-project config file enver looks for in cwd.
+const LocalFilename = ".enver.yaml"
+
+// LocalPath is the local layer: LocalFilename in the current working directory.
+// There is no walk-up — only this one file participates.
+func LocalPath() string {
 	cwd, err := os.Getwd()
-	if err != nil || home == "" || !strings.HasPrefix(cwd+string(filepath.Separator), home+string(filepath.Separator)) {
-		// Only layer when cwd is under $HOME.
+	if err != nil {
+		return LocalFilename
+	}
+	return filepath.Join(cwd, LocalFilename)
+}
+
+// findLocal reports the local layer, if any: LocalPath when that file exists.
+// The model is exactly two layers — global plus this one cwd file — so the
+// result is 0 or 1 entry, and both callers iterate it unchanged.
+func findLocal() []string {
+	p := LocalPath()
+	if _, err := os.Stat(p); err != nil {
 		return nil
 	}
-	var paths []string
-	for dir := cwd; dir != home && dir != "/" && filepath.Dir(dir) != dir; dir = filepath.Dir(dir) {
-		p := filepath.Join(dir, ".enver.yaml")
-		if _, err := os.Stat(p); err == nil {
-			paths = append(paths, p)
-		}
-	}
-	// paths is nearest-first; reverse so cwd is applied last.
-	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {
-		paths[i], paths[j] = paths[j], paths[i]
-	}
-	return paths
+	return []string{p}
 }
 
 // Merge folds override into base. Override wins for `default` and for per-key
-// env values; profiles union; `extends` is taken from override when set.
+// env values; profiles union; `extends` lists concatenate as [base…, override…]
+// with first-occurrence dedup, so override (local) mixins compose with rather
+// than replace base (global) ones. In LoadMerged, base is global and override is
+// the cwd local file, so a profile's effective extends is [global…, local…].
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
@@ -93,9 +102,7 @@ func Merge(base, override Config) Config {
 	}
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
-		if len(p.Extends) > 0 {
-			bp.Extends = p.Extends
-		}
+		bp.Extends = mergeExtends(bp.Extends, p.Extends)
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
@@ -103,6 +110,18 @@ func Merge(base, override Config) Config {
 			bp.Env[k] = v
 		}
 		out.Profiles[name] = bp
+	}
+	return out
+}
+
+// mergeExtends appends add's entries to base, skipping any already present, so
+// the result is [base…, add…] with first-occurrence dedup.
+func mergeExtends(base, add Extends) Extends {
+	out := append(Extends(nil), base...)
+	for _, x := range add {
+		if !out.Has(x) {
+			out = append(out, x)
+		}
 	}
 	return out
 }
@@ -275,7 +294,7 @@ func (c Config) ResolveCommentsAcross(globalOverride string, useLocal bool, name
 	}
 	files := []string{GlobalPath(globalOverride)}
 	if useLocal {
-		files = append(files, findLocal()...) // home-side first, cwd last
+		files = append(files, findLocal()...) // global first, then the cwd local file
 	}
 	order := c.resolutionOrder(name, map[string]bool{})
 	return commentsFromChain(order, files), nil

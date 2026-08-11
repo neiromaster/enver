@@ -37,6 +37,47 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestMergeExtends(t *testing.T) {
+	cases := []struct {
+		name       string
+		base, over Extends
+		want       Extends
+	}{
+		{"dedup overlap", Extends{"a", "b"}, Extends{"b", "c"}, Extends{"a", "b", "c"}},
+		{"empty over keeps base", Extends{"a"}, nil, Extends{"a"}},
+		{"empty base takes over", nil, Extends{"x"}, Extends{"x"}},
+		{"both empty", nil, nil, nil},
+	}
+	for _, c := range cases {
+		got := mergeExtends(c.base, c.over)
+		if !sliceEq(got, c.want) {
+			t.Fatalf("%s: mergeExtends(%v, %v) = %v, want %v", c.name, c.base, c.over, got, c.want)
+		}
+	}
+
+	// A profile defined in both layers composes extends as [global…, local…].
+	base := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"g"}, Env: map[string]string{"K": "base"}}}}
+	over := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"l"}, Env: map[string]string{"K2": "over"}}}}
+	merged := Merge(base, over)
+	if got := merged.Profiles["p"].Extends; !sliceEq(got, Extends{"g", "l"}) {
+		t.Fatalf("merged extends = %v, want [g l]", got)
+	}
+
+	// Local (later) parent wins over a global parent on a shared key.
+	cfg := Config{Profiles: map[string]Profile{
+		"g": {Env: map[string]string{"S": "global"}},
+		"l": {Env: map[string]string{"S": "local"}},
+		"p": {Extends: Extends{"g", "l"}},
+	}}
+	env, _, err := cfg.ResolveProfile("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["S"] != "local" {
+		t.Fatalf("S = %q, want local (later parent wins)", env["S"])
+	}
+}
+
 func TestResolveProfileExtends(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"root": {Env: map[string]string{"A": "1", "B": "1"}},
@@ -113,7 +154,7 @@ func TestGlobalPath(t *testing.T) {
 func TestLoadMergedLayering(t *testing.T) {
 	// Resolve the temp dir: on macOS t.TempDir() returns /var/folders/... but
 	// os.Getwd() resolves the /var → /private/var symlink, which would break
-	// the cwd-under-HOME prefix check in findLocal().
+	// path comparisons against cwd.
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -129,21 +170,17 @@ func TestLoadMergedLayering(t *testing.T) {
 		}
 	}
 	mkFile(".config/enver/config.yaml", "default: base\nprofiles:\n  p:\n    env:\n      K: base\n")
-	proj := filepath.Join(home, "proj", "sub")
-	if err := os.MkdirAll(proj, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// parent layer
-	mkFile("proj/.enver.yaml", "profiles:\n  p:\n    env:\n      K: parent\n      EXTRA: parent\n")
-	// closer layer
-	mkFile("proj/sub/.enver.yaml", "profiles:\n  p:\n    env:\n      K: closer\n")
 
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	// From the deepest dir, the closer .enver.yaml wins for K; parent adds EXTRA.
-	cwd := proj
-	restore := chdir(t, cwd)
+	// Case 1: cwd has ./.enver.yaml → it is the local layer; local wins for K.
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkFile("proj/.enver.yaml", "profiles:\n  p:\n    env:\n      K: local\n")
+	restore := chdir(t, proj)
 	defer restore()
 
 	cfg, err := LoadMerged("", true)
@@ -154,11 +191,8 @@ func TestLoadMergedLayering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env["K"] != "closer" {
-		t.Fatalf("K = %q, want closer (nearest .enver.yaml)", env["K"])
-	}
-	if env["EXTRA"] != "parent" {
-		t.Fatalf("EXTRA = %q, want parent (added by outer layer)", env["EXTRA"])
+	if env["K"] != "local" {
+		t.Fatalf("K = %q, want local (cwd .enver.yaml)", env["K"])
 	}
 
 	// --no-local falls back to global only.
@@ -169,6 +203,22 @@ func TestLoadMergedLayering(t *testing.T) {
 	env2, _, _ := cfg2.ResolveProfile("p")
 	if env2["K"] != "base" {
 		t.Fatalf("no-local K = %q, want base", env2["K"])
+	}
+
+	// Case 2: cwd has no .enver.yaml but a parent dir does → the parent is NOT
+	// walked; only global is loaded.
+	sub := filepath.Join(proj, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer chdir(t, sub)()
+	cfg3, err := LoadMerged("", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env3, _, _ := cfg3.ResolveProfile("p")
+	if env3["K"] != "base" {
+		t.Fatalf("K = %q, want base (parent .enver.yaml must not be walked)", env3["K"])
 	}
 }
 
