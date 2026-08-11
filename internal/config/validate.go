@@ -35,20 +35,19 @@ func Validate(cfg Config) []Issue {
 	var issues []Issue
 	for _, n := range cfg.ProfileNames() {
 		p := cfg.Profiles[n]
-		if p.Extends != "" {
-			if !exists[p.Extends] {
-				issues = append(issues, Issue{Profile: n, Kind: "dangling-extends", Severity: "error", Target: p.Extends})
-				continue
+		for _, parent := range p.Extends {
+			if !exists[parent] {
+				issues = append(issues, Issue{Profile: n, Kind: "dangling-extends", Severity: "error", Target: parent})
 			}
+		}
+		if len(p.Extends) > 0 {
 			if _, _, err := cfg.ResolveProfile(n); err != nil {
 				if strings.Contains(err.Error(), "cycle") {
 					issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
 				}
-				// a "not found" here is a deeper dangling link, reported at its own
-				// source profile; do not double-report or mislabel it as a cycle.
 			}
 		}
-		if len(p.Env) == 0 && p.Extends == "" {
+		if len(p.Env) == 0 && len(p.Extends) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
 		}
 	}

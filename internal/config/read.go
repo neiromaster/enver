@@ -33,7 +33,7 @@ func ReadProfile(path, name string) (p Profile, comments map[string]string, isDe
 	profNode := pm.Content[idx]
 	p = Profile{Env: map[string]string{}}
 	if ev := findIndex(profNode, "extends"); ev >= 0 {
-		p.Extends = profNode.Content[ev].Value
+		p.Extends = readExtendsNode(profNode.Content[ev])
 	}
 	env := envMapping(profNode)
 	if env != nil {

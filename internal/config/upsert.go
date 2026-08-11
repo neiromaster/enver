@@ -70,14 +70,11 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool, 
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
 
-	if forceExtends {
-		if p.Extends == "" {
-			removeKey(prof, "extends")
-		} else {
-			setScalar(prof, "extends", p.Extends)
-		}
-	} else if p.Extends != "" {
-		setScalar(prof, "extends", p.Extends)
+	switch {
+	case forceExtends:
+		writeExtendsNode(prof, p.Extends)
+	case len(p.Extends) > 0:
+		writeExtendsNode(prof, p.Extends)
 	}
 	if len(p.Env) > 0 {
 		env := ensureMappingEntry(prof, "env")

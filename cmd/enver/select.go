@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
@@ -16,8 +17,8 @@ func profileOptions(cfg config.Config, exclude string) []ui.Option {
 			continue
 		}
 		label := n
-		if e := cfg.Profiles[n].Extends; e != "" {
-			label = fmt.Sprintf("%s (extends → %s)", n, e)
+		if e := cfg.Profiles[n].Extends; len(e) > 0 {
+			label = fmt.Sprintf("%s (extends → %s)", n, strings.Join(e, ", "))
 		}
 		opts = append(opts, ui.Option{Value: n, Label: label})
 	}

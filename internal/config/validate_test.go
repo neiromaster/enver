@@ -4,11 +4,11 @@ import "testing"
 
 func TestValidateFindsDanglingAndCycle(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
-		"ok":     {Extends: "base"},
+		"ok":     {Extends: Extends{"base"}},
 		"base":   {Env: map[string]string{"K": "v"}},
-		"dangle": {Extends: "ghost"},
-		"a":      {Extends: "b"},
-		"b":      {Extends: "a"},
+		"dangle": {Extends: Extends{"ghost"}},
+		"a":      {Extends: Extends{"b"}},
+		"b":      {Extends: Extends{"a"}},
 		"empty":  {},
 	}}
 	kinds := map[string]string{}
@@ -30,7 +30,7 @@ func TestValidateFindsDanglingAndCycle(t *testing.T) {
 }
 
 func TestValidateSeverityExit(t *testing.T) {
-	cfg := Config{Profiles: map[string]Profile{"x": {Extends: "ghost"}}}
+	cfg := Config{Profiles: map[string]Profile{"x": {Extends: Extends{"ghost"}}}}
 	hasErr := false
 	for _, is := range Validate(cfg) {
 		if is.Severity == "error" {
@@ -45,8 +45,8 @@ func TestValidateSeverityExit(t *testing.T) {
 func TestValidateDeepDanglingNotLabeledCycle(t *testing.T) {
 	// a -> b -> ghost ; b's dangling ref to ghost is the real issue.
 	cfg := Config{Profiles: map[string]Profile{
-		"a": {Extends: "b"},
-		"b": {Extends: "ghost"},
+		"a": {Extends: Extends{"b"}},
+		"b": {Extends: Extends{"ghost"}},
 	}}
 	got := map[string]string{}
 	for _, is := range Validate(cfg) {

@@ -52,7 +52,7 @@ profiles:
 func TestUpsertCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yaml")
-	p := Profile{Extends: "anth", Env: map[string]string{"K": "v"}}
+	p := Profile{Extends: Extends{"anth"}, Env: map[string]string{"K": "v"}}
 	if err := UpsertProfile(path, "new", p, true, false, nil); err != nil {
 		t.Fatalf("upsert into missing file: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestEnvCommentSurvivesEncryptDecrypt(t *testing.T) {
 func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := UpsertProfile(path, "p", Profile{Extends: "base", Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, true, nil); err != nil {
@@ -230,7 +230,7 @@ func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if prof.Extends != "" {
+	if len(prof.Extends) > 0 {
 		t.Errorf("Extends = %q, want empty (forceExtends cleared it)", prof.Extends)
 	}
 	if prof.Env["A"] != "1" || prof.Env["B"] != "2" {
@@ -241,7 +241,7 @@ func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 func TestUpsertPreserveExtendsKeepsExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := UpsertProfile(path, "p", Profile{Extends: "base", Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, false, nil); err != nil {
@@ -251,7 +251,7 @@ func TestUpsertPreserveExtendsKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if prof.Extends != "base" {
+	if !prof.Extends.Has("base") {
 		t.Errorf("Extends = %q, want base (forceExtends=false preserves it)", prof.Extends)
 	}
 	if prof.Env["A"] != "1" || prof.Env["B"] != "2" {

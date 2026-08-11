@@ -27,13 +27,13 @@ const (
 type editState struct {
 	name          string
 	entries       []ui.EnvEntry
-	extends       string
+	extends       config.Extends
 	isDefault     bool
 	deleteProfile bool
 
 	// orig* snapshot the loaded profile for unsaved-change detection on the Done
 	// row. origEntries is a copy, so in-place edits to entries never reach it.
-	origExtends   string
+	origExtends   config.Extends
 	origIsDefault bool
 	origEntries   []ui.EnvEntry
 }
@@ -109,7 +109,7 @@ func (s editState) commentsMap() map[string]string {
 }
 
 func (s editState) canCommit() error {
-	if len(s.entries) == 0 && s.extends == "" {
+	if len(s.entries) == 0 && len(s.extends) == 0 {
 		return fmt.Errorf("a profile needs at least one env var or an extends")
 	}
 	return nil
@@ -119,7 +119,7 @@ func (s editState) canCommit() error {
 // added, removed, or modified entry, a changed extends, a toggled default, or a
 // pending profile deletion.
 func (s editState) dirty() bool {
-	if s.extends != s.origExtends || s.isDefault != s.origIsDefault || s.deleteProfile {
+	if !extendsEqual(s.extends, s.origExtends) || s.isDefault != s.origIsDefault || s.deleteProfile {
 		return true
 	}
 	if len(s.entries) != len(s.origEntries) {
@@ -133,6 +133,18 @@ func (s editState) dirty() bool {
 	return false
 }
 
+func extendsEqual(a, b config.Extends) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // overrideKeySet returns the own keys that shadow a key contributed by the
 // extends chain (parents only), so menuOptions and deleteVarOptions can mark
 // actual overrides. The parent resolution blanks the profile's own env, so a
@@ -140,7 +152,7 @@ func (s editState) dirty() bool {
 // own keys. A profile with no extends, or a pending extends that would cycle,
 // yields nil.
 func overrideKeySet(cfg config.Config, s editState) map[string]bool {
-	if s.extends == "" {
+	if len(s.extends) == 0 {
 		return nil
 	}
 	probe := probeConfig(cfg, s)
@@ -224,11 +236,11 @@ func deleteVarOptions(s editState, overrideKeys map[string]bool) []ui.Option {
 	return append(own, pickerTail()...)
 }
 
-func extendsLabel(extends string) string {
-	if extends == "" {
+func extendsLabel(extends config.Extends) string {
+	if len(extends) == 0 {
 		return "Change extends… (none)"
 	}
-	return fmt.Sprintf("Change extends… (%s)", extends)
+	return fmt.Sprintf("Change extends… (%s)", strings.Join(extends, ", "))
 }
 
 func defaultLabel(isDefault bool) string {
@@ -349,7 +361,11 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				if picked == actionCancel {
 					continue
 				}
-				s.extends = picked
+				if picked == "" {
+					s.extends = nil
+				} else {
+					s.extends = config.Extends{picked}
+				}
 			case actionDefault:
 				s.isDefault = !s.isDefault
 			case actionDeleteVar:
@@ -429,7 +445,7 @@ func commitValidate(cfg config.Config, s editState) error {
 	if err := s.canCommit(); err != nil {
 		return err
 	}
-	if s.extends != "" {
+	if len(s.extends) > 0 {
 		probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
 		for k, v := range cfg.Profiles {
 			probe.Profiles[k] = v
@@ -438,17 +454,17 @@ func commitValidate(cfg config.Config, s editState) error {
 		tp.Extends = s.extends
 		probe.Profiles[s.name] = tp
 		if _, _, err := probe.ResolveProfile(s.name); err != nil {
-			return fmt.Errorf("extends %q would create a cycle", s.extends)
+			return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
 		}
 	}
 	return nil
 }
 
 func editTitle(s editState) string {
-	if s.extends == "" {
+	if len(s.extends) == 0 {
 		return fmt.Sprintf("Edit profile: %s", s.name)
 	}
-	return fmt.Sprintf("Edit profile: %s (extends %s)", s.name, s.extends)
+	return fmt.Sprintf("Edit profile: %s (extends %s)", s.name, strings.Join(s.extends, ", "))
 }
 
 // inheritedEntries returns resolved env keys that the profile does not define

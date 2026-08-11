@@ -27,7 +27,7 @@ func TestBuildProfile(t *testing.T) {
 		{Key: "MODEL", Value: "claude-sonnet-5"},
 	}
 	prof, comments := buildProfile("anth", entries)
-	if prof.Extends != "anth" {
+	if !prof.Extends.Has("anth") {
 		t.Fatalf("extends = %q, want anth", prof.Extends)
 	}
 	if prof.Env["API_KEY"] != "sk-x" || prof.Env["MODEL"] != "claude-sonnet-5" {

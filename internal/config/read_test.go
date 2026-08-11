@@ -31,7 +31,7 @@ profiles:
 	if !isDefault {
 		t.Fatal("isDefault = false, want true")
 	}
-	if p.Extends != "base" {
+	if !p.Extends.Has("base") {
 		t.Fatalf("extends = %q, want base", p.Extends)
 	}
 	if p.Env["API_KEY"] != "sk-xxx" || p.Env["MODEL"] != "claude-sonnet-5" {

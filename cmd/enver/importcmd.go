@@ -117,22 +117,22 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 	}
 	existingProf, exists := existing.Profiles[name]
 
-	extendsToWrite := ""
+	extendsToWrite := config.Extends(nil)
 	if extendsFlag != "" {
 		if _, ok := existing.Profiles[extendsFlag]; !ok {
 			return "", fmt.Errorf("extends profile %q does not exist", extendsFlag)
 		}
-		extendsToWrite = extendsFlag
+		extendsToWrite = config.Extends{extendsFlag}
 	} else if exists {
 		extendsToWrite = existingProf.Extends
 	}
 
-	if len(imported) == 0 && extendsToWrite == "" {
+	if len(imported) == 0 && len(extendsToWrite) == 0 {
 		return "", fmt.Errorf("no variables to import")
 	}
 
 	oldEnv := map[string]string{}
-	oldExtends := ""
+	oldExtends := config.Extends(nil)
 	if exists {
 		oldEnv = existingProf.Env
 		oldExtends = existingProf.Extends
@@ -228,17 +228,17 @@ func replaceConfirmMsg(name string, removed []diffEntry) string {
 	return fmt.Sprintf("Replace will remove %d %s from %q: %s%s. Continue?", len(keys), noun, name, strings.Join(shown, ", "), tail)
 }
 
-func extLabel(s string) string {
-	if s == "" {
+func extLabel(e config.Extends) string {
+	if len(e) == 0 {
 		return "(none)"
 	}
-	return s
+	return strings.Join(e, ", ")
 }
 
 // formatImportSummary renders the import result: a header line, then per-key diff
 // lines (added +, overridden ~, removed -) with values masked, and an extends
 // line when the value changed.
-func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends string) string {
+func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends config.Extends) string {
 	var b strings.Builder
 	vars := "1 var"
 	if n != 1 {
@@ -254,7 +254,7 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	for _, e := range d.removed {
 		fmt.Fprintf(&b, "  - %s = %s\n", e.key, config.MaskValue(e.key, e.val))
 	}
-	if extendsToWrite != oldExtends {
+	if !extendsEqual(extendsToWrite, oldExtends) {
 		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))
 	}
 	fmt.Fprintf(&b, "Run `enver encrypt %s` to encrypt secrets.\n", name)

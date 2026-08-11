@@ -9,7 +9,7 @@ import (
 func TestProfileOptionsAnnotatesExtends(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"anth":  {},
-		"local": {Extends: "anth"},
+		"local": {Extends: config.Extends{"anth"}},
 	}}
 	opts := profileOptions(cfg, "")
 	if len(opts) != 2 {

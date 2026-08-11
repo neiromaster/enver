@@ -51,7 +51,7 @@ func TestWriteProfileClearsExtendsAndSetsDefault(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  anth:\n    extends: base\n    env:\n      K: v\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteProfile(path, "anth", Profile{Extends: "", Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
+	if err := WriteProfile(path, "anth", Profile{Extends: nil, Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
 		t.Fatalf("WriteProfile: %v", err)
 	}
 	s := string(mustRead(t, path))

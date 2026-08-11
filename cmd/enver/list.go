@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -39,13 +40,13 @@ func doList(w io.Writer) error {
 		if n == cfg.Default {
 			marker = "*"
 		}
-		extends := p.Extends
+		extends := strings.Join(p.Extends, ", ")
 		if extends == "" {
 			extends = "-"
 		}
 		own := len(p.Env)
 		varsCell := fmt.Sprintf("%d", own)
-		if p.Extends != "" {
+		if len(p.Extends) > 0 {
 			if resolved, _, err := cfg.ResolveProfile(n); err == nil {
 				varsCell = fmt.Sprintf("%d (→%d)", own, len(resolved))
 			}

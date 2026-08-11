@@ -34,8 +34,22 @@ func RenameProfile(path, old, new string) error {
 
 	for i := 0; i+1 < len(pm.Content); i += 2 {
 		profNode := pm.Content[i+1]
-		if ev := findIndex(profNode, "extends"); ev >= 0 && profNode.Content[ev].Value == old {
-			profNode.Content[ev].Value = new
+		ev := findIndex(profNode, "extends")
+		if ev < 0 {
+			continue
+		}
+		ext := profNode.Content[ev]
+		switch ext.Kind {
+		case yaml.ScalarNode:
+			if ext.Value == old {
+				ext.Value = new
+			}
+		case yaml.SequenceNode:
+			for _, item := range ext.Content {
+				if item.Value == old {
+					item.Value = new
+				}
+			}
 		}
 	}
 

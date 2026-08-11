@@ -12,7 +12,7 @@ func TestGuardRemovable(t *testing.T) {
 		Default: "anth",
 		Profiles: map[string]config.Profile{
 			"anth":  {},
-			"local": {Extends: "anth"},
+			"local": {Extends: config.Extends{"anth"}},
 		},
 	}
 	if err := guardRemovable(cfg, "missing"); err == nil {

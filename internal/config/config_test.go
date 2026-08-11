@@ -18,7 +18,7 @@ func TestMerge(t *testing.T) {
 		Default: "c",
 		Profiles: map[string]Profile{
 			"a": {Env: map[string]string{"K2": "over", "K4": "over"}},
-			"c": {Extends: "a", Env: map[string]string{"K5": "over"}},
+			"c": {Extends: Extends{"a"}, Env: map[string]string{"K5": "over"}},
 		},
 	}
 	got := Merge(base, over)
@@ -32,7 +32,7 @@ func TestMerge(t *testing.T) {
 	if _, ok := got.Profiles["b"]; !ok {
 		t.Fatal("profile b dropped by merge")
 	}
-	if got.Profiles["c"].Extends != "a" {
+	if !got.Profiles["c"].Extends.Has("a") {
 		t.Fatalf("c.extends = %q, want a", got.Profiles["c"].Extends)
 	}
 }
@@ -40,8 +40,8 @@ func TestMerge(t *testing.T) {
 func TestResolveProfileExtends(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"root": {Env: map[string]string{"A": "1", "B": "1"}},
-		"mid":  {Extends: "root", Env: map[string]string{"B": "2", "C": "2"}},
-		"leaf": {Extends: "mid", Env: map[string]string{"C": "3"}},
+		"mid":  {Extends: Extends{"root"}, Env: map[string]string{"B": "2", "C": "2"}},
+		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"C": "3"}},
 	}}
 	env, chain, err := cfg.ResolveProfile("leaf")
 	if err != nil {
@@ -58,8 +58,8 @@ func TestResolveProfileExtends(t *testing.T) {
 
 func TestResolveProfileCycle(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
-		"a": {Extends: "b"},
-		"b": {Extends: "a"},
+		"a": {Extends: Extends{"b"}},
+		"b": {Extends: Extends{"a"}},
 	}}
 	_, _, err := cfg.ResolveProfile("a")
 	if err == nil {
@@ -187,7 +187,7 @@ func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
+	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] != b[i] {
 			return false
 		}
@@ -210,9 +210,9 @@ func mapEq(a, b map[string]string) bool {
 func TestExtendedBy(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"base":  {},
-		"mid":   {Extends: "base"},
-		"leaf":  {Extends: "mid"},
-		"other": {Extends: "base"},
+		"mid":   {Extends: Extends{"base"}},
+		"leaf":  {Extends: Extends{"mid"}},
+		"other": {Extends: Extends{"base"}},
 	}}
 	got := cfg.ExtendedBy("base")
 	want := []string{"mid", "other"}
@@ -247,8 +247,8 @@ func TestResolveComments(t *testing.T) {
 	}
 	cfg := Config{Profiles: map[string]Profile{
 		"base": {Env: map[string]string{"FOO": "base", "BAR": "base"}},
-		"mid":  {Extends: "base", Env: map[string]string{"FOO": "mid"}},
-		"leaf": {Extends: "mid", Env: map[string]string{"OWN": "x"}},
+		"mid":  {Extends: Extends{"base"}, Env: map[string]string{"FOO": "mid"}},
+		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"OWN": "x"}},
 	}}
 	got, err := cfg.ResolveComments(path, "leaf")
 	if err != nil {
@@ -394,7 +394,7 @@ func TestResolveCommentsAcrossUsesReceiverChain(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"base":  {Env: map[string]string{"FOO": "bv"}},
 		"other": {Env: map[string]string{"FOO": "ov"}},
-		"dev":   {Extends: "other", Env: map[string]string{"OWN": "x"}},
+		"dev":   {Extends: Extends{"other"}, Env: map[string]string{"OWN": "x"}},
 	}}
 	got, err := cfg.ResolveCommentsAcross(path, false, "dev")
 	if err != nil {
@@ -425,5 +425,73 @@ func TestResolveCommentsMergedMissingConfig(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected nil map on error, got %v", got)
+	}
+}
+
+func TestResolveProfileMultipleExtends(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base":   {Env: map[string]string{"A": "base", "B": "base"}},
+		"trait1": {Extends: Extends{"base"}, Env: map[string]string{"B": "t1", "C": "t1"}},
+		"trait2": {Extends: Extends{"base"}, Env: map[string]string{"C": "t2", "D": "t2"}},
+		"mix":    {Extends: Extends{"trait1", "trait2"}, Env: map[string]string{"D": "own"}},
+	}}
+	env, chain, err := cfg.ResolveProfile("mix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// trait2 is later than trait1: B=base (trait2's base-inherited B overwrites trait1's B=t1),
+	// C=t2 (trait2's direct definition wins), D=own (child wins). base unchanged: A=base.
+	// This is the diamond behavior: later parent's full env (including inherited keys) overwrites earlier.
+	want := map[string]string{"A": "base", "B": "base", "C": "t2", "D": "own"}
+	if !mapEq(env, want) {
+		t.Fatalf("env = %v, want %v", env, want)
+	}
+	if got, want := chain, []string{"mix", "trait1", "base", "trait2"}; !sliceEq(got, want) {
+		t.Fatalf("chain = %v, want %v", got, want)
+	}
+}
+
+func TestResolveProfileMultiCycle(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"a": {Extends: Extends{"b", "c"}},
+		"b": {Extends: Extends{"c"}},
+		"c": {Extends: Extends{"a"}},
+	}}
+	if _, _, err := cfg.ResolveProfile("a"); err == nil {
+		t.Fatal("multi-parent cycle not detected")
+	}
+}
+
+func TestExtendsHas(t *testing.T) {
+	e := Extends{"a", "b"}
+	if !e.Has("a") || !e.Has("b") || e.Has("c") {
+		t.Fatalf("Has wrong for %v", e)
+	}
+	if (Extends{}).Has("a") {
+		t.Fatal("empty Extends reports Has")
+	}
+}
+
+func TestExtendsYAMLScalarAndList(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// list form
+	if err := os.WriteFile(path, []byte("profiles:\n  mix:\n    extends: [a, b]\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Profiles["mix"].Extends; !sliceEq(got, []string{"a", "b"}) {
+		t.Fatalf("list extends = %v, want [a b]", got)
+	}
+	// scalar form still works
+	if err := os.WriteFile(path, []byte("profiles:\n  one:\n    extends: a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = load(path)
+	if got := cfg.Profiles["one"].Extends; !sliceEq(got, []string{"a"}) {
+		t.Fatalf("scalar extends = %v, want [a]", got)
 	}
 }

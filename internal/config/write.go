@@ -56,11 +56,7 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool, c
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
 
-	if p.Extends != "" {
-		setScalar(prof, "extends", p.Extends)
-	} else {
-		removeKey(prof, "extends")
-	}
+	writeExtendsNode(prof, p.Extends)
 
 	switch {
 	case len(p.Env) == 0:

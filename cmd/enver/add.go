@@ -48,7 +48,7 @@ func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[st
 			comments[e.Key] = e.Comment
 		}
 	}
-	return config.Profile{Extends: extends, Env: env}, comments
+	return config.Profile{Extends: config.Extends{extends}, Env: env}, comments
 }
 
 // buildSummary builds the display summary for the collecting env-card: own entries
@@ -125,7 +125,11 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		for _, n := range names {
 			opts = append(opts, ui.Option{Value: n, Label: n})
 		}
-		picked, err := ui.SelectDefault("Extends", opts, existing.Profiles[name].Extends)
+		defaultExtends := ""
+		if e := existing.Profiles[name].Extends; len(e) > 0 {
+			defaultExtends = e[0]
+		}
+		picked, err := ui.SelectDefault("Extends", opts, defaultExtends)
 		if err != nil {
 			return nil
 		}

@@ -10,10 +10,10 @@ import (
 )
 
 func TestNewEditStateSortedWithComments(t *testing.T) {
-	prof := config.Profile{Extends: "base", Env: map[string]string{"B": "2", "A": "1"}}
+	prof := config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"B": "2", "A": "1"}}
 	comments := map[string]string{"A": "the A"}
 	s := newEditState("p", prof, comments, true)
-	if s.extends != "base" || !s.isDefault || len(s.entries) != 2 {
+	if !s.extends.Has("base") || !s.isDefault || len(s.entries) != 2 {
 		t.Fatalf("state = %+v", s)
 	}
 	if s.entries[0].Key != "A" || s.entries[1].Key != "B" {
@@ -49,7 +49,7 @@ func TestEditStateCanCommitInvariant(t *testing.T) {
 	if err := empty.canCommit(); err == nil {
 		t.Fatal("empty non-extending profile should not commit")
 	}
-	withExtends := newEditState("p", config.Profile{Extends: "base"}, nil, false)
+	withExtends := newEditState("p", config.Profile{Extends: config.Extends{"base"}}, nil, false)
 	if err := withExtends.canCommit(); err != nil {
 		t.Fatalf("extends-only should commit: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestEditStateCanCommitInvariant(t *testing.T) {
 
 func TestEditStateDirtyDetection(t *testing.T) {
 	// Freshly loaded: clean, including a comment and extends and default.
-	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"A": "1"}},
+	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"A": "1"}},
 		map[string]string{"A": "c"}, true)
 	if s.dirty() {
 		t.Fatal("freshly loaded state should not be dirty")
@@ -85,7 +85,7 @@ func TestEditStateDirtyDetection(t *testing.T) {
 
 	// Changed extends from clean state.
 	se := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
-	se.extends = "base"
+	se.extends = config.Extends{"base"}
 	if !se.dirty() {
 		t.Fatal("changed extends should be dirty")
 	}
@@ -153,7 +153,7 @@ func TestParseMenuChoice(t *testing.T) {
 		t.Fatalf("action choice: kind=%q key=%q", kind, key)
 	}
 	// An override row's Value is the bare key, so it classifies as "own".
-	overrideState := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine"}}, nil, false)
+	overrideState := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine"}}, nil, false)
 	if kind, key := parseMenuChoice("SHADOW", overrideState); kind != "own" || key != "SHADOW" {
 		t.Fatalf("override choice: kind=%q key=%q", kind, key)
 	}
@@ -169,7 +169,7 @@ func TestInheritedForStateReflectsWorkingExtends(t *testing.T) {
 		t.Fatalf("expected no inherited before extends set, got %+v", got)
 	}
 	// User picks "extends base" inside the editor without committing.
-	s.extends = "base"
+	s.extends = config.Extends{"base"}
 	got := inheritedForState(cfg, s)
 	if len(got) != 1 || got[0].Key != "FROM_BASE" {
 		t.Fatalf("expected FROM_BASE inherited after extends change, got %+v", got)
@@ -181,7 +181,7 @@ func TestInheritedForStateReexposesDeletedShadow(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"OWN": "from-base"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: "base", Env: map[string]string{"OWN": "mine"}}, nil, false)
+	s := newEditState("a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "mine"}}, nil, false)
 	if got := inheritedForState(cfg, s); len(got) != 0 {
 		t.Fatalf("expected no inherited while own shadows, got %+v", got)
 	}
@@ -194,11 +194,11 @@ func TestInheritedForStateReexposesDeletedShadow(t *testing.T) {
 
 func TestInheritedForStateEmptyOnCycle(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
-		"a": {Extends: "b"},
-		"b": {Extends: "a", Env: map[string]string{"K": "v"}},
+		"a": {Extends: config.Extends{"b"}},
+		"b": {Extends: config.Extends{"a"}, Env: map[string]string{"K": "v"}},
 	}}
 	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
-	s.extends = "b" // would cycle
+	s.extends = config.Extends{"b"} // would cycle
 	if got := inheritedForState(cfg, s); got != nil {
 		t.Fatalf("expected nil inherited on pending cycle, got %+v", got)
 	}
@@ -207,11 +207,11 @@ func TestInheritedForStateEmptyOnCycle(t *testing.T) {
 func TestCommitValidateCycleRejected(t *testing.T) {
 	// a -> b -> a is a cycle.
 	cfg := config.Config{Profiles: map[string]config.Profile{
-		"a": {Extends: "b"},
-		"b": {Extends: "a"},
+		"a": {Extends: config.Extends{"b"}},
+		"b": {Extends: config.Extends{"a"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: "b", Env: map[string]string{"K": "v"}}, nil, false)
-	s.extends = "b" // a extending b, where b extends a
+	s := newEditState("a", config.Profile{Extends: config.Extends{"b"}, Env: map[string]string{"K": "v"}}, nil, false)
+	s.extends = config.Extends{"b"} // a extending b, where b extends a
 	if err := commitValidate(cfg, s); err == nil {
 		t.Fatal("cycle not rejected")
 	}
@@ -222,7 +222,7 @@ func TestCommitValidateValidExtends(t *testing.T) {
 		"base": {Env: map[string]string{"K": "v"}},
 		"a":    {Env: map[string]string{"K2": "v2"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: "base", Env: map[string]string{"K2": "v2"}}, nil, false)
+	s := newEditState("a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"K2": "v2"}}, nil, false)
 	if err := commitValidate(cfg, s); err != nil {
 		t.Fatalf("valid extends rejected: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestMenuOptionsMarksOverrides(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
 	// Integration reality: SHADOW is an override, so inheritedForState excludes it.
 	if got := inheritedForState(cfg, s); len(got) != 0 {
 		t.Fatalf("shadowed key leaked into inherited set: %+v", got)
@@ -300,10 +300,10 @@ func TestProbeConfigCarriesWorkingExtendsAndEnv(t *testing.T) {
 		"base": {Env: map[string]string{"FROM_BASE": "b"}},
 	}}
 	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
-	s.extends = "base" // changed in-session, not yet committed
+	s.extends = config.Extends{"base"} // changed in-session, not yet committed
 	probe := probeConfig(cfg, s)
 	tp := probe.Profiles["a"]
-	if tp.Extends != "base" {
+	if !tp.Extends.Has("base") {
 		t.Fatalf("probe extends = %q, want base", tp.Extends)
 	}
 	if tp.Env["OWN"] != "x" {
@@ -336,7 +336,7 @@ func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p", config.Profile{Extends: "base", Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
 	opts := deleteVarOptions(s, overrideKeySet(cfg, s))
 	find := func(val string) ui.Option {
 		for _, o := range opts {

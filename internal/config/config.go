@@ -14,7 +14,7 @@ import (
 
 // Profile is one named environment profile.
 type Profile struct {
-	Extends string            `yaml:"extends"`
+	Extends Extends           `yaml:"extends"`
 	Env     map[string]string `yaml:"env"`
 }
 
@@ -93,7 +93,7 @@ func Merge(base, override Config) Config {
 	}
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
-		if p.Extends != "" {
+		if len(p.Extends) > 0 {
 			bp.Extends = p.Extends
 		}
 		if bp.Env == nil {
@@ -126,34 +126,66 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	return cfg, nil
 }
 
-// ResolveProfile walks the `extends` chain (root applied first, child wins) and
-// returns the flattened env map plus the chain (name → … → root).
+// ResolveProfile resolves name's env by walking its extends graph: each parent
+// is resolved transitively and merged left-to-right (a later parent overrides
+// an earlier one on a shared key), then the profile's own env is applied last
+// (child wins). The returned chain is a self-first DFS pre-order (parents in
+// listed order, transitive, deduped) for display and comment provenance; for a
+// single parent it is identical to the legacy linear chain. A cycle, including
+// one spanning multiple parents, is reported as an error.
 func (c Config) ResolveProfile(name string) (env map[string]string, chain []string, err error) {
-	chain = []string{}
-	cur := name
-	seen := map[string]bool{}
-	for {
-		if seen[cur] {
-			return nil, chain, fmt.Errorf("extends cycle at %q", cur)
-		}
-		seen[cur] = true
-		p, ok := c.Profiles[cur]
-		if !ok {
-			return nil, chain, fmt.Errorf("profile %q not found", cur)
-		}
-		chain = append(chain, cur)
-		if p.Extends == "" {
-			break
-		}
-		cur = p.Extends
+	env, err = c.resolveEnv(name, map[string]bool{})
+	if err != nil {
+		return nil, nil, err
 	}
-	env = map[string]string{}
-	for i := len(chain) - 1; i >= 0; i-- {
-		for k, v := range c.Profiles[chain[i]].Env {
+	return env, c.chainOf(name, map[string]bool{}), nil
+}
+
+// resolveEnv returns the fully merged env for name: each parent is resolved
+// transitively and merged left-to-right, then name's own env is applied last
+// (child wins). The visiting set tracks the active path so a cycle (self,
+// mutual, or across multiple parents) is detected; a name is removed from
+// it on the way back up so a diamond is not mistaken for a cycle.
+func (c Config) resolveEnv(name string, visiting map[string]bool) (map[string]string, error) {
+	if visiting[name] {
+		return nil, fmt.Errorf("extends cycle at %q", name)
+	}
+	p, ok := c.Profiles[name]
+	if !ok {
+		return nil, fmt.Errorf("profile %q not found", name)
+	}
+	visiting[name] = true
+	env := map[string]string{}
+	for _, parent := range p.Extends {
+		pe, err := c.resolveEnv(parent, visiting)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range pe {
 			env[k] = v
 		}
 	}
-	return env, chain, nil
+	delete(visiting, name)
+	for k, v := range p.Env {
+		env[k] = v
+	}
+	return env, nil
+}
+
+// chainOf returns name's lineage as a self-first DFS pre-order: name, then each
+// parent (in listed order) and its lineage transitively, skipping names already
+// emitted. The caller must ensure the graph is acyclic — ResolveProfile checks
+// via resolveEnv before calling this.
+func (c Config) chainOf(name string, seen map[string]bool) []string {
+	if seen[name] {
+		return nil
+	}
+	seen[name] = true
+	out := []string{name}
+	for _, parent := range c.Profiles[name].Extends {
+		out = append(out, c.chainOf(parent, seen)...)
+	}
+	return out
 }
 
 // ResolveComments walks name's extends chain and returns, for each resolved env
@@ -287,7 +319,7 @@ func (c Config) ProfileNames() []string {
 func (c Config) ExtendedBy(name string) []string {
 	var out []string
 	for n, p := range c.Profiles {
-		if p.Extends == name {
+		if p.Extends.Has(name) {
 			out = append(out, n)
 		}
 	}

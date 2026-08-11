@@ -129,7 +129,7 @@ func TestImportExtendsCreate(t *testing.T) {
 		t.Errorf("create with --extends should report the extends change: %q", summary)
 	}
 	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
-	if prof.Extends != "base" {
+	if !prof.Extends.Has("base") {
 		t.Errorf("child.Extends = %q, want base", prof.Extends)
 	}
 	if prof.Env["OWN"] != "2" {
@@ -150,14 +150,14 @@ func TestImportExtendsMergePreserved(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"X": "1"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: "base", Env: map[string]string{"Y": "2"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"Y": "2"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runImport(bytes.NewReader([]byte("Z=3\n")), cfgPath, "p", false, false, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
-	if prof.Extends != "base" {
+	if !prof.Extends.Has("base") {
 		t.Errorf("merge without --extends should preserve base; got %q", prof.Extends)
 	}
 }
@@ -167,14 +167,14 @@ func TestImportExtendsReplacePreserved(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"X": "1"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: "base", Env: map[string]string{"OLD": "1"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OLD": "1"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
-	if prof.Extends != "base" {
+	if !prof.Extends.Has("base") {
 		t.Errorf("replace without --extends should preserve base; got %q", prof.Extends)
 	}
 	if _, ok := prof.Env["OLD"]; ok {
@@ -205,7 +205,7 @@ func TestImportEmptyWithExtendsOK(t *testing.T) {
 		t.Fatalf("empty import with --extends should succeed: %v", err)
 	}
 	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
-	if prof.Extends != "base" {
+	if !prof.Extends.Has("base") {
 		t.Errorf("child.Extends = %q, want base", prof.Extends)
 	}
 }
