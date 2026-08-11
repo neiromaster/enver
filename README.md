@@ -108,7 +108,38 @@ profiles:
 ```
 
 Merge rules: `default` is overridden when set; profiles union; per-profile env
-keys are overridden per-key; `extends` is taken from the closer layer when set.
+keys are overridden per-key; `extends` (the whole list, when non-empty) is taken
+from the closer layer.
+
+### Inheriting from multiple profiles
+
+A profile can extend several parents to compose mixins — small, single-purpose
+profiles combined into one:
+
+```yaml
+profiles:
+  proxy:        { env: { ANTHROPIC_BASE_URL: http://localhost:8082 } }
+  opus-models:  { env: { ANTHROPIC_MODEL: claude-opus-5 } }
+  dev:
+    extends: [proxy, opus-models]
+    env:
+      ANTHROPIC_API_KEY: sk-...
+```
+
+Precedence: parents are applied **left-to-right, so a later parent overrides an
+earlier one** on a shared key; the profile's own env overrides all parents;
+inheritance is transitive. The common single-parent form (`extends: anth`) is
+unchanged.
+
+A diamond where two parents both extend a shared grandparent, and one overrides
+a key the other only inherits, can let the later parent's inherited value win
+over an earlier parent's explicit override. This is consistent with the
+left-to-right rule and does not affect orthogonal mixins; `enver validate` does
+not warn on overlaps.
+
+**Authoring multiple parents:** `add` and `edit` select a single parent. Set
+several by editing the YAML (`extends: [a, b]`) or via
+`enver import <file> <name> --extends a,b`.
 
 ## Creating profiles interactively
 
