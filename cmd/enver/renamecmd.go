@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -18,7 +17,8 @@ var renameCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := app.Load(appOpts())
+		path := writeTarget()
+		targetCfg, err := config.LoadFile(path)
 		if err != nil {
 			return err
 		}
@@ -30,7 +30,7 @@ var renameCmd = &cobra.Command{
 			if err := requireInteractive("profile name"); err != nil {
 				return err
 			}
-			picked, err := pickProfile(cfg, "Profile to rename", "")
+			picked, err := pickProfile(targetCfg, "Profile to rename", "")
 			if err != nil || picked == "" {
 				return nil
 			}
@@ -53,11 +53,11 @@ var renameCmd = &cobra.Command{
 		if err := validateProfileName(newName); err != nil {
 			return err
 		}
-		if _, ok := cfg.Profiles[oldName]; !ok {
-			return fmt.Errorf("profile %q not found", oldName)
+		if _, ok := targetCfg.Profiles[oldName]; !ok {
+			return notFoundInTarget(oldName, path)
 		}
 		if newName != oldName {
-			if _, ok := cfg.Profiles[newName]; ok {
+			if _, ok := targetCfg.Profiles[newName]; ok {
 				return fmt.Errorf("profile %q already exists", newName)
 			}
 		}
@@ -65,7 +65,6 @@ var renameCmd = &cobra.Command{
 			fmt.Printf("%q is already named that; nothing to rename\n", newName)
 			return nil
 		}
-		path := config.GlobalPath(globalFlags.configPath)
 		if err := config.RenameProfile(path, oldName, newName); err != nil {
 			return err
 		}

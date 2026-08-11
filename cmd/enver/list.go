@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
-	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +25,7 @@ func doList(w io.Writer) error {
 	}
 	names := cfg.ProfileNames()
 	if len(names) == 0 {
-		_, err := fmt.Fprintf(w, "(no profiles defined)\n\nCreate one at: %s\n", config.GlobalPath(globalFlags.configPath))
+		_, err := fmt.Fprintf(w, "(no profiles defined)\n\nCreate one at: %s\n", writeTarget())
 		return err
 	}
 	type listRow struct {

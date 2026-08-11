@@ -42,7 +42,7 @@ var encryptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		path := config.GlobalPath(globalFlags.configPath)
+		path := writeTarget()
 		n, err := config.EncryptFile(path, key, profile, all)
 		if err != nil {
 			return err
@@ -68,7 +68,7 @@ var decryptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		path := config.GlobalPath(globalFlags.configPath)
+		path := writeTarget()
 		n, err := config.DecryptFile(path, key, profile)
 		if err != nil {
 			return err

@@ -389,7 +389,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					s.deleteKey(key)
 				}
 			case actionDeleteProfile:
-				if err := guardRemovable(cfg, name); err != nil {
+				if err := guardRemovable(cfg, targetCfg, name); err != nil {
 					fmt.Println(" ", err)
 					continue
 				}

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
 	"github.com/neiromaster/enver/internal/ui"
@@ -67,7 +66,7 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
-		summary, err := runImport(r, config.GlobalPath(globalFlags.configPath), name, importReplace, importForce, importExtends, ui.Confirm)
+		summary, err := runImport(r, writeTarget(), name, importReplace, importForce, importExtends, ui.Confirm)
 		if err != nil {
 			return err
 		}
@@ -109,7 +108,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		}
 	}
 
-	existing, err := app.Load(app.Options{ConfigPath: cfgPath, NoLocal: true})
+	existing, err := config.LoadFile(cfgPath)
 	if err != nil {
 		return "", err
 	}

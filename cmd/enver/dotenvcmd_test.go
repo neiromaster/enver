@@ -22,16 +22,19 @@ func writeTempConfig(t *testing.T, profile string, env map[string]string, commen
 	return path
 }
 
-// withGlobalConfig sets globalFlags to point at path with local layering off,
-// restoring the previous values on cleanup.
+// withGlobalConfig sets globalFlags to point at path with local layering off and
+// the write target on the global/config file, restoring previous values on
+// cleanup. Use for tests that set up a single config file as the global config.
 func withGlobalConfig(t *testing.T, path string) {
 	t.Helper()
-	savedConfig, savedNoLocal := globalFlags.configPath, globalFlags.noLocal
+	savedConfig, savedNoLocal, savedGlobal := globalFlags.configPath, globalFlags.noLocal, globalFlags.global
 	globalFlags.configPath = path
 	globalFlags.noLocal = true
+	globalFlags.global = true
 	t.Cleanup(func() {
 		globalFlags.configPath = savedConfig
 		globalFlags.noLocal = savedNoLocal
+		globalFlags.global = savedGlobal
 	})
 }
 

@@ -18,8 +18,16 @@ var defaultCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := config.GlobalPath(globalFlags.configPath)
+		path := writeTarget()
 		if defaultClear {
+			targetCfg, err := config.LoadFile(path)
+			if err != nil {
+				return err
+			}
+			if targetCfg.Default == "" {
+				fmt.Println("(no default set in this file)")
+				return nil
+			}
 			if err := config.ClearDefault(path); err != nil {
 				return err
 			}
@@ -41,8 +49,9 @@ var defaultCmd = &cobra.Command{
 		if err := validateProfileName(name); err != nil {
 			return err
 		}
-		if _, ok := cfg.Profiles[name]; !ok {
-			return fmt.Errorf("profile %q not found", name)
+		targetCfg, _ := config.LoadFile(path)
+		if _, ok := targetCfg.Profiles[name]; !ok {
+			return notFoundInTarget(name, path)
 		}
 		if err := config.SetDefault(path, name); err != nil {
 			return err

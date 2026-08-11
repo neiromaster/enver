@@ -20,7 +20,8 @@ var removeCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := app.Load(appOpts())
+		path := writeTarget()
+		targetCfg, err := config.LoadFile(path)
 		if err != nil {
 			return err
 		}
@@ -32,13 +33,20 @@ var removeCmd = &cobra.Command{
 			if err := requireInteractive("profile name"); err != nil {
 				return err
 			}
-			picked, err := pickProfile(cfg, "Profile to remove", "")
+			picked, err := pickProfile(targetCfg, "Profile to remove", "")
 			if err != nil || picked == "" {
 				return nil
 			}
 			name = picked
 		}
-		if err := guardRemovable(cfg, name); err != nil {
+		if _, ok := targetCfg.Profiles[name]; !ok {
+			return notFoundInTarget(name, path)
+		}
+		merged, err := app.Load(appOpts())
+		if err != nil {
+			return err
+		}
+		if err := guardRemovable(merged, targetCfg, name); err != nil {
 			return err
 		}
 		if !removeYes {
@@ -51,7 +59,6 @@ var removeCmd = &cobra.Command{
 				return nil
 			}
 		}
-		path := config.GlobalPath(globalFlags.configPath)
 		if err := config.DeleteProfile(path, name); err != nil {
 			return err
 		}
@@ -60,17 +67,18 @@ var removeCmd = &cobra.Command{
 	},
 }
 
-// guardRemovable refuses to delete a profile that other profiles extend or that is
-// the current default, naming the dependents.
-func guardRemovable(cfg config.Config, name string) error {
-	if _, ok := cfg.Profiles[name]; !ok {
-		return fmt.Errorf("profile %q not found", name)
-	}
+// guardRemovable refuses to delete a profile that other profiles extend or that
+// is the target file's default. ExtendedBy is checked against the merged config
+// (a local child can depend on a global parent); the default check is against
+// the target file, since that is the file being mutated. Existence is assumed —
+// callers check the target file first so DeleteProfile's missing-file no-op
+// cannot mask a wrong scope.
+func guardRemovable(merged, target config.Config, name string) error {
 	var blocks []string
-	if extendedBy := cfg.ExtendedBy(name); len(extendedBy) > 0 {
+	if extendedBy := merged.ExtendedBy(name); len(extendedBy) > 0 {
 		blocks = append(blocks, fmt.Sprintf("extended by %v", extendedBy))
 	}
-	if cfg.Default == name {
+	if target.Default == name {
 		blocks = append(blocks, "is the default profile")
 	}
 	if len(blocks) > 0 {
