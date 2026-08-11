@@ -327,3 +327,29 @@ func TestImportReplaceForceSkipsConfirm(t *testing.T) {
 		t.Error("--force should still remove OLD")
 	}
 }
+
+func TestImportExtendsList(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(cfgPath, "a", config.Profile{Env: map[string]string{"K": "1"}}, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertProfile(cfgPath, "b", config.Profile{Env: map[string]string{"K": "2"}}, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	envBytes := []byte("X=y\n")
+	summary, err := runImport(bytes.NewReader(envBytes), cfgPath, "p", false, false, "a,b", nil)
+	if err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ a, b") {
+		t.Errorf("create with --extends a,b should report multi-parent extends: %q", summary)
+	}
+	prof, _, _, ok, err := config.ReadProfile(cfgPath, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile p: ok=%v err=%v", ok, err)
+	}
+	if !prof.Extends.Has("a") || !prof.Extends.Has("b") || len(prof.Extends) != 2 {
+		t.Fatalf("p.Extends = %v, want [a b]", prof.Extends)
+	}
+}

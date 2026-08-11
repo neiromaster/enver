@@ -85,7 +85,7 @@ var importCmd = &cobra.Command{
 func init() {
 	importCmd.Flags().BoolVar(&importReplace, "replace", false, "wipe the profile's own env before importing")
 	importCmd.Flags().BoolVar(&importForce, "force", false, "skip the --replace removal confirmation")
-	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends")
+	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends (comma-separated for multiple)")
 }
 
 // runImport parses .env data from r into profile name at cfgPath. Imported keys
@@ -119,10 +119,16 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 
 	extendsToWrite := config.Extends(nil)
 	if extendsFlag != "" {
-		if _, ok := existing.Profiles[extendsFlag]; !ok {
-			return "", fmt.Errorf("extends profile %q does not exist", extendsFlag)
+		for _, raw := range strings.Split(extendsFlag, ",") {
+			p := strings.TrimSpace(raw)
+			if p == "" {
+				continue
+			}
+			if _, ok := existing.Profiles[p]; !ok {
+				return "", fmt.Errorf("extends profile %q does not exist", p)
+			}
+			extendsToWrite = append(extendsToWrite, p)
 		}
-		extendsToWrite = config.Extends{extendsFlag}
 	} else if exists {
 		extendsToWrite = existingProf.Extends
 	}
