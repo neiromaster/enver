@@ -278,7 +278,7 @@ default key file. A profile with no encrypted values runs without any key.
 enverx [profile] -- <command> [args...]   Run command with the profile's env (dedicated runner)
 enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the detached form)
 enver show [profile] [--no-mask]          Preview resolved env (masked by default)
-enver export [profile]                    Print `export K=V` (unmasked, for eval)
+enver export [profile] [--format bash|powershell]  Print `export K=V` (unmasked, for eval)
 enver dotenv [profile] [-o file]          Export a profile to a .env file (with comments)
 enver import <file> [profile] [--replace] Import a .env file into a profile (--extends, --force)
 enver list                                List profiles
@@ -319,7 +319,8 @@ explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
 case-insensitive) are masked in `enver show` output (use `--no-mask` to reveal).
 `enver export` is always unmasked so `eval "$(enver export <profile>)"` applies to
-the current shell.
+the current shell. `--format powershell` emits `$env:K = 'V'` for PowerShell
+(`enver export <profile> --format powershell | iex`); `bash` is the default.
 
 ## How it works
 
@@ -328,7 +329,9 @@ the current shell.
    detection — root applied first, child overrides parent.
 3. For `enver x` / `enverx`: child env = current `os.Environ()` ⊕ profile env,
    then `exec` the command with stdin/out/err connected and the child's exit code
-   propagated.
+   propagated. On a terminal, enver first primes the tab title (VS Code agent
+   mode + profile name) so the child's own title shows live. Windows has no
+   `exec`, so there the child is spawned and waited on instead.
 
 No file under `~/.claude/` or elsewhere is modified.
 
