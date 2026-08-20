@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-	"syscall"
 
 	"golang.org/x/term"
 )
@@ -50,11 +49,7 @@ func Run(cmdArgs []string, env []string, name, profile string) int {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		_, _ = os.Stdout.WriteString(launchTitleOSC(profile))
 	}
-	if err := syscall.Exec(path, append([]string{cmdArgs[0]}, cmdArgs[1:]...), env); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-		return 1
-	}
-	return 0
+	return execChild(path, cmdArgs, env, name)
 }
 
 // launchTitleOSC primes the terminal title before exec: the first OSC 0 locks
