@@ -55,9 +55,17 @@ func TestRunMissingCommandReturns127(t *testing.T) {
 	if _, err := exec.LookPath(missing); err == nil {
 		t.Fatalf("precondition failed: %q unexpectedly resolves on PATH", missing)
 	}
-	code := Run([]string{missing}, MergedEnv(nil), "enverx")
+	code := Run([]string{missing}, MergedEnv(nil), "enverx", "p")
 	if code != 127 {
 		t.Fatalf("expected exit code 127 for missing command, got %d", code)
+	}
+}
+
+func TestLaunchTitleOSC(t *testing.T) {
+	got := launchTitleOSC("anth")
+	want := "\x1b]0;claude code\x07\x1b]0;anth\x07"
+	if got != want {
+		t.Fatalf("launchTitleOSC = %q, want %q", got, want)
 	}
 }
 

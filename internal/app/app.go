@@ -82,7 +82,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, runner.MergedEnv(env), opts.Name); code != 0 {
+	if code := runner.Run(cmdArgs, runner.MergedEnv(env), opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil

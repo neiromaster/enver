@@ -7,6 +7,9 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"syscall"
+
+	"golang.org/x/term"
 )
 
 // MergedEnv starts from the current environment and overlays the profile vars,
@@ -36,24 +39,27 @@ func MergedEnv(profileEnv map[string]string) []string {
 
 // Run execs cmdArgs with the given environment, wiring stdio through. name is
 // the invocation label ("enver x" or "enverx") used to prefix stderr messages.
-// It returns the child's exit code (127 if the command is not found).
-func Run(cmdArgs []string, env []string, name string) int {
+// profile is shown in the terminal title until the child sends its own. It
+// returns the child's exit code (127 if the command is not found).
+func Run(cmdArgs []string, env []string, name, profile string) int {
 	path, err := exec.LookPath(cmdArgs[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
 		return 127
 	}
-	cmd := exec.Command(path, cmdArgs[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
-		}
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		_, _ = os.Stdout.WriteString(launchTitleOSC(profile))
+	}
+	if err := syscall.Exec(path, append([]string{cmdArgs[0]}, cmdArgs[1:]...), env); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 		return 1
 	}
 	return 0
+}
+
+// launchTitleOSC primes the terminal title before exec: the first OSC 0 locks
+// VS Code's agent mode (matched by /claude\s*code/i), the second shows the
+// profile name until the child overwrites it with its own titles.
+func launchTitleOSC(profile string) string {
+	return "\x1b]0;claude code\x07\x1b]0;" + profile + "\x07"
 }
