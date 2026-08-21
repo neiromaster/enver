@@ -1,10 +1,14 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"golang.org/x/term"
 )
 
 type inputModel struct {
@@ -61,4 +65,22 @@ func Input(title string) (string, error) {
 		return "", err
 	}
 	return out.(*inputModel).result(), nil
+}
+
+// Password reads a hidden passphrase from the terminal. The prompt goes to
+// stderr so it never pollutes piped stdout. Returns ErrCanceled on empty input.
+func Password(prompt string) (string, error) {
+	if !Interactive() {
+		return "", errors.New("interactive prompt requires a terminal")
+	}
+	fmt.Fprint(os.Stderr, prompt+" ")
+	pass, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	if len(pass) == 0 {
+		return "", ErrCanceled
+	}
+	return string(pass), nil
 }

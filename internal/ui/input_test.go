@@ -32,3 +32,13 @@ func TestInputCancel(t *testing.T) {
 		t.Fatal("esc did not cancel")
 	}
 }
+
+func TestPasswordNonInteractive(t *testing.T) {
+	prev := Interactive
+	Interactive = func() bool { return false }
+	t.Cleanup(func() { Interactive = prev })
+
+	if _, err := Password("Enter passphrase:"); err == nil {
+		t.Fatal("Password must error when stdin is not a terminal")
+	}
+}
