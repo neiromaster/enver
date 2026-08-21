@@ -203,6 +203,26 @@ func TestEncryptV1BackwardCompat(t *testing.T) {
 	}
 }
 
+func TestEncryptNilElementIsV1(t *testing.T) {
+	key := make([]byte, keySize)
+	// A nil salt forwarded through a variadic parameter arrives as a single nil
+	// element; it must mean "no salt" (v1), not a v2 value with no salt.
+	enc, err := EncryptValue("secret", key, nil)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if !strings.HasPrefix(enc, prefixV1) {
+		t.Fatalf("encrypted value = %q, want enc:v1: prefix", enc)
+	}
+	plain, err := DecryptValue(enc, key)
+	if err != nil {
+		t.Fatalf("decrypt v1: %v", err)
+	}
+	if plain != "secret" {
+		t.Fatalf("plain = %q, want secret", plain)
+	}
+}
+
 func TestSaltFromValue(t *testing.T) {
 	salt := []byte("0123456789abcdef")
 	key := make([]byte, keySize)

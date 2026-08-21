@@ -118,7 +118,7 @@ func EncryptValue(plain string, key []byte, salt ...[]byte) (string, error) {
 		return "", err
 	}
 	sealed := gcm.Seal(nil, nonce, []byte(plain), nil)
-	if len(salt) == 0 {
+	if len(salt) == 0 || salt[0] == nil {
 		payload := make([]byte, 0, len(nonce)+len(sealed))
 		payload = append(payload, nonce...)
 		payload = append(payload, sealed...)
