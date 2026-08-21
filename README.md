@@ -40,10 +40,9 @@ brew install enver
 ```
 
 The `enver` cask installs **both** the `enver` and `enverx` binaries and wires
-up `enver` shell completions (bash, zsh, fish) automatically. On macOS the cask
-also strips Gatekeeper quarantine, so the binaries run without a manual
-"Allow Anyway" step. For `enverx` completions, generate them manually, e.g.
-`enverx completion bash > $(brew --prefix)/etc/bash_completion.d/enverx`.
+up shell completions for both (bash, zsh, fish) automatically. On macOS the
+cask also strips Gatekeeper quarantine, so the binaries run without a manual
+"Allow Anyway" step.
 
 **Go** (anywhere with a Go toolchain):
 
@@ -179,6 +178,11 @@ both local and global profiles; under `--global` it lists global profiles only
 (a global profile must not extend a local one, which would break outside this
 directory).
 
+Profile completion follows the same split: read commands (`show`, `export`,
+`dotenv`, `x`) complete against both layers, while mutating commands complete
+only the profiles they can write — the local file, or the global file under
+`--global`.
+
 ## Editing profiles
 
 `enver edit` opens a profile in an interactive menu where the profile's own
@@ -194,8 +198,9 @@ the menu:
   choice that would form an `extends` cycle is rejected when you commit.
 - **Toggle default** — set or clear this profile as the default.
 - **Delete variable** — remove one or more of the profile's own variables.
-- **Delete profile** — remove the whole profile. This is guarded: it is refused
-  while other profiles extend it or it is the default (see `remove`).
+- **Delete profile** — remove the whole profile. It is refused while other
+  profiles extend it; if the profile is the default, the default is cleared
+  along with it (see `remove`).
 
 Cancelling exits without writing. A profile must keep at least one variable or
 an `extends`, so **Done** is rejected on an empty profile.
@@ -203,8 +208,9 @@ an `extends`, so **Done** is rejected on an empty profile.
 ## Managing profiles
 
 - **`enver remove [profile]`** — delete a profile. Refused while other profiles
-  extend it or while it is the default (the error names the dependents); repoint
-  or remove those first. Pass `--yes` / `-y` to skip the confirmation prompt.
+  extend it (the error names the dependents); repoint or remove those first. If
+  the profile is the default, the default is cleared with it. Pass `--yes` / `-y`
+  to skip the confirmation prompt.
 - **`enver rename [old] [new]`** — rename a profile and rewrite every reference
   in the same file: any `extends: old` in other profiles and the top-level
   `default` if it matches. Refused if the new name already exists. (References
@@ -213,7 +219,9 @@ an `extends`, so **Done** is rejected on an empty profile.
 - **`enver duplicate <src> [new]`** — make a structural copy of a profile
   (extends, env, and comments). The copy is not made the default.
 - **`enver default [profile]`** — with no argument, print the current default;
-  with a name, set it; `--clear` removes the default.
+  with a name, set it; `--clear` removes the default. The effective default is
+  the local file's `default` when set, otherwise the global file's — a project
+  can pin its own default while keeping the user-level one as fallback.
 - **`enver validate`** — audit config health: dangling `extends` and `extends`
   cycles (errors), and profiles with no env and no extends (warnings). It also
   checks the global file in isolation and flags a global profile that extends a
