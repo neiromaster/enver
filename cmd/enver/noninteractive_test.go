@@ -115,6 +115,17 @@ func TestImportNonInteractiveWithProfileWorks(t *testing.T) {
 	}
 }
 
+func TestKeygenNonInteractiveErrors(t *testing.T) {
+	setNonInteractive(t)
+	prev := keygenRandom
+	keygenRandom = false
+	t.Cleanup(func() { keygenRandom = prev })
+
+	if err := keygenCmd.RunE(&cobra.Command{}, nil); err == nil || !strings.Contains(err.Error(), "terminal") {
+		t.Fatalf("expected terminal-required error, got: %v", err)
+	}
+}
+
 func TestRenameNonInteractiveMissingArgs(t *testing.T) {
 	setNonInteractive(t)
 	withGlobalConfig(t, writeTempConfig(t, "p", map[string]string{"A": "1"}, nil, false))

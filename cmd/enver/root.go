@@ -68,6 +68,9 @@ func init() {
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
+
+	app.Interactive = ui.Interactive
+	app.PromptPassphrase = ui.Password
 }
 
 func main() {
