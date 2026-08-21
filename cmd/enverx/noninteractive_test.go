@@ -1,0 +1,56 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/crypto"
+)
+
+// TestRunNonInteractiveNoKeyFailsLoudly pins the detached-runner recovery
+// behavior: with an encrypted (enc:v2) config and no key cache, enverx must fail
+// loudly instead of prompting or hanging. app.RecoverKey gates on app.Interactive
+// (copied from ui.Interactive at init), so pin that func var directly.
+func TestRunNonInteractiveNoKeyFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("ENVER_KEY", "")
+
+	salt := []byte("0123456789abcdef")
+	key, err := crypto.DeriveKey("hunter2", salt)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	cfgPath := filepath.Join(dir, "enver", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := fmt.Sprintf("profiles:\n  anth:\n    env:\n      API_KEY: %s\n", enc)
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return false }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+	// Safety net: if interactive were ever (incorrectly) true, fail before the
+	// runner can exec a child in the test process.
+	prevPrompt := app.PromptPassphrase
+	app.PromptPassphrase = func(string) (string, error) { return "", errors.New("should not prompt in non-interactive mode") }
+	t.Cleanup(func() { app.PromptPassphrase = prevPrompt })
+
+	rootCmd.SetArgs([]string{"--no-local", "anth", "--", "sh", "-c", "true"})
+	err = rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "no key found") {
+		t.Fatalf("expected no-key-found error, got: %v", err)
+	}
+}

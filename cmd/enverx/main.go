@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/ui"
 	"github.com/neiromaster/enver/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +40,9 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	app.Interactive = ui.Interactive
+	app.PromptPassphrase = ui.Password
+
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&flags.configPath, "config", "", "override the global config file")
 	pf.StringVar(&flags.keyPath, "key", "", "key file (or ENVER_KEY env)")
