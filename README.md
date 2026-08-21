@@ -165,7 +165,7 @@ profiles:
   glm:
     env:
       # get this token from https://vault.example/anth
-      ANTHROPIC_API_KEY: enc:v1:...
+      ANTHROPIC_API_KEY: enc:v2:...
 ```
 
 Env keys merge additively into an existing profile of the same name.
@@ -261,20 +261,39 @@ to a dotfiles repo. Only individual secret-looking values are encrypted — keys
 structure and non-secret values (base URLs, model names) stay plaintext.
 
 ```sh
-enver keygen                    # create ~/.config/enver/key (mode 0600)
+enver keygen                    # prompt for a passphrase, write the key cache (mode 0600)
+enver keygen --random           # non-interactive: write a raw random key instead (for CI)
 enver encrypt                   # encrypt secret-looking values in the config
 enver encrypt glm --all         # encrypt every value in the "glm" profile
 enver decrypt                   # restore plaintext (for editing)
 ```
 
-Encrypted values use the format `enc:v1:<base64(nonce||ciphertext||tag)>`
-(AES-256-GCM). Encryption is idempotent — re-running `encrypt` skips already
+`enver keygen` prompts for a passphrase twice and writes a key cache to
+`~/.config/enver/key` (JSON, mode `0600`). The same passphrase always derives
+the same key (argon2id; the salt comes from your encrypted values), so the key
+can be regenerated from memory on any machine. `enver keygen --random` keeps the
+legacy behavior of writing a raw random key, for CI and other non-interactive
+setups.
+
+New values are written as `enc:v2:<base64(salt||nonce||ciphertext)>` (AES-256-GCM
+with the 16-byte argon2id salt embedded). Legacy `enc:v1:<base64(nonce||ciphertext)>`
+values still decrypt, and are written when only a raw `--key`/`ENVER_KEY` key is
+available. Encryption is idempotent — re-running `encrypt` skips already
 encrypted values.
 
 At runtime `enverx <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
-order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), then the
-default key file. A profile with no encrypted values runs without any key.
+order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), the default
+key file, then an interactive passphrase prompt that derives, verifies, and
+caches the key. Where stdin is not a terminal the prompt is skipped and the
+command fails loudly instead of hanging. A profile with no encrypted values runs
+without any key.
+
+**Recovery on a new machine:** clone the encrypted config, then run
+`enver x <profile> -- <command>` (or `enver encrypt` / `enver decrypt`) and
+enter the passphrase when prompted — the key is derived from the salt embedded
+in your values, verified against them, and cached to `~/.config/enver/key`. From
+then on the standalone `enverx` runner works as usual.
 
 > Commit the encrypted config; never commit the key file. Encryption protects
 > against accidental leaks (git, dotfiles, casual disk access), not against an
@@ -297,7 +316,7 @@ enver rename [old] [new]                  Rename a profile (rewrites extends/def
 enver duplicate <src> [new]               Copy a profile (extends, env, comments)
 enver default [profile] [--clear]         Set, show, or clear the default profile
 enver validate                            Check config health
-enver keygen [--force]                    Generate the encryption key file
+enver keygen [--random] [--force]         Passphrase-derived key; --random for a raw key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
 enver --global / -g                       Write to the global config (default: ./.enver.yaml)
@@ -345,9 +364,10 @@ No file under `~/.claude/` or elsewhere is modified.
 
 ## Security
 
-- **Secrets at rest** — `enver encrypt` stores values as `enc:v1:` ciphertext
-  (AES-256-GCM) so the config is safe to commit. The key lives at
-  `~/.config/enver/key` (mode `0600`) — **never commit the key**.
+- **Secrets at rest** — `enver encrypt` stores values as `enc:v2:` ciphertext
+  (AES-256-GCM, argon2id salt embedded); legacy `enc:v1:` values still decrypt.
+  The key cache lives at `~/.config/enver/key` (mode `0600`) —
+  **never commit the key**.
 - **Preview masking** — `enver show` redacts `key|token|secret|password|auth|credential`
   values; use `--no-mask` or `enver export` to reveal them.
 - **Threat model** — encryption protects against accidental leaks (git,
