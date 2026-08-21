@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -46,7 +45,7 @@ var removeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := guardRemovable(merged, targetCfg, name); err != nil {
+		if err := guardRemovable(merged, name); err != nil {
 			return err
 		}
 		if !removeYes {
@@ -59,28 +58,27 @@ var removeCmd = &cobra.Command{
 				return nil
 			}
 		}
+		clearedDefault := targetCfg.Default == name
 		if err := config.DeleteProfile(path, name); err != nil {
 			return err
 		}
-		fmt.Printf("\n✓ removed profile %q\n", name)
+		if clearedDefault {
+			fmt.Printf("\n✓ removed profile %q (default cleared)\n", name)
+		} else {
+			fmt.Printf("\n✓ removed profile %q\n", name)
+		}
 		return nil
 	},
 }
 
 // guardRemovable blocks deletion when other profiles extend name (merged view —
-// a local child can depend on a global parent) or name is the target file's
-// default. Callers pre-check existence so DeleteProfile's missing-file no-op
-// cannot mask a wrong scope.
-func guardRemovable(merged, target config.Config, name string) error {
-	var blocks []string
+// a local child can depend on a global parent). Deleting the file's default is
+// allowed: DeleteProfile clears the default key along with the profile. Callers
+// pre-check existence so DeleteProfile's missing-file no-op cannot mask a wrong
+// scope.
+func guardRemovable(merged config.Config, name string) error {
 	if extendedBy := merged.ExtendedBy(name); len(extendedBy) > 0 {
-		blocks = append(blocks, fmt.Sprintf("extended by %v", extendedBy))
-	}
-	if target.Default == name {
-		blocks = append(blocks, "is the default profile")
-	}
-	if len(blocks) > 0 {
-		return fmt.Errorf("refusing to remove %q: %s; repoint or remove those first", name, strings.Join(blocks, "; "))
+		return fmt.Errorf("refusing to remove %q: extended by %v; repoint or remove those first", name, extendedBy)
 	}
 	return nil
 }

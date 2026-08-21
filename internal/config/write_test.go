@@ -122,3 +122,64 @@ func TestDeleteProfileMissingIsNoOp(t *testing.T) {
 		t.Fatalf("missing file should not error: %v", err)
 	}
 }
+
+// TestDeleteProfileClearsDefault: removing the profile that is the file's
+// default also clears the default key, leaving a valid no-default config.
+func TestDeleteProfileClearsDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	in := `default: anth
+profiles:
+  anth:
+    env:
+      K: v
+  glm:
+    env:
+      K2: v2
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProfile(path, "anth"); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if strings.Contains(s, "anth") {
+		t.Fatalf("profile not removed:\n%s", s)
+	}
+	if strings.Contains(s, "default") {
+		t.Fatalf("default key not cleared:\n%s", s)
+	}
+	if !strings.Contains(s, "glm") {
+		t.Fatalf("sibling profile lost:\n%s", s)
+	}
+}
+
+// TestDeleteProfilePreservesUnrelatedDefault: removing a non-default profile
+// leaves the default key pointing at another profile untouched.
+func TestDeleteProfilePreservesUnrelatedDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	in := `default: glm
+profiles:
+  anth:
+    env:
+      K: v
+  glm:
+    env:
+      K2: v2
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProfile(path, "anth"); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+	s := string(mustRead(t, path))
+	if strings.Contains(s, "anth") {
+		t.Fatalf("profile not removed:\n%s", s)
+	}
+	if !strings.Contains(s, "default: glm") {
+		t.Fatalf("unrelated default lost:\n%s", s)
+	}
+}

@@ -104,8 +104,9 @@ func writePath(path string, out []byte) error {
 }
 
 // DeleteProfile removes the named profile from the file. Missing file or profile
-// is a no-op (no error). It does not touch the default pointer — callers guard
-// against deleting the default.
+// is a no-op (no error). If the removed profile was the file's default, the
+// default key is cleared too — a dangling default is never valid, and a config
+// without a default is a legitimate state.
 func DeleteProfile(path, name string) error {
 	root, err := loadNode(path)
 	if err != nil {
@@ -120,6 +121,9 @@ func DeleteProfile(path, name string) error {
 		return nil
 	}
 	removeKey(pm, name)
+	if dv := findIndex(body, "default"); dv >= 0 && body.Content[dv].Value == name {
+		removeKey(body, "default")
+	}
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		return err
