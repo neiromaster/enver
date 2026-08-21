@@ -66,7 +66,7 @@ var keygenCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("✓ key cache written to %s (mode 0600)\n", path)
-		fmt.Println("Recovery: on a new machine, run `enver run` and enter your passphrase when prompted.")
+		fmt.Println("Recovery: on a new machine, run `enver x <profile> -- <command>` and enter your passphrase when prompted.")
 		return nil
 	},
 }
