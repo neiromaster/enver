@@ -9,11 +9,8 @@ build:
 	go build -o bin/$(BINARY) ./cmd/enver
 
 # Regenerate shell completion scripts into ./completions (needed before a local goreleaser run).
-completions: build
-	mkdir -p completions
-	./bin/$(BINARY) completion bash > completions/enver.bash
-	./bin/$(BINARY) completion zsh  > completions/enver.zsh
-	./bin/$(BINARY) completion fish > completions/enver.fish
+completions:
+	bash scripts/generate-completions.sh
 
 # Install into $GOBIN (usually on $PATH) — the canonical way to get enver.
 install:

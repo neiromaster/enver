@@ -22,12 +22,7 @@ jobs:
           cache: true
 
       - name: Generate shell completions
-        run: |
-          mkdir -p completions
-          go build -o /tmp/enver ./cmd/enver
-          /tmp/enver completion bash > completions/enver.bash
-          /tmp/enver completion zsh  > completions/enver.zsh
-          /tmp/enver completion fish > completions/enver.fish
+        run: bash scripts/generate-completions.sh
 
       - uses: goreleaser/goreleaser-action@v7
         with:
