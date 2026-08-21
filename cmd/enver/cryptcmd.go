@@ -79,7 +79,7 @@ var decryptCmd = &cobra.Command{
 }
 
 func requireKey() ([]byte, error) {
-	key, err := app.ResolveKey(appOpts())
+	key, _, err := app.ResolveKey(appOpts())
 	if err != nil {
 		return nil, err
 	}
