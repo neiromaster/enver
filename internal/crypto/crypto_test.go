@@ -1,6 +1,8 @@
 package crypto
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +73,9 @@ func TestIsEncrypted(t *testing.T) {
 	if !IsEncrypted("enc:v1:YWJjZA==") {
 		t.Fatal("enc:v1: value not reported as encrypted")
 	}
+	if !IsEncrypted("enc:v2:" + base64.StdEncoding.EncodeToString(make([]byte, 44))) {
+		t.Fatal("enc:v2: value must be recognized as encrypted")
+	}
 }
 
 func TestGenerateKeyRefusesOverwrite(t *testing.T) {
@@ -130,5 +135,152 @@ func TestDecodeKeyInvalid(t *testing.T) {
 	}
 	if _, err := DecodeKey("dG9v"); err == nil { // too short
 		t.Fatal("wrong-length key should error")
+	}
+}
+
+func TestDeriveKeyDeterministic(t *testing.T) {
+	salt := make([]byte, 16)
+	key1, err := DeriveKey("hunter2", salt)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	key2, err := DeriveKey("hunter2", salt)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	if !bytes.Equal(key1, key2) {
+		t.Fatal("same passphrase+salt must derive the same key")
+	}
+	otherSalt := make([]byte, 16)
+	otherSalt[0] = 1
+	key3, _ := DeriveKey("hunter2", otherSalt)
+	if bytes.Equal(key1, key3) {
+		t.Fatal("different salt must derive a different key")
+	}
+	key4, _ := DeriveKey("hunter3", salt)
+	if bytes.Equal(key1, key4) {
+		t.Fatal("different passphrase must derive a different key")
+	}
+	if len(key1) != keySize {
+		t.Fatalf("key length = %d, want %d", len(key1), keySize)
+	}
+}
+
+func TestEncryptV2RoundTrip(t *testing.T) {
+	salt := make([]byte, 16)
+	key := make([]byte, keySize)
+	enc, err := EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if !strings.HasPrefix(enc, prefixV2) {
+		t.Fatalf("encrypted value = %q, want enc:v2: prefix", enc)
+	}
+	plain, err := DecryptValue(enc, key)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if plain != "secret" {
+		t.Fatalf("plain = %q, want secret", plain)
+	}
+}
+
+func TestEncryptV1BackwardCompat(t *testing.T) {
+	key := make([]byte, keySize)
+	enc, err := EncryptValue("secret", key) // no salt → v1
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if !strings.HasPrefix(enc, prefixV1) {
+		t.Fatalf("encrypted value = %q, want enc:v1: prefix", enc)
+	}
+	plain, err := DecryptValue(enc, key)
+	if err != nil {
+		t.Fatalf("decrypt v1: %v", err)
+	}
+	if plain != "secret" {
+		t.Fatalf("plain = %q, want secret", plain)
+	}
+}
+
+func TestSaltFromValue(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	key := make([]byte, keySize)
+	enc, err := EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	got, err := SaltFromValue(enc)
+	if err != nil {
+		t.Fatalf("salt from value: %v", err)
+	}
+	if !bytes.Equal(got, salt) {
+		t.Fatalf("salt = %x, want %x", got, salt)
+	}
+	if _, err := SaltFromValue("enc:v1:AAAA"); err == nil {
+		t.Fatal("SaltFromValue on a v1 value must error")
+	}
+	if _, err := SaltFromValue("plain"); err == nil {
+		t.Fatal("SaltFromValue on plaintext must error")
+	}
+}
+
+func TestKeyCacheRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "key")
+	salt := []byte("0123456789abcdef")
+	key := make([]byte, keySize)
+	c := NewKeyCache(salt, key)
+	if err := WriteKeyCache(path, c); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+	got, err := LoadKeyCache(path)
+	if err != nil {
+		t.Fatalf("load cache: %v", err)
+	}
+	if !bytes.Equal(got.Salt, salt) || !bytes.Equal(got.Key, key) {
+		t.Fatalf("cache round-trip mismatch: %+v", got)
+	}
+	if got.KDF != "argon2id" || got.Time != 3 || got.Memory != 64*1024 || got.Threads != 4 {
+		t.Fatalf("cache params mismatch: %+v", got)
+	}
+}
+
+func TestLoadKeyAutoDetect(t *testing.T) {
+	dir := t.TempDir()
+	key := make([]byte, keySize)
+	// Raw legacy key file.
+	rawPath := filepath.Join(dir, "raw")
+	if err := os.WriteFile(rawPath, []byte(base64.StdEncoding.EncodeToString(key)), 0o600); err != nil {
+		t.Fatalf("write raw: %v", err)
+	}
+	got, err := LoadKey(rawPath)
+	if err != nil {
+		t.Fatalf("load raw: %v", err)
+	}
+	if !bytes.Equal(got, key) {
+		t.Fatal("raw key mismatch")
+	}
+	// JSON cache file.
+	cachePath := filepath.Join(dir, "cache")
+	salt := []byte("0123456789abcdef")
+	if err := WriteKeyCache(cachePath, NewKeyCache(salt, key)); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+	got, err = LoadKey(cachePath)
+	if err != nil {
+		t.Fatalf("load cache: %v", err)
+	}
+	if !bytes.Equal(got, key) {
+		t.Fatal("cache key mismatch")
+	}
+	// LoadKeyWithSalt returns the salt only for the cache.
+	_, saltGot, err := LoadKeyWithSalt(rawPath)
+	if err != nil || saltGot != nil {
+		t.Fatalf("raw salt = %x err=%v, want nil", saltGot, err)
+	}
+	_, saltGot, err = LoadKeyWithSalt(cachePath)
+	if err != nil || !bytes.Equal(saltGot, salt) {
+		t.Fatalf("cache salt = %x err=%v, want %x", saltGot, err, salt)
 	}
 }
