@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,6 +163,113 @@ func TestProfileOrDefault(t *testing.T) {
 	}
 	if p, err := ProfileOrDefault("prod", "dev"); err != nil || p != "prod" {
 		t.Fatalf("explicit profile should win over default: p=%q err=%v", p, err)
+	}
+}
+
+func TestResolveKeyFromCache(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "key")
+	salt := []byte("0123456789abcdef")
+	key := make([]byte, 32)
+	if err := crypto.WriteKeyCache(cachePath, crypto.NewKeyCache(salt, key)); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+	got, gotSalt, err := ResolveKey(Options{KeyPath: cachePath})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !bytes.Equal(got, key) || !bytes.Equal(gotSalt, salt) {
+		t.Fatalf("key=%x salt=%x, want %x/%x", got, gotSalt, key, salt)
+	}
+}
+
+func TestResolveRecovery(t *testing.T) {
+	dir := t.TempDir()
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "key") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+	t.Setenv("ENVER_KEY", "")
+
+	salt := []byte("0123456789abcdef")
+	pass := "hunter2"
+	key, err := crypto.DeriveKey(pass, salt)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"e": {Env: map[string]string{"API_KEY": enc}},
+	}}
+	oldPrompt := PromptPassphrase
+	oldInteractive := Interactive
+	PromptPassphrase = func(prompt string) (string, error) { return pass, nil }
+	Interactive = func() bool { return true }
+	t.Cleanup(func() {
+		PromptPassphrase = oldPrompt
+		Interactive = oldInteractive
+	})
+
+	env, _, err := Resolve(cfg, "e", Options{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if env["API_KEY"] != "secret" {
+		t.Fatalf("decrypted = %q, want secret", env["API_KEY"])
+	}
+	if _, err := os.Stat(crypto.KeyFilePath()); err != nil {
+		t.Fatalf("cache not written: %v", err)
+	}
+}
+
+func TestResolveRecoveryWrongPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "key") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+	t.Setenv("ENVER_KEY", "")
+
+	salt := []byte("0123456789abcdef")
+	key, _ := crypto.DeriveKey("right", salt)
+	enc, _ := crypto.EncryptValue("secret", key, salt)
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"e": {Env: map[string]string{"API_KEY": enc}},
+	}}
+	oldPrompt := PromptPassphrase
+	oldInteractive := Interactive
+	PromptPassphrase = func(prompt string) (string, error) { return "wrong", nil }
+	Interactive = func() bool { return true }
+	t.Cleanup(func() {
+		PromptPassphrase = oldPrompt
+		Interactive = oldInteractive
+	})
+
+	if _, _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
+		t.Fatalf("expected wrong-passphrase error, got: %v", err)
+	}
+}
+
+func TestResolveRecoveryNonInteractive(t *testing.T) {
+	dir := t.TempDir()
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "key") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+	t.Setenv("ENVER_KEY", "")
+
+	salt := []byte("0123456789abcdef")
+	key, _ := crypto.DeriveKey("hunter2", salt)
+	enc, _ := crypto.EncryptValue("secret", key, salt)
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"e": {Env: map[string]string{"API_KEY": enc}},
+	}}
+	oldInteractive := Interactive
+	Interactive = func() bool { return false }
+	t.Cleanup(func() { Interactive = oldInteractive })
+
+	if _, _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
+		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
 }
 

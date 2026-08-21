@@ -22,6 +22,14 @@ type Options struct {
 	Name       string // invocation label ("enverx" / "enver x") for error messages
 }
 
+// Interactive reports whether stdin is a terminal. Injected by the CLI layer
+// (cmd/enver sets it to ui.Interactive) so this package stays free of ui.
+var Interactive = func() bool { return false }
+
+// PromptPassphrase reads a hidden passphrase. Injected by the CLI layer
+// (cmd/enver sets it to ui.Password).
+var PromptPassphrase func(prompt string) (string, error)
+
 // Load resolves the global config plus any local .enver.yaml layers.
 func Load(opts Options) (config.Config, error) {
 	return config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
@@ -40,12 +48,19 @@ func Resolve(cfg config.Config, profile string, opts Options) (map[string]string
 		}
 		return env, chain, nil
 	}
-	key, err := ResolveKey(opts)
+	key, _, err := ResolveKey(opts)
 	if err != nil {
 		return nil, chain, err
 	}
 	if key == nil {
-		return nil, chain, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
+		salt, sample := firstSaltAndSample(env)
+		if salt == nil {
+			return nil, chain, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
+		}
+		key, err = RecoverKey(salt, sample)
+		if err != nil {
+			return nil, chain, err
+		}
 	}
 	for k, v := range env {
 		if crypto.IsEncrypted(v) {
@@ -120,19 +135,47 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 }
 
 // ResolveKey resolves the decryption key from --key, the ENVER_KEY env var, or
-// the default key file. It returns (nil, nil) when no key is available; callers
-// decide whether that is an error.
-func ResolveKey(opts Options) ([]byte, error) {
+// the default key file. It returns (nil, nil, nil) when no key is available;
+// callers decide whether that is an error. salt is non-nil only when the key
+// came from a passphrase cache (used to embed in new enc:v2: values).
+func ResolveKey(opts Options) (key, salt []byte, err error) {
 	if opts.KeyPath != "" {
-		return crypto.LoadKey(opts.KeyPath)
+		return crypto.LoadKeyWithSalt(opts.KeyPath)
 	}
 	if v := os.Getenv("ENVER_KEY"); v != "" {
-		return crypto.DecodeKey(v)
+		k, err := crypto.DecodeKey(v)
+		return k, nil, err
 	}
 	if path := crypto.KeyFilePath(); fileExists(path) {
-		return crypto.LoadKey(path)
+		return crypto.LoadKeyWithSalt(path)
 	}
-	return nil, nil
+	return nil, nil, nil
+}
+
+// RecoverKey prompts for a passphrase, derives the key from salt, verifies it
+// by decrypting sample, and writes the key cache. Returns the derived key.
+func RecoverKey(salt []byte, sample string) ([]byte, error) {
+	if !Interactive() {
+		return nil, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
+	}
+	if PromptPassphrase == nil {
+		return nil, fmt.Errorf("passphrase recovery is not configured")
+	}
+	pass, err := PromptPassphrase("Enter passphrase:")
+	if err != nil {
+		return nil, err
+	}
+	key, err := crypto.DeriveKey(pass, salt)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := crypto.DecryptValue(sample, key); err != nil {
+		return nil, fmt.Errorf("wrong passphrase")
+	}
+	if err := crypto.WriteKeyCache(crypto.KeyFilePath(), crypto.NewKeyCache(salt, key)); err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 // MatchingProfiles returns profile names beginning with toComplete, for shell
@@ -180,4 +223,15 @@ func osEnvMap() map[string]string {
 		}
 	}
 	return m
+}
+
+// firstSaltAndSample returns the salt and full value of the first enc:v2: value
+// in env, or (nil, "") when there is none.
+func firstSaltAndSample(env map[string]string) ([]byte, string) {
+	for _, v := range env {
+		if s, err := crypto.SaltFromValue(v); err == nil {
+			return s, v
+		}
+	}
+	return nil, ""
 }
