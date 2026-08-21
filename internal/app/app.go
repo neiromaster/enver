@@ -36,7 +36,8 @@ func Load(opts Options) (config.Config, error) {
 }
 
 // Resolve walks the profile's extends chain and transparently decrypts any
-// enc:v1: values. A key is required only when encrypted values are present.
+// enc:v1: or enc:v2: values. A key is required only when encrypted values are
+// present.
 func Resolve(cfg config.Config, profile string, opts Options) (map[string]string, []string, error) {
 	env, chain, err := cfg.ResolveProfile(profile)
 	if err != nil {

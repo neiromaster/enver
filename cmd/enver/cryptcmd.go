@@ -53,7 +53,7 @@ var keygenCmd = &cobra.Command{
 			return err
 		}
 		if salt == nil {
-			salt = make([]byte, 16)
+			salt = make([]byte, crypto.SaltSize)
 			if _, err := rand.Read(salt); err != nil {
 				return err
 			}

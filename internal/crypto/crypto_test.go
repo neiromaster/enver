@@ -3,6 +3,7 @@ package crypto
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,6 +244,76 @@ func TestSaltFromValue(t *testing.T) {
 	if _, err := SaltFromValue("plain"); err == nil {
 		t.Fatal("SaltFromValue on plaintext must error")
 	}
+}
+
+func TestEncryptValueRejectsBadSaltLength(t *testing.T) {
+	key := make([]byte, keySize)
+	badSalts := [][]byte{
+		make([]byte, 20), // too long
+		{},               // non-nil but empty
+	}
+	for _, salt := range badSalts {
+		if _, err := EncryptValue("secret", key, salt); err == nil {
+			t.Fatalf("EncryptValue with %d-byte salt must error", len(salt))
+		}
+	}
+}
+
+func TestKeyCacheRejectsInvalid(t *testing.T) {
+	valid := NewKeyCache([]byte("0123456789abcdef"), make([]byte, keySize))
+	wrongKey := valid
+	wrongKey.Key = make([]byte, 16)
+	wrongSalt := valid
+	wrongSalt.Salt = make([]byte, 8)
+
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"empty JSON object", []byte("{}")},
+		{"truncated JSON", []byte(`{"v":1`)},
+		{"wrong-length key", mustMarshalJSON(t, wrongKey)},
+		{"wrong-length salt", mustMarshalJSON(t, wrongSalt)},
+	}
+	for _, tc := range cases {
+		t.Run("parse "+tc.name, func(t *testing.T) {
+			if _, err := parseKeyCache(tc.data); err == nil {
+				t.Fatal("parseKeyCache accepted invalid cache data")
+			}
+		})
+		t.Run("load "+tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "key")
+			if err := os.WriteFile(path, tc.data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			key, salt, err := LoadKeyWithSalt(path)
+			if err == nil {
+				t.Fatalf("LoadKeyWithSalt returned (%d-byte key, %d-byte salt, nil), want an error", len(key), len(salt))
+			}
+		})
+	}
+
+	// A well-formed cache must still load.
+	path := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(path, mustMarshalJSON(t, valid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, salt, err := LoadKeyWithSalt(path)
+	if err != nil {
+		t.Fatalf("valid cache: %v", err)
+	}
+	if !bytes.Equal(key, valid.Key) || !bytes.Equal(salt, valid.Salt) {
+		t.Fatal("valid cache round-trip mismatch")
+	}
+}
+
+func mustMarshalJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestKeyCacheRoundTrip(t *testing.T) {

@@ -30,6 +30,9 @@ const (
 	saltSize   = 16
 )
 
+// SaltSize is the length of the argon2id salt in bytes.
+const SaltSize = saltSize
+
 // KeyFilePath is the default location for the enver key file. A var so tests
 // can redirect it.
 var KeyFilePath = func() string {
@@ -123,6 +126,9 @@ func EncryptValue(plain string, key []byte, salt ...[]byte) (string, error) {
 		payload = append(payload, nonce...)
 		payload = append(payload, sealed...)
 		return prefixV1 + base64.StdEncoding.EncodeToString(payload), nil
+	}
+	if len(salt[0]) != saltSize {
+		return "", fmt.Errorf("salt must be %d bytes, got %d", saltSize, len(salt[0]))
 	}
 	payload := make([]byte, 0, len(salt[0])+len(nonce)+len(sealed))
 	payload = append(payload, salt[0]...)
@@ -244,6 +250,12 @@ func parseKeyCache(data []byte) (KeyCache, error) {
 	var c KeyCache
 	if err := json.Unmarshal(data, &c); err != nil {
 		return KeyCache{}, fmt.Errorf("invalid key cache: %w", err)
+	}
+	if len(c.Key) != keySize {
+		return KeyCache{}, fmt.Errorf("invalid key cache: key length %d, want %d", len(c.Key), keySize)
+	}
+	if len(c.Salt) != saltSize {
+		return KeyCache{}, fmt.Errorf("invalid key cache: salt length %d, want %d", len(c.Salt), saltSize)
 	}
 	return c, nil
 }
