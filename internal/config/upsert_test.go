@@ -87,7 +87,8 @@ profiles:
 		key[i] = byte(i)
 	}
 
-	n, err := EncryptFile(path, key, "", false)
+	salt := []byte("0123456789abcdef")
+	n, err := EncryptFile(path, key, "", false, salt)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -95,15 +96,15 @@ profiles:
 		t.Fatalf("encrypted %d values, want 1 (only API_KEY is secret-looking)", n)
 	}
 	enc, _ := os.ReadFile(path)
-	if !strings.Contains(string(enc), "enc:v1:") {
-		t.Fatal("encrypted value not found in file")
+	if !strings.Contains(string(enc), "enc:v2:") {
+		t.Fatal("encrypted value not found in file or lacks enc:v2: prefix")
 	}
 	if !strings.Contains(string(enc), "claude-sonnet-5") {
 		t.Fatal("non-secret value got encrypted")
 	}
 
 	// idempotent
-	n2, err := EncryptFile(path, key, "", false)
+	n2, err := EncryptFile(path, key, "", false, salt)
 	if err != nil {
 		t.Fatalf("re-encrypt: %v", err)
 	}
@@ -266,4 +267,35 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestFirstEncryptedValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	enc, err := crypto.EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	// No encrypted values.
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \"1\"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := FirstEncryptedValue(path)
+	if err != nil || got != "" {
+		t.Fatalf("plain config: got %q err=%v, want empty", got, err)
+	}
+	// One v2 value.
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \""+enc+"\"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err = FirstEncryptedValue(path)
+	if err != nil || got != enc {
+		t.Fatalf("v2 config: got %q err=%v, want %q", got, err, enc)
+	}
+	// Missing file → error.
+	if _, err := FirstEncryptedValue(filepath.Join(dir, "nope.yaml")); err == nil {
+		t.Fatal("missing file must error")
+	}
 }

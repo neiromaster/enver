@@ -45,7 +45,7 @@ func envMapping(profileNode *yaml.Node) *yaml.Node {
 // EncryptFile encrypts secret-looking values (or all values when all is true) in
 // the config at path, preserving structure and comments. profile filters to a
 // single profile; empty means all. Returns the count of newly encrypted values.
-func EncryptFile(path string, key []byte, profile string, all bool) (int, error) {
+func EncryptFile(path string, key []byte, profile string, all bool, salt ...[]byte) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
 		return 0, err
@@ -73,7 +73,7 @@ func EncryptFile(path string, key []byte, profile string, all bool) (int, error)
 			if !all && !secretRe.MatchString(keyNode.Value) {
 				continue
 			}
-			enc, err := crypto.EncryptValue(valNode.Value, key)
+			enc, err := crypto.EncryptValue(valNode.Value, key, salt...)
 			if err != nil {
 				return count, err
 			}
@@ -136,4 +136,33 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 		return count, err
 	}
 	return count, os.WriteFile(path, out, 0o644)
+}
+
+// FirstEncryptedValue returns the first enc:v2: value in the config at path, or
+// "" when none exists. Used to recover the salt for passphrase key derivation.
+func FirstEncryptedValue(path string) (string, error) {
+	root, err := loadNode(path)
+	if err != nil {
+		return "", err
+	}
+	pm := profilesMapping(root.Content[0])
+	if pm == nil {
+		return "", nil
+	}
+	for i := 0; i+1 < len(pm.Content); i += 2 {
+		env := envMapping(pm.Content[i+1])
+		if env == nil {
+			continue
+		}
+		for j := 0; j+1 < len(env.Content); j += 2 {
+			valNode := env.Content[j+1]
+			if valNode.Kind != yaml.ScalarNode {
+				continue
+			}
+			if _, err := crypto.SaltFromValue(valNode.Value); err == nil {
+				return valNode.Value, nil
+			}
+		}
+	}
+	return "", nil
 }
