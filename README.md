@@ -275,6 +275,12 @@ can be regenerated from memory on any machine. `enver keygen --random` keeps the
 legacy behavior of writing a raw random key, for CI and other non-interactive
 setups.
 
+`enver keygen --force` refuses to overwrite silently: when the configs contain
+encrypted values and the new key differs from the current one, the interactive
+path asks for confirmation and `--random` prints a warning, since an overwritten
+key makes the existing ciphertext unreadable. Run `enver decrypt` with the old
+key first if you need to migrate them.
+
 New values are written as `enc:v2:<base64(salt||nonce||ciphertext)>` (AES-256-GCM
 with the 16-byte argon2id salt embedded). Legacy `enc:v1:<base64(nonce||ciphertext)>`
 values still decrypt, and are written when only a raw `--key`/`ENVER_KEY` key is
@@ -304,11 +310,11 @@ then on the standalone `enverx` runner works as usual.
 ```
 enverx [profile] -- <command> [args...]   Run command with the profile's env (dedicated runner)
 enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the detached form)
-enver show [profile] [--no-mask]          Preview resolved env (masked by default)
-enver export [profile] [--format bash|powershell]  Print `export K=V` (unmasked, for eval)
-enver dotenv [profile] [-o file]          Export a profile to a .env file (with comments)
-enver import <file> [profile] [--replace] Import a .env file into a profile (--extends, --force)
-enver list                                List profiles
+enver show [profile] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
+enver export [profile] [--format bash|powershell]      Print `export K=V` (unmasked, for eval)
+enver dotenv [profile] [-o file]                       Write a profile to a .env file (with comments)
+enver import <file> [profile] [--replace]              Import a .env file into a profile (--extends, --force)
+enver list [--format text|json]          List profiles
 enver add [name]                          Interactively add a profile
 enver edit [profile]                      Interactively edit a profile
 enver remove [profile] [-y]               Delete a profile
@@ -324,6 +330,7 @@ enver --config <path>                     Override the global config file (read 
 enver --key <path>                        Key file (or ENVER_KEY env)
 enver --no-local                          Ignore the ./.enver.yaml layer when reading
 enver --no-expand                         Do not expand $VAR references
+enver --chdir <dir>                       Run as if started from <dir> (.enver.yaml and relative --config resolve against it)
 enver --version / enverx --version / -h, --help
 ```
 
@@ -344,10 +351,14 @@ as a profile, so a profile that shares one of those names must be run via the
 explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
 
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
-case-insensitive) are masked in `enver show` output (use `--no-mask` to reveal).
-`enver export` is always unmasked so `eval "$(enver export <profile>)"` applies to
-the current shell. `--format powershell` emits `$env:K = 'V'` for PowerShell
-(`enver export <profile> --format powershell | iex`); `bash` is the default.
+case-insensitive, or values that embed credentials in a URL such as
+`postgres://user:pass@host`) are masked in `enver show` output (use `--no-mask`
+to reveal) and encrypted by `enver encrypt`. Plain URLs without credentials
+(`https://api.example.com`) are left alone. `enver export` is always unmasked so
+`eval "$(enver export <profile>)"` applies to the current shell. `--format
+powershell` emits `$env:K = 'V'` for PowerShell (`enver export <profile>
+--format powershell | iex`); `bash` is the default. `show`/`list` also accept
+`--format json` for machine-readable output (`show` still honors `--no-mask`).
 
 ## How it works
 
