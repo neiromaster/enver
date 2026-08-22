@@ -18,6 +18,7 @@ var globalFlags struct {
 	noLocal    bool
 	noExpand   bool
 	global     bool
+	chdir      string
 }
 
 var rootCmd = &cobra.Command{
@@ -66,8 +67,13 @@ func init() {
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore the ./.enver.yaml layer when reading")
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
+	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return applyChdir()
+	}
 
 	app.Interactive = ui.Interactive
 	app.PromptPassphrase = ui.Password
@@ -87,6 +93,16 @@ func appOpts() app.Options {
 		NoLocal:    globalFlags.noLocal,
 		NoExpand:   globalFlags.noExpand,
 	}
+}
+
+// applyChdir changes to --chdir before any command logic so that LocalPath and
+// relative --config resolve in the target directory. Wired as PersistentPreRunE;
+// tests call it directly.
+func applyChdir() error {
+	if globalFlags.chdir == "" {
+		return nil
+	}
+	return os.Chdir(globalFlags.chdir)
 }
 
 func requireInteractive(what string) error {

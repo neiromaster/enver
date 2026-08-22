@@ -17,6 +17,7 @@ var flags struct {
 	keyPath    string
 	noLocal    bool
 	noExpand   bool
+	chdir      string
 }
 
 var rootCmd = &cobra.Command{
@@ -48,6 +49,14 @@ func init() {
 	pf.StringVar(&flags.keyPath, "key", "", "key file (or ENVER_KEY env)")
 	pf.BoolVar(&flags.noLocal, "no-local", false, "ignore .enver.yaml layers")
 	pf.BoolVar(&flags.noExpand, "no-expand", false, "do not expand $VAR references")
+	pf.StringVar(&flags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if flags.chdir == "" {
+			return nil
+		}
+		return os.Chdir(flags.chdir)
+	}
 }
 
 func main() {
