@@ -356,9 +356,21 @@ func (c Config) ExtendedBy(name string) []string {
 
 var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|credential)`)
 
+// urlCredRe matches a value that embeds credentials in a URL authority, e.g.
+// postgres://user:pass@db.internal:5432/app. Such values are secrets even under
+// a generic key (DATABASE_URL, CONNECTION_STRING). Plain URLs without a
+// userinfo component (https://api.example.com) are not secrets.
+var urlCredRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.\-]*://[^/@\s]*:[^/@\s]*@`)
+
+// IsSensitive reports whether a key/value pair is a secret: a secret-looking key
+// name, or a value that carries credentials in a URL.
+func IsSensitive(k, v string) bool {
+	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
+}
+
 // MaskValue redacts secret-looking values for display.
 func MaskValue(k, v string) string {
-	if secretRe.MatchString(k) && len(v) > 6 {
+	if IsSensitive(k, v) && len(v) > 6 {
 		return v[:4] + "…" + fmt.Sprintf("(len=%d)", len(v))
 	}
 	return v

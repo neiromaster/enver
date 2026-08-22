@@ -136,6 +136,30 @@ func TestMaskValue(t *testing.T) {
 	}
 }
 
+func TestMaskValueURLSecrets(t *testing.T) {
+	cases := []struct{ k, v string }{
+		{"DATABASE_URL", "postgres://user:pass@db.internal:5432/app"},
+		{"CONNECTION_STRING", "mysql://root:s3cr3t@host:3306/db"},
+		{"REDIS_URL", "redis://:verysecret@cache:6379"},
+	}
+	for _, c := range cases {
+		if got := MaskValue(c.k, c.v); got == c.v {
+			t.Fatalf("MaskValue(%q) should redact URL credentials", c.k)
+		}
+	}
+	plain := []struct{ k, v string }{
+		{"ANTHROPIC_BASE_URL", "https://api.anthropic.com"},
+		{"DB_URL", "http://localhost:8082/health"},
+		{"S3_ENDPOINT", "https://minio.example.com"},
+		{"POSTGRES_URL", "postgres://db:5432/app"},
+	}
+	for _, c := range plain {
+		if got := MaskValue(c.k, c.v); got != c.v {
+			t.Fatalf("MaskValue(%q) must not redact a URL without credentials, got %q", c.k, got)
+		}
+	}
+}
+
 func TestGlobalPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if got, want := GlobalPath(""), filepath.Join("/xdg", "enver", "config.yaml"); got != want {

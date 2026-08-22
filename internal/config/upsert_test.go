@@ -126,6 +126,55 @@ profiles:
 	}
 }
 
+func TestEncryptFileEncodesURLSecrets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := `profiles:
+  prod:
+    env:
+      DATABASE_URL: postgres://user:pass@db.internal:5432/app
+      ANTHROPIC_BASE_URL: https://api.anthropic.com
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	salt := []byte("0123456789abcdef")
+
+	n, err := EncryptFile(path, key, "", false, salt)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("encrypted %d values, want 1 (only DATABASE_URL carries credentials)", n)
+	}
+	enc, _ := os.ReadFile(path)
+	if !strings.Contains(string(enc), "enc:v2:") {
+		t.Fatal("DATABASE_URL not encrypted")
+	}
+	if strings.Contains(string(enc), "user:pass@db.internal") {
+		t.Fatal("URL credentials leaked into the encrypted file")
+	}
+	if !strings.Contains(string(enc), "https://api.anthropic.com") {
+		t.Fatal("plain URL without credentials got encrypted")
+	}
+
+	n3, err := DecryptFile(path, key, "")
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if n3 != 1 {
+		t.Fatalf("decrypted %d, want 1", n3)
+	}
+	dec, _ := os.ReadFile(path)
+	if !strings.Contains(string(dec), "postgres://user:pass@db.internal:5432/app") {
+		t.Fatal("URL credentials not restored on decrypt")
+	}
+}
+
 func TestEncryptFileWrongKeyFailsDecrypt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

@@ -70,7 +70,7 @@ func EncryptFile(path string, key []byte, profile string, all bool, salt ...[]by
 			if valNode.Kind != yaml.ScalarNode || crypto.IsEncrypted(valNode.Value) {
 				continue
 			}
-			if !all && !secretRe.MatchString(keyNode.Value) {
+			if !all && !IsSensitive(keyNode.Value, valNode.Value) {
 				continue
 			}
 			enc, err := crypto.EncryptValue(valNode.Value, key, salt...)
