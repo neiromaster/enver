@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"os"
@@ -22,6 +23,9 @@ var keygenCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		path := crypto.KeyFilePath()
 		if keygenRandom {
+			if keygenRisk(force, path, nil) {
+				fmt.Fprintln(os.Stderr, "warning: overwriting the key makes existing encrypted values unreadable; run `enver decrypt` with the old key first to migrate")
+			}
 			if err := crypto.GenerateKey(path, force); err != nil {
 				return err
 			}
@@ -62,6 +66,17 @@ var keygenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if keygenRisk(force, path, key) {
+			ok, cerr := ui.Confirm(
+				"This passphrase derives a key different from the current one. Overwriting strands existing encrypted values (run `enver decrypt` with the old key first). Overwrite anyway?",
+				false)
+			if cerr != nil {
+				return cerr
+			}
+			if !ok {
+				return fmt.Errorf("aborted: key not overwritten")
+			}
+		}
 		if err := crypto.WriteKeyCache(path, crypto.NewKeyCache(salt, key)); err != nil {
 			return err
 		}
@@ -69,6 +84,43 @@ var keygenCmd = &cobra.Command{
 		fmt.Println("Recovery: on a new machine, run `enver x <profile> -- <command>` and enter your passphrase when prompted.")
 		return nil
 	},
+}
+
+// keygenRisk reports whether force-overwriting the key at path with newKey
+// would strand encrypted values: an existing key that differs plus encrypted
+// values in the configs. newKey is nil when the key is not yet known (--random),
+// in which case any existing key counts as different.
+func keygenRisk(force bool, path string, newKey []byte) bool {
+	if !force {
+		return false
+	}
+	old, _, err := crypto.LoadKeyWithSalt(path)
+	if err != nil || len(old) == 0 {
+		return false // no existing key file: nothing to strand
+	}
+	if newKey != nil && bytes.Equal(old, newKey) {
+		return false // same key: safe to rewrite
+	}
+	return hasEncryptedValues()
+}
+
+// hasEncryptedValues reports whether either config layer contains an encrypted
+// value, i.e. whether a new key would make any existing data unreadable.
+func hasEncryptedValues() bool {
+	for _, p := range []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()} {
+		c, err := config.LoadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, prof := range c.Profiles {
+			for _, v := range prof.Env {
+				if crypto.IsEncrypted(v) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // existingSalt returns the enc:v2: salt from the global or local config, or nil
