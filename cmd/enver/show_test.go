@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,6 +25,50 @@ func TestPrintEnvMasking(t *testing.T) {
 	}
 	if !strings.Contains(masked.String(), "ANTHROPIC_MODEL=claude-sonnet-5") {
 		t.Errorf("masked output missing plaintext model:\n%s", masked.String())
+	}
+}
+
+func TestPrintEnvJSON(t *testing.T) {
+	env := map[string]string{
+		"API_KEY":         "sk-ant-secret-1234567890",
+		"ANTHROPIC_MODEL": "claude-sonnet-5",
+	}
+	chain := []string{"anth"}
+
+	var out bytes.Buffer
+	if err := printEnvJSON(&out, "anth", chain, env, false); err != nil {
+		t.Fatalf("printEnvJSON: %v", err)
+	}
+	var got showJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+	}
+	if got.Profile != "anth" {
+		t.Errorf("profile = %q, want anth", got.Profile)
+	}
+	if !reflect.DeepEqual(got.Chain, chain) {
+		t.Errorf("chain = %v, want %v", got.Chain, chain)
+	}
+	if got.Env["ANTHROPIC_MODEL"] != "claude-sonnet-5" {
+		t.Errorf("plain value = %q, want claude-sonnet-5", got.Env["ANTHROPIC_MODEL"])
+	}
+	if got.Env["API_KEY"] == "sk-ant-secret-1234567890" {
+		t.Error("secret must be masked in JSON")
+	}
+	if !strings.Contains(out.String(), "len=24") {
+		t.Errorf("masked JSON missing length hint:\n%s", out.String())
+	}
+
+	// --no-mask surfaces the full secret.
+	out.Reset()
+	if err := printEnvJSON(&out, "anth", chain, env, true); err != nil {
+		t.Fatalf("printEnvJSON unmasked: %v", err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got.Env["API_KEY"] != "sk-ant-secret-1234567890" {
+		t.Error("--no-mask must show the full secret")
 	}
 }
 

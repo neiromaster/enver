@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -9,13 +10,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var listFormat string
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List profiles",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return doList(cmd.OutOrStdout())
+		switch listFormat {
+		case "text":
+			return doList(cmd.OutOrStdout())
+		case "json":
+			return doListJSON(cmd.OutOrStdout())
+		default:
+			return fmt.Errorf("unsupported list format %q (use text or json)", listFormat)
+		}
 	},
+}
+
+func init() {
+	listCmd.Flags().StringVar(&listFormat, "format", "text", "output format: text or json")
+	_ = listCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"text", "json"}, cobra.ShellCompDirectiveDefault
+	})
 }
 
 func doList(w io.Writer) error {
@@ -66,4 +83,45 @@ func doList(w io.Writer) error {
 	}
 	_, err = fmt.Fprintln(w, "\n* = default")
 	return err
+}
+
+// listJSON is the machine-readable shape of `enver list --format json`.
+type listJSON struct {
+	Profiles []listJSONEntry `json:"profiles"`
+}
+
+type listJSONEntry struct {
+	Name     string   `json:"name"`
+	Default  bool     `json:"default"`
+	Extends  []string `json:"extends,omitempty"`
+	Vars     int      `json:"vars"`
+	Resolved int      `json:"resolved"`
+}
+
+func doListJSON(w io.Writer) error {
+	cfg, err := app.Load(appOpts())
+	if err != nil {
+		return err
+	}
+	names := cfg.ProfileNames()
+	out := listJSON{Profiles: make([]listJSONEntry, 0, len(names))}
+	for _, n := range names {
+		p := cfg.Profiles[n]
+		resolved := len(p.Env)
+		if len(p.Extends) > 0 {
+			if r, _, err := cfg.ResolveProfile(n); err == nil {
+				resolved = len(r)
+			}
+		}
+		out.Profiles = append(out.Profiles, listJSONEntry{
+			Name:     n,
+			Default:  n == cfg.Default,
+			Extends:  p.Extends,
+			Vars:     len(p.Env),
+			Resolved: resolved,
+		})
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }

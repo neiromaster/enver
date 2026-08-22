@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -111,6 +113,46 @@ func TestDoListAlignsLongProfileNames(t *testing.T) {
 
 	if !strings.Contains(out.String(), "* = default") {
 		t.Errorf("missing default footer:\n%s", out.String())
+	}
+}
+
+func TestDoListJSON(t *testing.T) {
+	path := writeTempConfig(t, "base", map[string]string{"X": "1"}, nil, false)
+	if err := config.UpsertProfile(path, "prod", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"A": "1", "B": "2"}}, false, false, nil); err != nil {
+		t.Fatalf("upsert prod: %v", err)
+	}
+	if err := config.SetDefault(path, "prod"); err != nil {
+		t.Fatalf("set default: %v", err)
+	}
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := doListJSON(&out); err != nil {
+		t.Fatalf("doListJSON: %v", err)
+	}
+	var got listJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+	}
+	if len(got.Profiles) != 2 {
+		t.Fatalf("got %d profiles, want 2:\n%s", len(got.Profiles), out.String())
+	}
+	byName := make(map[string]listJSONEntry, len(got.Profiles))
+	for _, p := range got.Profiles {
+		byName[p.Name] = p
+	}
+	prod := byName["prod"]
+	if !prod.Default {
+		t.Error("prod must be the default")
+	}
+	if !reflect.DeepEqual(prod.Extends, []string{"base"}) {
+		t.Errorf("prod.extends = %v, want [base]", prod.Extends)
+	}
+	if prod.Vars != 2 || prod.Resolved != 3 {
+		t.Errorf("prod vars=%d resolved=%d, want 2/3", prod.Vars, prod.Resolved)
+	}
+	if base := byName["base"]; base.Default || base.Vars != 1 || base.Resolved != 1 {
+		t.Errorf("base default=%v vars=%d resolved=%d, want false/1/1", base.Default, base.Vars, base.Resolved)
 	}
 }
 

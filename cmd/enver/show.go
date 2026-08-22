@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -33,7 +34,14 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printEnv(cmd.OutOrStdout(), env, chain, showNoMask)
+		switch showFormat {
+		case "text":
+			return printEnv(cmd.OutOrStdout(), env, chain, showNoMask)
+		case "json":
+			return printEnvJSON(cmd.OutOrStdout(), profile, chain, env, showNoMask)
+		default:
+			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
+		}
 	},
 }
 
@@ -69,11 +77,16 @@ var exportCmd = &cobra.Command{
 }
 
 var showNoMask bool
+var showFormat string
 var exportFormat string
 
 func init() {
 	showCmd.Flags().BoolVar(&showNoMask, "no-mask", false, "show full secret values")
+	showCmd.Flags().StringVar(&showFormat, "format", "text", "output format: text or json")
 	exportCmd.Flags().StringVar(&exportFormat, "format", "bash", "output format: bash or powershell")
+	_ = showCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"text", "json"}, cobra.ShellCompDirectiveDefault
+	})
 	_ = exportCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"bash", "powershell"}, cobra.ShellCompDirectiveDefault
 	})
@@ -94,6 +107,28 @@ func printEnv(w io.Writer, env map[string]string, chain []string, unmasked bool)
 		}
 	}
 	return nil
+}
+
+// showJSON is the machine-readable shape of `enver show --format json`.
+type showJSON struct {
+	Profile string            `json:"profile"`
+	Chain   []string          `json:"chain"`
+	Env     map[string]string `json:"env"`
+}
+
+// printEnvJSON writes the resolved env as JSON, masked unless unmasked.
+func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, unmasked bool) error {
+	envOut := make(map[string]string, len(env))
+	for _, k := range sortedEnvKeys(env) {
+		v := env[k]
+		if !unmasked {
+			v = config.MaskValue(k, v)
+		}
+		envOut[k] = v
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: envOut})
 }
 
 // printExport writes the resolved env as shell assignments for eval. bash emits
