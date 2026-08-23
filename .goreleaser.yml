@@ -12,6 +12,7 @@ builds:
     binary: enver
     env:
       - CGO_ENABLED=0
+      - GOWORK=off
     flags:
       - -trimpath
     ldflags:
