@@ -30,9 +30,9 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.1
+        run: |
+          echo "::add-matcher::.github/golangci-lint-problem-matcher.json"
+          go tool golangci-lint run
 
   test:
     strategy:
