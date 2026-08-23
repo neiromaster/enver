@@ -6,4 +6,4 @@ pre-commit:
       stage_fixed: true
     golangci-lint:
       glob: "*.go"
-      run: golangci-lint run
+      run: go tool golangci-lint run
