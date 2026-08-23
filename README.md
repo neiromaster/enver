@@ -391,12 +391,16 @@ make vet test
 ```
 
 A pre-commit hook (via [lefthook](https://github.com/evilmartians/lefthook))
-auto-formats staged Go files. Enable it once after cloning — lefthook is pinned
-as a Go tool dependency in `go.mod`, so nothing global is required:
+auto-formats staged Go files. Enable it once after cloning — lefthook and
+golangci-lint are pinned as Go tool dependencies in the isolated `tools/`
+module (reached through `go.work`), so nothing global is required:
 
 ```sh
 make hooks   # runs `go tool lefthook install`
 ```
+
+Keep `tools/` free of .go files: the tools module must stay invisible to
+`go build`/`go test`/`go vet` run from the repo root.
 
 CI also runs `gofmt` and `golangci-lint`, so unformatted code won't merge.
 
