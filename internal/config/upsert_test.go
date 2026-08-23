@@ -88,7 +88,7 @@ profiles:
 	}
 
 	salt := []byte("0123456789abcdef")
-	n, err := EncryptFile(path, key, "", false, salt)
+	n, err := EncryptFile(path, key, salt, "", false)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -104,7 +104,7 @@ profiles:
 	}
 
 	// idempotent
-	n2, err := EncryptFile(path, key, "", false, salt)
+	n2, err := EncryptFile(path, key, salt, "", false)
 	if err != nil {
 		t.Fatalf("re-encrypt: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestEncryptFileEncodesURLSecrets(t *testing.T) {
 	}
 	salt := []byte("0123456789abcdef")
 
-	n, err := EncryptFile(path, key, "", false, salt)
+	n, err := EncryptFile(path, key, salt, "", false)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestEncryptFileWrongKeyFailsDecrypt(t *testing.T) {
 	keyA := make([]byte, 32)
 	keyB := make([]byte, 32)
 	keyB[0] = 1
-	if _, err := EncryptFile(path, keyA, "", false); err != nil {
+	if _, err := EncryptFile(path, keyA, []byte("0123456789abcdef"), "", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := DecryptFile(path, keyB, ""); err == nil {
@@ -195,8 +195,11 @@ func TestEncryptFileWrongKeyFailsDecrypt(t *testing.T) {
 }
 
 func TestCryptoPrefixMatch(t *testing.T) {
-	if !crypto.IsEncrypted("enc:v1:YWJj") {
-		t.Fatal("IsEncrypted should match enc:v1:")
+	if !crypto.IsEncrypted("enc:v2:YWJj") {
+		t.Fatal("IsEncrypted should match enc:v2:")
+	}
+	if crypto.IsEncrypted("enc:v1:YWJj") {
+		t.Fatal("IsEncrypted must not match the dropped enc:v1: format")
 	}
 }
 
@@ -253,7 +256,7 @@ func TestEnvCommentSurvivesEncryptDecrypt(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i)
 	}
-	if _, err := EncryptFile(path, key, "", false); err != nil {
+	if _, err := EncryptFile(path, key, []byte("0123456789abcdef"), "", false); err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
 	enc := string(mustRead(t, path))

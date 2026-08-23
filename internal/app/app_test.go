@@ -86,11 +86,11 @@ func TestResolveLazyKey(t *testing.T) {
 	if err := crypto.GenerateKey(kpath, true); err != nil {
 		t.Fatal(err)
 	}
-	key, err := crypto.LoadKey(kpath)
+	key, salt, err := crypto.LoadKey(kpath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	enc, err := crypto.EncryptValue("secret-value", key)
+	enc, err := crypto.EncryptValue("secret-value", key, salt)
 	if err != nil {
 		t.Fatal(err)
 	}

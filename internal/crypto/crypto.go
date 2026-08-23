@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -15,10 +14,7 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const (
-	prefixV1 = "enc:v1:"
-	prefixV2 = "enc:v2:"
-)
+const prefixV2 = "enc:v2:"
 
 const keySize = 32
 
@@ -46,8 +42,8 @@ var KeyFilePath = func() string {
 	return filepath.Join(home, ".config", "enver", "key")
 }
 
-// GenerateKey writes a fresh random key (base64) to path with 0600 perms.
-// Refuses to overwrite an existing file unless force is true.
+// GenerateKey writes a fresh key cache (random key and salt) to path as JSON
+// with 0600 perms. Refuses to overwrite an existing file unless force is true.
 func GenerateKey(path string, force bool) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
@@ -58,38 +54,24 @@ func GenerateKey(path string, force bool) error {
 	if _, err := rand.Read(key); err != nil {
 		return err
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
+	salt := make([]byte, saltSize)
+	if _, err := rand.Read(salt); err != nil {
+		return err
 	}
-	return os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(key)), 0o600)
+	return WriteKeyCache(path, KeyCache{Version: 1, KDF: "random", Salt: salt, Key: key})
 }
 
-// LoadKey reads the key at path, accepting either a passphrase cache (JSON) or
-// a legacy raw base64 key.
-func LoadKey(path string) ([]byte, error) {
-	key, _, err := LoadKeyWithSalt(path)
-	return key, err
-}
-
-// LoadKeyWithSalt reads the key at path, returning the salt when the file is a
-// passphrase cache (nil for legacy raw keys).
-func LoadKeyWithSalt(path string) (key, salt []byte, err error) {
+// LoadKey reads the key cache at path, returning the key and its salt.
+func LoadKey(path string) (key, salt []byte, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) > 0 && trimmed[0] == '{' {
-		c, err := parseKeyCache(trimmed)
-		if err != nil {
-			return nil, nil, err
-		}
-		return c.Key, c.Salt, nil
+	c, err := parseKeyCache(data)
+	if err != nil {
+		return nil, nil, err
 	}
-	k, err := DecodeKey(string(trimmed))
-	return k, nil, err
+	return c.Key, c.Salt, nil
 }
 
 // DecodeKey base64-decodes an inline key string (e.g. from ENVER_KEY).
@@ -104,14 +86,16 @@ func DecodeKey(s string) ([]byte, error) {
 	return key, nil
 }
 
-// IsEncrypted reports whether v carries an enver encrypted-value prefix.
+// IsEncrypted reports whether v carries the enc:v2: prefix.
 func IsEncrypted(v string) bool {
-	return hasPrefix(v, prefixV1) || hasPrefix(v, prefixV2)
+	return hasPrefix(v, prefixV2)
 }
 
-// EncryptValue returns "enc:v1:<base64>" when salt is nil, or
-// "enc:v2:<base64(salt||nonce||ciphertext)>" when salt is non-nil.
-func EncryptValue(plain string, key []byte, salt ...[]byte) (string, error) {
+// EncryptValue returns "enc:v2:<base64(salt||nonce||ciphertext)>".
+func EncryptValue(plain string, key, salt []byte) (string, error) {
+	if len(salt) != saltSize {
+		return "", fmt.Errorf("salt must be %d bytes, got %d", saltSize, len(salt))
+	}
 	gcm, err := newGCM(key)
 	if err != nil {
 		return "", err
@@ -121,35 +105,20 @@ func EncryptValue(plain string, key []byte, salt ...[]byte) (string, error) {
 		return "", err
 	}
 	sealed := gcm.Seal(nil, nonce, []byte(plain), nil)
-	if len(salt) == 0 || salt[0] == nil {
-		payload := make([]byte, 0, len(nonce)+len(sealed))
-		payload = append(payload, nonce...)
-		payload = append(payload, sealed...)
-		return prefixV1 + base64.StdEncoding.EncodeToString(payload), nil
-	}
-	if len(salt[0]) != saltSize {
-		return "", fmt.Errorf("salt must be %d bytes, got %d", saltSize, len(salt[0]))
-	}
-	payload := make([]byte, 0, len(salt[0])+len(nonce)+len(sealed))
-	payload = append(payload, salt[0]...)
+	payload := make([]byte, 0, len(salt)+len(nonce)+len(sealed))
+	payload = append(payload, salt...)
 	payload = append(payload, nonce...)
 	payload = append(payload, sealed...)
 	return prefixV2 + base64.StdEncoding.EncodeToString(payload), nil
 }
 
-// DecryptValue reverses EncryptValue for both enc:v1: and enc:v2: values.
-// Returns an error if v is not encrypted or the key/payload are invalid.
+// DecryptValue reverses EncryptValue. Returns an error if v is not an enc:v2:
+// value or the key/payload are invalid.
 func DecryptValue(v string, key []byte) (string, error) {
-	var p string
-	switch {
-	case hasPrefix(v, prefixV1):
-		p = prefixV1
-	case hasPrefix(v, prefixV2):
-		p = prefixV2
-	default:
+	if !hasPrefix(v, prefixV2) {
 		return "", errors.New("value is not encrypted")
 	}
-	raw, err := base64.StdEncoding.DecodeString(v[len(p):])
+	raw, err := base64.StdEncoding.DecodeString(v[len(prefixV2):])
 	if err != nil {
 		return "", fmt.Errorf("invalid ciphertext: %w", err)
 	}
@@ -158,16 +127,10 @@ func DecryptValue(v string, key []byte) (string, error) {
 		return "", err
 	}
 	ns := gcm.NonceSize()
-	off := 0
-	if p == prefixV2 {
-		if len(raw) < saltSize+ns+gcm.Overhead() {
-			return "", errors.New("ciphertext too short")
-		}
-		off = saltSize
-	} else if len(raw) < ns+gcm.Overhead() {
+	if len(raw) < saltSize+ns+gcm.Overhead() {
 		return "", errors.New("ciphertext too short")
 	}
-	nonce, sealed := raw[off:off+ns], raw[off+ns:]
+	nonce, sealed := raw[saltSize:saltSize+ns], raw[saltSize+ns:]
 	plain, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed (wrong key?): %w", err)

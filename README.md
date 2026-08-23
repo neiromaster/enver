@@ -259,7 +259,7 @@ structure and non-secret values (base URLs, model names) stay plaintext.
 
 ```sh
 enver keygen                    # prompt for a passphrase, write the key cache (mode 0600)
-enver keygen --random           # non-interactive: write a raw random key instead (for CI)
+enver keygen --random           # non-interactive: write a random key cache instead (for CI)
 enver encrypt                   # encrypt secret-looking values in the config
 enver encrypt glm --all         # encrypt every value in the "glm" profile
 enver decrypt                   # restore plaintext (for editing)
@@ -268,8 +268,8 @@ enver decrypt                   # restore plaintext (for editing)
 `enver keygen` prompts for a passphrase twice and writes a key cache to
 `~/.config/enver/key` (JSON, mode `0600`). The same passphrase always derives
 the same key (argon2id; the salt comes from your encrypted values), so the key
-can be regenerated from memory on any machine. `enver keygen --random` keeps the
-legacy behavior of writing a raw random key, for CI and other non-interactive
+can be regenerated from memory on any machine. `enver keygen --random` writes a
+random key cache instead — non-derivable, for CI and other non-interactive
 setups.
 
 `enver keygen --force` refuses to overwrite silently: when the configs contain
@@ -278,15 +278,14 @@ path asks for confirmation and `--random` prints a warning, since an overwritten
 key makes the existing ciphertext unreadable. Run `enver decrypt` with the old
 key first if you need to migrate them.
 
-New values are written as `enc:v2:<base64(salt||nonce||ciphertext)>` (AES-256-GCM
-with the 16-byte argon2id salt embedded). Legacy `enc:v1:<base64(nonce||ciphertext)>`
-values still decrypt, and are written when only a raw `--key`/`ENVER_KEY` key is
-available. Encryption is idempotent — re-running `encrypt` skips already
-encrypted values.
+Encrypted values are `enc:v2:<base64(salt||nonce||ciphertext)>` (AES-256-GCM
+with the 16-byte argon2id salt embedded). Encryption is idempotent — re-running
+`encrypt` skips already encrypted values.
 
 At runtime `enver x <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
-order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), the default
+order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI — decryption
+only, since it carries no salt), the default
 key file, then an interactive passphrase prompt that derives, verifies, and
 caches the key. Where stdin is not a terminal the prompt is skipped and the
 command fails loudly instead of hanging. A profile with no encrypted values runs
@@ -318,7 +317,7 @@ enver rename [old] [new]                  Rename a profile (rewrites extends/def
 enver duplicate <src> [new]               Copy a profile (extends, env, comments)
 enver default [profile] [--clear]         Set, show, or clear the default profile
 enver validate                            Check config health
-enver keygen [--random] [--force]         Passphrase-derived key; --random for a raw key (CI)
+enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
 enver --global / -g                       Write to the global config (default: ./.enver.yaml)
@@ -370,9 +369,8 @@ No file under `~/.claude/` or elsewhere is modified.
 ## Security
 
 - **Secrets at rest** — `enver encrypt` stores values as `enc:v2:` ciphertext
-  (AES-256-GCM, argon2id salt embedded); legacy `enc:v1:` values still decrypt.
-  The key cache lives at `~/.config/enver/key` (mode `0600`) —
-  **never commit the key**.
+  (AES-256-GCM, argon2id salt embedded). The key cache lives at
+  `~/.config/enver/key` (mode `0600`) — **never commit the key**.
 - **Preview masking** — `enver show` redacts `key|token|secret|password|auth|credential`
   values; use `--no-mask` or `enver export` to reveal them.
 - **Threat model** — encryption protects against accidental leaks (git,

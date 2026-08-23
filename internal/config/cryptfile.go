@@ -45,7 +45,7 @@ func envMapping(profileNode *yaml.Node) *yaml.Node {
 // EncryptFile encrypts secret-looking values (or all values when all is true) in
 // the config at path, preserving structure and comments. profile filters to a
 // single profile; empty means all. Returns the count of newly encrypted values.
-func EncryptFile(path string, key []byte, profile string, all bool, salt ...[]byte) (int, error) {
+func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
 		return 0, err
@@ -73,7 +73,7 @@ func EncryptFile(path string, key []byte, profile string, all bool, salt ...[]by
 			if !all && !IsSensitive(keyNode.Value, valNode.Value) {
 				continue
 			}
-			enc, err := crypto.EncryptValue(valNode.Value, key, salt...)
+			enc, err := crypto.EncryptValue(valNode.Value, key, salt)
 			if err != nil {
 				return count, err
 			}

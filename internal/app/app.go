@@ -45,8 +45,7 @@ func Chdir(dir string) error {
 }
 
 // Resolve walks the profile's extends chain and transparently decrypts any
-// enc:v1: or enc:v2: values. A key is required only when encrypted values are
-// present.
+// enc:v2: values. A key is required only when encrypted values are present.
 func Resolve(cfg config.Config, profile string, opts Options) (map[string]string, []string, error) {
 	env, chain, err := cfg.ResolveProfile(profile)
 	if err != nil {
@@ -146,18 +145,19 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 
 // ResolveKey resolves the decryption key from --key, the ENVER_KEY env var, or
 // the default key file. It returns (nil, nil, nil) when no key is available;
-// callers decide whether that is an error. salt is non-nil only when the key
-// came from a passphrase cache (used to embed in new enc:v2: values).
+// callers decide whether that is an error. salt is nil only for ENVER_KEY keys,
+// which can decrypt (the salt is embedded in each enc:v2: value) but not
+// encrypt.
 func ResolveKey(opts Options) (key, salt []byte, err error) {
 	if opts.KeyPath != "" {
-		return crypto.LoadKeyWithSalt(opts.KeyPath)
+		return crypto.LoadKey(opts.KeyPath)
 	}
 	if v := os.Getenv("ENVER_KEY"); v != "" {
 		k, err := crypto.DecodeKey(v)
 		return k, nil, err
 	}
 	if path := crypto.KeyFilePath(); fileExists(path) {
-		return crypto.LoadKeyWithSalt(path)
+		return crypto.LoadKey(path)
 	}
 	return nil, nil, nil
 }

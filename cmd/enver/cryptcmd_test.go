@@ -134,7 +134,7 @@ func TestScanConfigCrypt(t *testing.T) {
 	if err := config.UpsertProfile(local, "p", config.Profile{Env: map[string]string{"API_KEY": "secret"}}, false, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.EncryptFile(local, key, "", false, []byte("0123456789abcdef")); err != nil {
+	if _, err := config.EncryptFile(local, key, []byte("0123456789abcdef"), "", false); err != nil {
 		t.Fatal(err)
 	}
 	scan, err = scanConfigCrypt()

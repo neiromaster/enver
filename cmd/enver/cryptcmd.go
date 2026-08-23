@@ -33,7 +33,7 @@ var keygenCmd = &cobra.Command{
 			if err := crypto.GenerateKey(path, force); err != nil {
 				return err
 			}
-			fmt.Printf("✓ key written to %s (mode 0600)\n", path)
+			fmt.Printf("✓ key cache written to %s (mode 0600)\n", path)
 			fmt.Println("Keep this file private. Commit encrypted configs, never the key.")
 			return nil
 		}
@@ -124,7 +124,7 @@ func keygenRisk(force bool, path string, newKey []byte, hasEncrypted func() (boo
 	if !force {
 		return false, nil
 	}
-	old, _, err := crypto.LoadKeyWithSalt(path)
+	old, _, err := crypto.LoadKey(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil // no existing key file: nothing to strand
@@ -192,8 +192,11 @@ var encryptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if salt == nil {
+			return fmt.Errorf("ENVER_KEY carries no salt, so it cannot encrypt; run `enver keygen` or pass --key <key cache>")
+		}
 		path := writeTarget()
-		n, err := config.EncryptFile(path, key, profile, all, salt)
+		n, err := config.EncryptFile(path, key, salt, profile, all)
 		if err != nil {
 			return err
 		}

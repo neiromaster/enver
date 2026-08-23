@@ -16,6 +16,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i)
 	}
+	salt := make([]byte, saltSize)
 	cases := []string{
 		"sk-ant-secret-1234567890",
 		"",
@@ -24,7 +25,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		"unicode: ключ-пароль-密码 🔐",
 	}
 	for _, plain := range cases {
-		enc, err := EncryptValue(plain, key)
+		enc, err := EncryptValue(plain, key, salt)
 		if err != nil {
 			t.Fatalf("encrypt %q: %v", plain, err)
 		}
@@ -43,9 +44,10 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 
 func TestEncryptUsesRandomNonce(t *testing.T) {
 	key := make([]byte, keySize)
+	salt := make([]byte, saltSize)
 	plain := "sk-same-input"
-	a, _ := EncryptValue(plain, key)
-	b, _ := EncryptValue(plain, key)
+	a, _ := EncryptValue(plain, key, salt)
+	b, _ := EncryptValue(plain, key, salt)
 	if a == b {
 		t.Fatal("two encryptions of the same value produced identical ciphertext (nonce not random)")
 	}
@@ -55,7 +57,7 @@ func TestDecryptWrongKeyFails(t *testing.T) {
 	keyA := make([]byte, keySize)
 	keyB := make([]byte, keySize)
 	keyB[0] = 1
-	enc, _ := EncryptValue("secret", keyA)
+	enc, _ := EncryptValue("secret", keyA, make([]byte, saltSize))
 	if _, err := DecryptValue(enc, keyB); err == nil {
 		t.Fatal("decrypt with wrong key should fail (GCM auth)")
 	}
@@ -72,8 +74,8 @@ func TestIsEncrypted(t *testing.T) {
 	if IsEncrypted("sk-ant-xxx") {
 		t.Fatal("plain value reported as encrypted")
 	}
-	if !IsEncrypted("enc:v1:YWJjZA==") {
-		t.Fatal("enc:v1: value not reported as encrypted")
+	if IsEncrypted("enc:v1:YWJjZA==") {
+		t.Fatal("enc:v1: is a dropped format and must not be reported as encrypted")
 	}
 	if !IsEncrypted("enc:v2:" + base64.StdEncoding.EncodeToString(make([]byte, 44))) {
 		t.Fatal("enc:v2: value must be recognized as encrypted")
@@ -118,14 +120,17 @@ func TestLoadKeyRoundTrip(t *testing.T) {
 	if err := GenerateKey(path, false); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadKey(path)
+	loaded, salt, err := LoadKey(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(loaded) != keySize {
 		t.Fatalf("loaded key len = %d, want %d", len(loaded), keySize)
 	}
-	enc, err := EncryptValue("secret", loaded)
+	if len(salt) != saltSize {
+		t.Fatalf("loaded salt len = %d, want %d", len(salt), saltSize)
+	}
+	enc, err := EncryptValue("secret", loaded, salt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,44 +195,6 @@ func TestEncryptV2RoundTrip(t *testing.T) {
 	}
 }
 
-func TestEncryptV1BackwardCompat(t *testing.T) {
-	key := make([]byte, keySize)
-	enc, err := EncryptValue("secret", key) // no salt → v1
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	if !strings.HasPrefix(enc, prefixV1) {
-		t.Fatalf("encrypted value = %q, want enc:v1: prefix", enc)
-	}
-	plain, err := DecryptValue(enc, key)
-	if err != nil {
-		t.Fatalf("decrypt v1: %v", err)
-	}
-	if plain != "secret" {
-		t.Fatalf("plain = %q, want secret", plain)
-	}
-}
-
-func TestEncryptNilElementIsV1(t *testing.T) {
-	key := make([]byte, keySize)
-	// A nil salt forwarded through a variadic parameter arrives as a single nil
-	// element; it must mean "no salt" (v1), not a v2 value with no salt.
-	enc, err := EncryptValue("secret", key, nil)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	if !strings.HasPrefix(enc, prefixV1) {
-		t.Fatalf("encrypted value = %q, want enc:v1: prefix", enc)
-	}
-	plain, err := DecryptValue(enc, key)
-	if err != nil {
-		t.Fatalf("decrypt v1: %v", err)
-	}
-	if plain != "secret" {
-		t.Fatalf("plain = %q, want secret", plain)
-	}
-}
-
 func TestSaltFromValue(t *testing.T) {
 	salt := []byte("0123456789abcdef")
 	key := make([]byte, keySize)
@@ -255,6 +222,7 @@ func TestEncryptValueRejectsBadSaltLength(t *testing.T) {
 	badSalts := [][]byte{
 		make([]byte, 20), // too long
 		{},               // non-nil but empty
+		nil,
 	}
 	for _, salt := range badSalts {
 		if _, err := EncryptValue("secret", key, salt); err == nil {
@@ -290,9 +258,9 @@ func TestKeyCacheRejectsInvalid(t *testing.T) {
 			if err := os.WriteFile(path, tc.data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			key, salt, err := LoadKeyWithSalt(path)
+			key, salt, err := LoadKey(path)
 			if err == nil {
-				t.Fatalf("LoadKeyWithSalt returned (%d-byte key, %d-byte salt, nil), want an error", len(key), len(salt))
+				t.Fatalf("LoadKey returned (%d-byte key, %d-byte salt, nil), want an error", len(key), len(salt))
 			}
 		})
 	}
@@ -302,7 +270,7 @@ func TestKeyCacheRejectsInvalid(t *testing.T) {
 	if err := os.WriteFile(path, mustMarshalJSON(t, valid), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	key, salt, err := LoadKeyWithSalt(path)
+	key, salt, err := LoadKey(path)
 	if err != nil {
 		t.Fatalf("valid cache: %v", err)
 	}
@@ -341,41 +309,14 @@ func TestKeyCacheRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadKeyAutoDetect(t *testing.T) {
-	dir := t.TempDir()
+func TestLoadKeyRejectsRawKeyFile(t *testing.T) {
+	// Raw base64 key files were the enc:v1 era format; only JSON caches load now.
+	rawPath := filepath.Join(t.TempDir(), "raw")
 	key := make([]byte, keySize)
-	// Raw legacy key file.
-	rawPath := filepath.Join(dir, "raw")
 	if err := os.WriteFile(rawPath, []byte(base64.StdEncoding.EncodeToString(key)), 0o600); err != nil {
 		t.Fatalf("write raw: %v", err)
 	}
-	got, err := LoadKey(rawPath)
-	if err != nil {
-		t.Fatalf("load raw: %v", err)
-	}
-	if !bytes.Equal(got, key) {
-		t.Fatal("raw key mismatch")
-	}
-	// JSON cache file.
-	cachePath := filepath.Join(dir, "cache")
-	salt := []byte("0123456789abcdef")
-	if err := WriteKeyCache(cachePath, NewKeyCache(salt, key)); err != nil {
-		t.Fatalf("write cache: %v", err)
-	}
-	got, err = LoadKey(cachePath)
-	if err != nil {
-		t.Fatalf("load cache: %v", err)
-	}
-	if !bytes.Equal(got, key) {
-		t.Fatal("cache key mismatch")
-	}
-	// LoadKeyWithSalt returns the salt only for the cache.
-	_, saltGot, err := LoadKeyWithSalt(rawPath)
-	if err != nil || saltGot != nil {
-		t.Fatalf("raw salt = %x err=%v, want nil", saltGot, err)
-	}
-	_, saltGot, err = LoadKeyWithSalt(cachePath)
-	if err != nil || !bytes.Equal(saltGot, salt) {
-		t.Fatalf("cache salt = %x err=%v, want %x", saltGot, err, salt)
+	if _, _, err := LoadKey(rawPath); err == nil {
+		t.Fatal("raw base64 key file must not load; want an invalid key cache error")
 	}
 }
