@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/spf13/cobra"
 )
 
 // TestWriteTarget covers the write-scope rule: local .enver.yaml in cwd by
@@ -85,5 +86,50 @@ func TestApplyChdir(t *testing.T) {
 	globalFlags.chdir = filepath.Join(dir, "does-not-exist")
 	if err := applyChdir(); err == nil {
 		t.Fatal("applyChdir() into a missing directory should fail")
+	}
+}
+
+// TestCompletionAppliesChdir pins that --chdir reaches profile completion.
+// PersistentPreRunE (which applies chdir for normal runs) does not run during
+// shell completion, so the completion functions must apply it themselves.
+func TestCompletionAppliesChdir(t *testing.T) {
+	saved := globalFlags
+	t.Cleanup(func() { globalFlags = saved })
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	proj, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertProfile(filepath.Join(proj, config.LocalFilename), "projdev", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Neutral cwd with no local config; --chdir points at the project.
+	neutral, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(neutral); err != nil {
+		t.Fatal(err)
+	}
+	globalFlags.chdir = proj
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().Bool("global", false, "")
+	cmd.Flags().Bool("no-local", false, "")
+
+	got, directive := completeProfileInTarget(cmd, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v, want NoFileComp", directive)
+	}
+	if len(got) != 1 || got[0] != "projdev" {
+		t.Fatalf("completion = %v, want [projdev] (from --chdir target)", got)
 	}
 }

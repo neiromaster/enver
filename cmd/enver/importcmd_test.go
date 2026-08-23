@@ -225,20 +225,20 @@ func TestImportDiffMerge(t *testing.T) {
 	}
 }
 
-func TestImportDiffCreateMasks(t *testing.T) {
+// TestImportDiffCreateShowsValues pins the diff contract: the summary echoes the
+// imported values verbatim. The data came straight from the user's own .env
+// file, so masking would force an unmask dance just to verify what changed.
+func TestImportDiffCreateShowsValues(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	summary, err := runImport(bytes.NewReader([]byte("API_TOKEN=sk-live-secret\nA=1\n")), cfgPath, "p", false, false, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(summary, "sk-live-secret") {
-		t.Errorf("secret value should be masked:\n%s", summary)
+	if !strings.Contains(summary, "+ API_TOKEN = sk-live-secret") {
+		t.Errorf("secret value must be shown in full:\n%s", summary)
 	}
 	if !strings.Contains(summary, "+ A = 1") {
 		t.Errorf("non-secret value should show in full:\n%s", summary)
-	}
-	if !strings.Contains(summary, "+ API_TOKEN = ") {
-		t.Errorf("secret key line missing:\n%s", summary)
 	}
 }
 

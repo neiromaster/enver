@@ -109,9 +109,11 @@ func doListJSON(w io.Writer) error {
 		p := cfg.Profiles[n]
 		resolved := len(p.Env)
 		if len(p.Extends) > 0 {
-			if r, _, err := cfg.ResolveProfile(n); err == nil {
-				resolved = len(r)
+			r, _, err := cfg.ResolveProfile(n)
+			if err != nil {
+				return err
 			}
+			resolved = len(r)
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
 			Name:     n,

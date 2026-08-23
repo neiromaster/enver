@@ -141,6 +141,8 @@ func TestMaskValueURLSecrets(t *testing.T) {
 		{"DATABASE_URL", "postgres://user:pass@db.internal:5432/app"},
 		{"CONNECTION_STRING", "mysql://root:s3cr3t@host:3306/db"},
 		{"REDIS_URL", "redis://:verysecret@cache:6379"},
+		{"DATABASE_URL", "postgres://user:Abcdef/Xy@db.internal:5432/app"},
+		{"GITHUB_URL", "https://ghp_xxx@github.com/org/repo"},
 	}
 	for _, c := range cases {
 		if got := MaskValue(c.k, c.v); got == c.v {

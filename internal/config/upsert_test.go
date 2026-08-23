@@ -129,6 +129,8 @@ profiles:
 func TestEncryptFileEncodesURLSecrets(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
+	// The fixture intentionally carries URL credentials to prove they encrypt.
+	//nolint:gosec
 	original := `profiles:
   prod:
     env:

@@ -96,13 +96,11 @@ func appOpts() app.Options {
 }
 
 // applyChdir changes to --chdir before any command logic so that LocalPath and
-// relative --config resolve in the target directory. Wired as PersistentPreRunE;
-// tests call it directly.
+// relative --config resolve in the target directory. Wired as PersistentPreRunE
+// and called by completion functions (which bypass PersistentPreRunE); tests
+// call it directly.
 func applyChdir() error {
-	if globalFlags.chdir == "" {
-		return nil
-	}
-	return os.Chdir(globalFlags.chdir)
+	return app.Chdir(globalFlags.chdir)
 }
 
 func requireInteractive(what string) error {
@@ -154,6 +152,9 @@ func notFoundInTarget(name, target string) error {
 }
 
 func targetProfiles(cmd *cobra.Command, toComplete string) []string {
+	if err := applyChdir(); err != nil {
+		return nil
+	}
 	g, _ := cmd.Flags().GetBool("global")
 	cfgPath, _ := cmd.Flags().GetString("config")
 	target := config.LocalPath()
@@ -175,6 +176,9 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 
 // completeProfile backs read commands: merged-config completion.
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := applyChdir(); err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}

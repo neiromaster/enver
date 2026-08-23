@@ -156,6 +156,23 @@ func TestDoListJSON(t *testing.T) {
 	}
 }
 
+// TestDoListJSONBrokenResolve pins the machine-readable contract: a profile
+// whose extends chain cannot resolve is an error, not a silently-degraded row.
+// Text output may fall back to own-count for human display; JSON consumers need
+// to know the profile is broken.
+func TestDoListJSONBrokenResolve(t *testing.T) {
+	path := writeTempConfig(t, "ok", map[string]string{"X": "1"}, nil, false)
+	if err := config.UpsertProfile(path, "broken", config.Profile{Extends: config.Extends{"ghost"}}, false, false, nil); err != nil {
+		t.Fatalf("upsert broken: %v", err)
+	}
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := doListJSON(&out); err == nil {
+		t.Fatalf("doListJSON must fail on an unresolvable extends chain, got:\n%s", out.String())
+	}
+}
+
 func findListLine(out, profile string) string {
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)

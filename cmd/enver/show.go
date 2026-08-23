@@ -38,7 +38,7 @@ var showCmd = &cobra.Command{
 		case "text":
 			return printEnv(cmd.OutOrStdout(), env, chain, showNoMask)
 		case "json":
-			return printEnvJSON(cmd.OutOrStdout(), profile, chain, env, showNoMask)
+			return printEnvJSON(cmd.OutOrStdout(), profile, chain, env)
 		default:
 			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
 		}
@@ -116,19 +116,13 @@ type showJSON struct {
 	Env     map[string]string `json:"env"`
 }
 
-// printEnvJSON writes the resolved env as JSON, masked unless unmasked.
-func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, unmasked bool) error {
-	envOut := make(map[string]string, len(env))
-	for _, k := range sortedEnvKeys(env) {
-		v := env[k]
-		if !unmasked {
-			v = config.MaskValue(k, v)
-		}
-		envOut[k] = v
-	}
+// printEnvJSON writes the resolved env as JSON, always unmasked: JSON is a
+// machine contract (export, piping to tools), so masking would corrupt the
+// values a consumer reads back.
+func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: envOut})
+	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: env})
 }
 
 // printExport writes the resolved env as shell assignments for eval. bash emits

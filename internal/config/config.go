@@ -358,9 +358,11 @@ var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|cr
 
 // urlCredRe matches a value that embeds credentials in a URL authority, e.g.
 // postgres://user:pass@db.internal:5432/app. Such values are secrets even under
-// a generic key (DATABASE_URL, CONNECTION_STRING). Plain URLs without a
-// userinfo component (https://api.example.com) are not secrets.
-var urlCredRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.\-]*://[^/@\s]*:[^/@\s]*@`)
+// a generic key (DATABASE_URL, CONNECTION_STRING). The userinfo is matched
+// before the @ so a password may contain `/` and a token may be the bare
+// username (https://TOKEN@github.com/...). Plain URLs without a userinfo
+// component (https://api.example.com) are not secrets.
+var urlCredRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.\-]*://(?:[^/@\s:]*:[^@\s]*|[^/@\s:]+)@`)
 
 // IsSensitive reports whether a key/value pair is a secret: a secret-looking key
 // name, or a value that carries credentials in a URL.

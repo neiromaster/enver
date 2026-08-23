@@ -28,6 +28,9 @@ func TestPrintEnvMasking(t *testing.T) {
 	}
 }
 
+// TestPrintEnvJSON pins the JSON contract: machine-readable output is always
+// unmasked. Text masking is for human eyes; a consumer piping JSON to a tool
+// needs the real values, and --no-mask stays a text-output concern.
 func TestPrintEnvJSON(t *testing.T) {
 	env := map[string]string{
 		"API_KEY":         "sk-ant-secret-1234567890",
@@ -36,7 +39,7 @@ func TestPrintEnvJSON(t *testing.T) {
 	chain := []string{"anth"}
 
 	var out bytes.Buffer
-	if err := printEnvJSON(&out, "anth", chain, env, false); err != nil {
+	if err := printEnvJSON(&out, "anth", chain, env); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -52,23 +55,11 @@ func TestPrintEnvJSON(t *testing.T) {
 	if got.Env["ANTHROPIC_MODEL"] != "claude-sonnet-5" {
 		t.Errorf("plain value = %q, want claude-sonnet-5", got.Env["ANTHROPIC_MODEL"])
 	}
-	if got.Env["API_KEY"] == "sk-ant-secret-1234567890" {
-		t.Error("secret must be masked in JSON")
-	}
-	if !strings.Contains(out.String(), "len=24") {
-		t.Errorf("masked JSON missing length hint:\n%s", out.String())
-	}
-
-	// --no-mask surfaces the full secret.
-	out.Reset()
-	if err := printEnvJSON(&out, "anth", chain, env, true); err != nil {
-		t.Fatalf("printEnvJSON unmasked: %v", err)
-	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
 	if got.Env["API_KEY"] != "sk-ant-secret-1234567890" {
-		t.Error("--no-mask must show the full secret")
+		t.Error("JSON must always carry the full secret value")
+	}
+	if strings.Contains(out.String(), "len=") {
+		t.Errorf("JSON must not contain masking hints:\n%s", out.String())
 	}
 }
 

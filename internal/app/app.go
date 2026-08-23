@@ -35,6 +35,15 @@ func Load(opts Options) (config.Config, error) {
 	return config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
 }
 
+// Chdir changes to dir when non-empty. Shared by the enver and enverx entry
+// points so --chdir behaves identically in both binaries; "" is a no-op.
+func Chdir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	return os.Chdir(dir)
+}
+
 // Resolve walks the profile's extends chain and transparently decrypts any
 // enc:v1: or enc:v2: values. A key is required only when encrypted values are
 // present.

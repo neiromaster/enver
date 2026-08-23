@@ -239,8 +239,9 @@ func extLabel(e config.Extends) string {
 }
 
 // formatImportSummary renders the import result: a header line, then per-key diff
-// lines (added +, overridden ~, removed -) with values masked, and an extends
-// line when the value changed.
+// lines (added +, overridden ~, removed -) echoing the values verbatim, and an
+// extends line when the value changed. The data came from the user's own .env,
+// so masking would hide exactly what the diff is meant to confirm.
 func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends config.Extends) string {
 	var b strings.Builder
 	vars := "1 var"
@@ -249,13 +250,13 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	}
 	fmt.Fprintf(&b, "\n✓ imported %s into %q — %s\n", vars, name, mode)
 	for _, e := range d.added {
-		fmt.Fprintf(&b, "  + %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+		fmt.Fprintf(&b, "  + %s = %s\n", e.key, e.val)
 	}
 	for _, e := range d.overridden {
-		fmt.Fprintf(&b, "  ~ %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+		fmt.Fprintf(&b, "  ~ %s = %s\n", e.key, e.val)
 	}
 	for _, e := range d.removed {
-		fmt.Fprintf(&b, "  - %s = %s\n", e.key, config.MaskValue(e.key, e.val))
+		fmt.Fprintf(&b, "  - %s = %s\n", e.key, e.val)
 	}
 	if !extendsEqual(extendsToWrite, oldExtends) {
 		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))

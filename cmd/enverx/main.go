@@ -52,10 +52,7 @@ func init() {
 	pf.StringVar(&flags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if flags.chdir == "" {
-			return nil
-		}
-		return os.Chdir(flags.chdir)
+		return app.Chdir(flags.chdir)
 	}
 }
 
@@ -67,6 +64,9 @@ func main() {
 }
 
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := app.Chdir(flags.chdir); err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
