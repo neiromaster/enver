@@ -402,6 +402,9 @@ make hooks   # runs `go tool lefthook install`
 Keep `tools/` free of .go files: the tools module must stay invisible to
 `go build`/`go test`/`go vet` run from the repo root.
 
+The `use` order in `go.work` matters too: the repo root must stay first so
+release tooling treats it as the main module.
+
 CI also runs `gofmt` and `golangci-lint`, so unformatted code won't merge.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
