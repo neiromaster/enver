@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -109,8 +110,11 @@ func TestWriteDotenvFileCreatesWith0600(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("file mode = %o, want 0600", perm)
+	// Windows has no Unix permission bits; os.WriteFile's mode is not preserved.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("file mode = %o, want 0600", perm)
+		}
 	}
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != "FOO=bar\n" {
@@ -222,8 +226,10 @@ func TestWriteDotenvFileEnforces0600OnOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("file mode after overwrite = %o, want 0o600", perm)
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("file mode after overwrite = %o, want 0o600", perm)
+		}
 	}
 }
 

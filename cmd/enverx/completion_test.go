@@ -20,7 +20,6 @@ func TestCompleteProfileAppliesChdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(wd) })
 
 	proj, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -36,6 +35,9 @@ func TestCompleteProfileAppliesChdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Restore cwd before TempDir's cleanup removes the dirs: cleanups run LIFO,
+	// and Windows cannot remove a directory that is still the process cwd.
+	t.Cleanup(func() { _ = os.Chdir(wd) })
 	if err := os.Chdir(neutral); err != nil {
 		t.Fatal(err)
 	}

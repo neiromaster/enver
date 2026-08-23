@@ -169,7 +169,7 @@ func TestGlobalPath(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/home/user")
-	if got, want := GlobalPath(""), "/home/user/.config/enver/config.yaml"; got != want {
+	if got, want := GlobalPath(""), filepath.Join("/home/user", ".config", "enver", "config.yaml"); got != want {
 		t.Fatalf("HOME path = %q, want %q", got, want)
 	}
 	if got := GlobalPath("/custom/path.yaml"); got != "/custom/path.yaml" {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -103,8 +104,11 @@ func TestGenerateKeyPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("key file perm = %o, want 0600", perm)
+	// Windows has no Unix permission bits; os.WriteFile's mode is not preserved.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("key file perm = %o, want 0600", perm)
+		}
 	}
 }
 

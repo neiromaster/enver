@@ -35,10 +35,18 @@ func TestMergedEnvSorted(t *testing.T) {
 	t.Setenv("ZZZ_TEST", "1")
 	t.Setenv("AAA_TEST", "1")
 	env := MergedEnv(map[string]string{"MMM_TEST": "1"})
-	for i := 1; i < len(env); i++ {
-		if env[i-1] > env[i] {
-			t.Fatalf("env not sorted: %q before %q", env[i-1], env[i])
+	// Compare keys, not full KEY=VALUE entries: values may contain bytes (e.g.
+	// "(x86)" in Windows path env vars) that sort differently from keys.
+	prev := ""
+	for _, kv := range env {
+		key, _, ok := splitKV(kv)
+		if !ok {
+			t.Fatalf("entry missing '=': %q", kv)
 		}
+		if prev > key {
+			t.Fatalf("env keys not sorted: %q before %q", prev, key)
+		}
+		prev = key
 	}
 }
 
