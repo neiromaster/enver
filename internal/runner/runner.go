@@ -37,7 +37,7 @@ func MergedEnv(profileEnv map[string]string) []string {
 }
 
 // Run execs cmdArgs with the given environment, wiring stdio through. name is
-// the invocation label ("enver x" or "enverx") used to prefix stderr messages.
+// the invocation label ("enver x") used to prefix stderr messages.
 // profile is shown in the terminal title until the child sends its own. It
 // returns the child's exit code (127 if the command is not found).
 func Run(cmdArgs []string, env []string, name, profile string) int {

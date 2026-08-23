@@ -10,7 +10,7 @@ command — **without mutating the target tool's own config**. Built for running
 API keys / base URLs / model sets, but works for any command.
 
 ```
-enverx anth -- claude
+enver x -- claude                       # uses the config's default profile
 enver x openrouter -- claude --model claude-sonnet-5
 eval "$(enver export prod-db)"
 enver add                   # interactively create a profile
@@ -26,7 +26,7 @@ claude-specific switchers (`ccm`, `claude-code-switcher`) mutate
 
 `enver` is a **provider-agnostic exec shim**: one YAML store, profiles that can
 inherit via `extends`, layered `cwd → home`, and a clean
-`enverx <profile> -- <command>` invocation that injects env only into the child
+`enver x <profile> -- <command>` invocation that injects env only into the child
 process.
 
 ## Install
@@ -39,29 +39,26 @@ brew trust neiromaster/enver   # Homebrew requires trusting third-party taps
 brew install enver
 ```
 
-The `enver` cask installs **both** the `enver` and `enverx` binaries and wires
-up shell completions for both (bash, zsh, fish) automatically. On macOS the
-cask also strips Gatekeeper quarantine, so the binaries run without a manual
-"Allow Anyway" step.
+The `enver` cask installs the `enver` binary and wires up shell completions
+(bash, zsh, fish) automatically. On macOS the cask also strips Gatekeeper
+quarantine, so the binary runs without a manual "Allow Anyway" step.
 
 **Go** (anywhere with a Go toolchain):
 
 ```sh
 go install github.com/neiromaster/enver/cmd/enver@latest
-go install github.com/neiromaster/enver/cmd/enverx@latest
 ```
 
-This drops the `enver` and `enverx` binaries into `$GOBIN` (on your `PATH`). Or
+This drops the `enver` binary into `$GOBIN` (on your `PATH`). Or
 build from source without installing:
 
 ```sh
 git clone https://github.com/neiromaster/enver && cd enver && make build   # → ./bin/enver
 ```
 
-`make build` produces `enver`; build the runner separately with
-`go build ./cmd/enverx`. Pre-compiled binaries for linux/darwin/windows ×
+`make build` produces `enver`. Pre-compiled binaries for linux/darwin/windows ×
 amd64/arm64 are on the [releases page](https://github.com/neiromaster/enver/releases);
-each archive includes both `enver` and `enverx`.
+each archive includes the `enver` binary and shell completions.
 
 ## Config
 
@@ -287,7 +284,7 @@ values still decrypt, and are written when only a raw `--key`/`ENVER_KEY` key is
 available. Encryption is idempotent — re-running `encrypt` skips already
 encrypted values.
 
-At runtime `enverx <profile> -- <command>` **transparently decrypts** with no
+At runtime `enver x <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
 order: `--key <path>` flag, `ENVER_KEY` env var (base64, for CI), the default
 key file, then an interactive passphrase prompt that derives, verifies, and
@@ -299,7 +296,7 @@ without any key.
 `enver x <profile> -- <command>` (or `enver encrypt` / `enver decrypt`) and
 enter the passphrase when prompted — the key is derived from the salt embedded
 in your values, verified against them, and cached to `~/.config/enver/key`. From
-then on the standalone `enverx` runner works as usual.
+then on `enver x` runs without prompting.
 
 > Commit the encrypted config; never commit the key file. Encryption protects
 > against accidental leaks (git, dotfiles, casual disk access), not against an
@@ -308,8 +305,7 @@ then on the standalone `enverx` runner works as usual.
 ## Usage
 
 ```
-enverx [profile] -- <command> [args...]   Run command with the profile's env (dedicated runner)
-enver x [profile] -- <command> [args...]  Same, inside enver (enverx is the detached form)
+enver x [profile] -- <command> [args...]  Run command with the profile's env
 enver show [profile] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
 enver export [profile] [--format bash|powershell]      Print `export K=V` (unmasked, for eval)
 enver dotenv [profile] [-o file]                       Write a profile to a .env file (with comments)
@@ -331,24 +327,22 @@ enver --key <path>                        Key file (or ENVER_KEY env)
 enver --no-local                          Ignore the ./.enver.yaml layer when reading
 enver --no-expand                         Do not expand $VAR references
 enver --chdir <dir>                       Run as if started from <dir> (.enver.yaml and relative --config resolve against it)
-enver --version / enverx --version / -h, --help
+enver --version / -h, --help
 ```
 
 > **Breaking:** the bare forms `enver <profile> -- <command>` and `enver <profile>`
-> (preview) were removed. Use `enverx <profile> -- <command>` (or `enver x ...`)
-> to run, and `enver show <profile>` to preview. `enver run` was renamed to `enver x`.
+> (preview) were removed. Use `enver x <profile> -- <command>` to run, and
+> `enver show <profile>` to preview. `enver run` was renamed to `enver x`.
 
 > **Breaking:** `enver init` was renamed to `enver add` — `init` implied initialization, but the command only adds a profile.
 
 With no profile, the config's `default` is used. `enver show <profile>` previews
 the resolved env (masked by default); `enver list` lists profiles.
 
-The first positional token is matched against subcommand names (`x`, `show`,
-`export`, `dotenv`, `import`, `list`, `add`, `edit`, `remove`, `rename`,
-`duplicate`, `default`, `validate`, `keygen`, `encrypt`, `decrypt`,
-`completion`) before being treated
-as a profile, so a profile that shares one of those names must be run via the
-explicit verb: `enverx <profile> -- <command>` (or `enver x ...`).
+Profile names may collide with subcommand verbs (`x`, `show`, `export`,
+`dotenv`, `import`, `list`, `add`, `edit`, `remove`, `rename`, `duplicate`,
+`default`, `validate`, `keygen`, `encrypt`, `decrypt`, `completion`);
+`enver x <name> -- <command>` addresses such a profile directly.
 
 Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
 case-insensitive, or values that embed credentials in a URL such as
@@ -362,10 +356,10 @@ powershell` emits `$env:K = 'V'` for PowerShell (`enver export <profile>
 
 ## How it works
 
-1. Load global config, then overlay each `.enver.yaml` from home down to cwd.
+1. Load the global config, then overlay the local `./.enver.yaml`.
 2. Resolve the selected profile (or `default`), walking `extends` with cycle
    detection — root applied first, child overrides parent.
-3. For `enver x` / `enverx`: child env = current `os.Environ()` ⊕ profile env,
+3. For `enver x`: child env = current `os.Environ()` ⊕ profile env,
    then `exec` the command with stdin/out/err connected and the child's exit code
    propagated. On a terminal, enver first primes the tab title (VS Code agent
    mode + profile name) so the child's own title shows live. Windows has no

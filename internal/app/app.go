@@ -1,5 +1,5 @@
-// Package app holds the shared run and resolve logic used by both the enver
-// and enverx binaries.
+// Package app holds the shared run and resolve logic behind the enver
+// commands.
 package app
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/neiromaster/enver/internal/varsubst"
 )
 
-// Options carries the flags shared by every enver/enverx entry point.
+// Options carries the flags shared by the enver commands.
 type Options struct {
 	ConfigPath string
 	KeyPath    string
 	NoLocal    bool
 	NoExpand   bool   // skip $VAR interpolation
-	Name       string // invocation label ("enverx" / "enver x") for error messages
+	Name       string // invocation label ("enver x") for error messages
 }
 
 // Interactive reports whether stdin is a terminal. Injected by the CLI layer
@@ -35,8 +35,8 @@ func Load(opts Options) (config.Config, error) {
 	return config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
 }
 
-// Chdir changes to dir when non-empty. Shared by the enver and enverx entry
-// points so --chdir behaves identically in both binaries; "" is a no-op.
+// Chdir changes to dir when non-empty. Wired into PersistentPreRunE and the
+// completion handlers, which bypass it; "" is a no-op.
 func Chdir(dir string) error {
 	if dir == "" {
 		return nil

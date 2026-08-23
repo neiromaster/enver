@@ -12,11 +12,11 @@ import (
 	"github.com/neiromaster/enver/internal/crypto"
 )
 
-// TestRunNonInteractiveNoKeyFailsLoudly pins the detached-runner recovery
-// behavior: with an encrypted (enc:v2) config and no key cache, enverx must fail
-// loudly instead of prompting or hanging. app.RecoverKey gates on app.Interactive
-// (copied from ui.Interactive at init), so pin that func var directly.
-func TestRunNonInteractiveNoKeyFailsLoudly(t *testing.T) {
+// TestXNonInteractiveNoKeyFailsLoudly pins the runner recovery behavior: with
+// an encrypted (enc:v2) config and no key source, `enver x` must fail loudly
+// instead of prompting or hanging. app.RecoverKey gates on app.Interactive
+// (bound at init), so pin the func vars directly.
+func TestXNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("ENVER_KEY", "")
@@ -38,6 +38,7 @@ func TestRunNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	withGlobalConfig(t, cfgPath)
 
 	prevInteractive := app.Interactive
 	app.Interactive = func() bool { return false }
@@ -48,9 +49,8 @@ func TestRunNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	app.PromptPassphrase = func(string) (string, error) { return "", errors.New("should not prompt in non-interactive mode") }
 	t.Cleanup(func() { app.PromptPassphrase = prevPrompt })
 
-	rootCmd.SetArgs([]string{"--no-local", "anth", "--", "sh", "-c", "true"})
-	err = rootCmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "no key found") {
+	rootCmd.SetArgs([]string{"x", "anth", "--", "sh", "-c", "true"})
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
 }

@@ -19,20 +19,8 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 
-  - id: enverx
-    main: ./cmd/enverx
-    binary: enverx
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X github.com/neiromaster/enver/internal/version.Version={{.Version}} -X github.com/neiromaster/enver/internal/version.Commit={{.Commit}} -X github.com/neiromaster/enver/internal/version.Date={{.CommitDate}}
-    goos: [linux, darwin, windows]
-    goarch: [amd64, arm64]
-
 archives:
-  - ids: [enver, enverx]
+  - ids: [enver]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
@@ -75,7 +63,6 @@ homebrew_casks:
     commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
     binaries:
       - enver
-      - enverx
     completions:
       bash: completions/enver.bash
       zsh: completions/enver.zsh

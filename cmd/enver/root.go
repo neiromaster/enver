@@ -30,7 +30,6 @@ Manage named, layered YAML profiles and run commands with a profile's
 environment injected, without mutating any tool's own config.
 
   enver x <profile> -- <command>        run a command with a profile
-  enverx <profile> -- <command>         dedicated runner binary (same thing)
   enver show <profile>                  preview resolved env (masked)
   enver export <profile>                print ` + "`export K=V`" + ` for eval
   enver dotenv <profile>                export a profile to a .env file (with comments)
@@ -45,11 +44,8 @@ environment injected, without mutating any tool's own config.
   enver validate                        check config health
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
-The first positional token is matched against subcommand names before being
-treated as a profile. Reserved: x, show, export, dotenv, import, list, add, edit, remove,
-rename, duplicate, default, validate, keygen, encrypt, decrypt, completion.
-Use the explicit verb for a profile sharing one: enverx <profile> -- <command>
-(or enver x ...).
+Profile names may collide with subcommand verbs; enver x <name> -- <command>
+addresses such a profile directly.
 
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
 plus a local .enver.yaml in the current directory. Mutating commands write to

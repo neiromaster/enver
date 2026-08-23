@@ -63,7 +63,7 @@ func TestRunMissingCommandReturns127(t *testing.T) {
 	if _, err := exec.LookPath(missing); err == nil {
 		t.Fatalf("precondition failed: %q unexpectedly resolves on PATH", missing)
 	}
-	code := Run([]string{missing}, MergedEnv(nil), "enverx", "p")
+	code := Run([]string{missing}, MergedEnv(nil), "enver x", "p")
 	if code != 127 {
 		t.Fatalf("expected exit code 127 for missing command, got %d", code)
 	}
