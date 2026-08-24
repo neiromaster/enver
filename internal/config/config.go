@@ -181,50 +181,73 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	return cfg, nil
 }
 
-// ResolveProfile resolves name's env by walking its extends graph: each parent
-// is resolved transitively and merged left-to-right (a later parent overrides
-// an earlier one on a shared key), then the profile's own env is applied last
-// (child wins). The returned chain is a self-first DFS pre-order (parents in
-// listed order, transitive, deduped) for display and comment provenance; for a
-// single parent it is identical to the legacy linear chain. A cycle, including
-// one spanning multiple parents, is reported as an error.
-func (c Config) ResolveProfile(name string) (env map[string]string, chain []string, err error) {
-	env, err = c.resolveEnv(name, map[string]bool{})
-	if err != nil {
-		return nil, nil, err
-	}
-	return env, c.chainOf(name, map[string]bool{}), nil
+// Resolved is the outcome of resolving a profile: the merged env, the merged
+// comments (nearest commented definer wins, matching value provenance), and
+// the self-first lineage chain.
+type Resolved struct {
+	Env      map[string]string
+	Comments map[string]string
+	Chain    []string
 }
 
-// resolveEnv returns the fully merged env for name: each parent is resolved
-// transitively and merged left-to-right, then name's own env is applied last
-// (child wins). The visiting set tracks the active path so a cycle (self,
-// mutual, or across multiple parents) is detected; a name is removed from
-// it on the way back up so a diamond is not mistaken for a cycle.
-func (c Config) resolveEnv(name string, visiting map[string]bool) (map[string]string, error) {
+// ResolveProfile resolves name: each parent is resolved transitively and
+// merged left-to-right (a later parent overrides an earlier one on a shared
+// key), then the profile's own env is applied last (child wins). Comments
+// follow the same fold — a definer's comment applies only when it carries
+// one, so a nearer uncommented redefinition keeps the farther comment. The
+// returned chain is a self-first DFS pre-order for display; a cycle,
+// including one spanning multiple parents, is reported as an error.
+func (c Config) ResolveProfile(name string) (Resolved, error) {
+	env, comments, err := c.resolveEnv(name, map[string]bool{})
+	if err != nil {
+		return Resolved{}, err
+	}
+	return Resolved{
+		Env:      env,
+		Comments: comments,
+		Chain:    c.chainOf(name, map[string]bool{}),
+	}, nil
+}
+
+// resolveEnv returns the fully merged env and comments for name: each parent
+// is resolved transitively and merged left-to-right, then name's own entries
+// are applied last (child wins; comments only when the definer carries one).
+// The visiting set tracks the active path so a cycle (self, mutual, or across
+// multiple parents) is detected; a name is removed from it on the way back up
+// so a diamond is not mistaken for a cycle.
+func (c Config) resolveEnv(name string, visiting map[string]bool) (env, comments map[string]string, err error) {
 	if visiting[name] {
-		return nil, fmt.Errorf("extends cycle at %q", name)
+		return nil, nil, fmt.Errorf("extends cycle at %q", name)
 	}
 	p, ok := c.Profiles[name]
 	if !ok {
-		return nil, fmt.Errorf("profile %q not found", name)
+		return nil, nil, fmt.Errorf("profile %q not found", name)
 	}
 	visiting[name] = true
-	env := map[string]string{}
+	env = map[string]string{}
+	comments = map[string]string{}
 	for _, parent := range p.Extends {
-		pe, err := c.resolveEnv(parent, visiting)
+		pe, pc, err := c.resolveEnv(parent, visiting)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for k, v := range pe {
 			env[k] = v
+		}
+		for k, cc := range pc {
+			comments[k] = cc
 		}
 	}
 	delete(visiting, name)
 	for k, v := range p.Env {
 		env[k] = v
 	}
-	return env, nil
+	for k, cc := range p.Comments {
+		if cc != "" {
+			comments[k] = cc
+		}
+	}
+	return env, comments, nil
 }
 
 // chainOf returns name's lineage as a self-first DFS pre-order: name, then each
@@ -266,7 +289,7 @@ func (c Config) resolutionOrder(name string, seen map[string]bool) []string {
 // absent. Comments are read from the YAML node tree at path (the HeadComment
 // above each key), so they survive encryption. A read error returns (nil, err).
 func (c Config) ResolveComments(path, name string) (map[string]string, error) {
-	_, _, err := c.ResolveProfile(name)
+	_, err := c.ResolveProfile(name)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +347,7 @@ func ResolveCommentsMerged(globalOverride string, useLocal bool, name string) (m
 // lets an in-progress edit (whose chain reflects uncommitted extends changes)
 // share dotenv's merged comment provenance.
 func (c Config) ResolveCommentsAcross(globalOverride string, useLocal bool, name string) (map[string]string, error) {
-	_, _, err := c.ResolveProfile(name)
+	_, err := c.ResolveProfile(name)
 	if err != nil {
 		return nil, err
 	}

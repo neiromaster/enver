@@ -141,8 +141,8 @@ func doAdd(cmd *cobra.Command, args []string) error {
 
 	parentEnv := map[string]string{}
 	if extends != "" {
-		if resolved, _, err := pickerCfg.ResolveProfile(extends); err == nil {
-			parentEnv = resolved
+		if r, err := pickerCfg.ResolveProfile(extends); err == nil {
+			parentEnv = r.Env
 		}
 	}
 

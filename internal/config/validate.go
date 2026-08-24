@@ -42,7 +42,7 @@ func Validate(cfg Config) []Issue {
 			}
 		}
 		if len(p.Extends) > 0 {
-			if _, _, err := cfg.ResolveProfile(n); err != nil {
+			if _, err := cfg.ResolveProfile(n); err != nil {
 				if strings.Contains(err.Error(), "cycle") {
 					issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
 				}

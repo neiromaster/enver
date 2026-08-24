@@ -47,36 +47,40 @@ func Chdir(dir string) error {
 // Resolve walks the profile's extends chain and transparently decrypts any
 // enc:v2: values. A key is required only when encrypted values are present.
 func Resolve(cfg config.Config, profile string, opts Options) (map[string]string, []string, error) {
-	env, chain, err := cfg.ResolveProfile(profile)
+	r, err := cfg.ResolveProfile(profile)
 	if err != nil {
-		return nil, chain, err
+		return nil, r.Chain, err
 	}
-	if !hasEncrypted(env) {
+	if !hasEncrypted(r.Env) {
+		env := r.Env
 		if !opts.NoExpand {
 			env = varsubst.Expand(env, osEnvMap())
 		}
-		return env, chain, nil
+		return env, r.Chain, nil
 	}
 	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, string, error) {
-		salt, sample := firstSaltAndSample(env)
+		salt, sample := firstSaltAndSample(r.Env)
 		return salt, sample, nil
 	})
 	if err != nil {
-		return nil, chain, err
+		return nil, r.Chain, err
 	}
-	for k, v := range env {
+	env := make(map[string]string, len(r.Env))
+	for k, v := range r.Env {
 		if crypto.IsEncrypted(v) {
 			plain, err := crypto.DecryptValue(v, key)
 			if err != nil {
-				return nil, chain, fmt.Errorf("decrypt %s: %w", k, err)
+				return nil, r.Chain, fmt.Errorf("decrypt %s: %w", k, err)
 			}
 			env[k] = plain
+		} else {
+			env[k] = v
 		}
 	}
 	if !opts.NoExpand {
 		env = varsubst.Expand(env, osEnvMap())
 	}
-	return env, chain, nil
+	return env, r.Chain, nil
 }
 
 // Run is the full run path: parse args, load config, resolve the profile, and

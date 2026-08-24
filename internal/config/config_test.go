@@ -69,12 +69,12 @@ func TestMergeExtends(t *testing.T) {
 		"l": {Env: map[string]string{"S": "local"}},
 		"p": {Extends: Extends{"g", "l"}},
 	}}
-	env, _, err := cfg.ResolveProfile("p")
+	r, err := cfg.ResolveProfile("p")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env["S"] != "local" {
-		t.Fatalf("S = %q, want local (later parent wins)", env["S"])
+	if r.Env["S"] != "local" {
+		t.Fatalf("S = %q, want local (later parent wins)", r.Env["S"])
 	}
 }
 
@@ -84,16 +84,16 @@ func TestResolveProfileExtends(t *testing.T) {
 		"mid":  {Extends: Extends{"root"}, Env: map[string]string{"B": "2", "C": "2"}},
 		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"C": "3"}},
 	}}
-	env, chain, err := cfg.ResolveProfile("leaf")
+	r, err := cfg.ResolveProfile("leaf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := chain, []string{"leaf", "mid", "root"}; !sliceEq(got, want) {
+	if got, want := r.Chain, []string{"leaf", "mid", "root"}; !sliceEq(got, want) {
 		t.Fatalf("chain = %v, want %v", got, want)
 	}
 	want := map[string]string{"A": "1", "B": "2", "C": "3"}
-	if !mapEq(env, want) {
-		t.Fatalf("env = %v, want %v", env, want)
+	if !mapEq(r.Env, want) {
+		t.Fatalf("env = %v, want %v", r.Env, want)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestResolveProfileCycle(t *testing.T) {
 		"a": {Extends: Extends{"b"}},
 		"b": {Extends: Extends{"a"}},
 	}}
-	_, _, err := cfg.ResolveProfile("a")
+	_, err := cfg.ResolveProfile("a")
 	if err == nil {
 		t.Fatal("cycle not detected")
 	}
@@ -110,7 +110,7 @@ func TestResolveProfileCycle(t *testing.T) {
 
 func TestResolveProfileNotFound(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{}}
-	_, _, err := cfg.ResolveProfile("nope")
+	_, err := cfg.ResolveProfile("nope")
 	if err == nil {
 		t.Fatal("missing profile not reported")
 	}
@@ -213,12 +213,12 @@ func TestLoadMergedLayering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := cfg.ResolveProfile("p")
+	r, err := cfg.ResolveProfile("p")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env["K"] != "local" {
-		t.Fatalf("K = %q, want local (cwd .enver.yaml)", env["K"])
+	if r.Env["K"] != "local" {
+		t.Fatalf("K = %q, want local (cwd .enver.yaml)", r.Env["K"])
 	}
 
 	// --no-local falls back to global only.
@@ -226,9 +226,9 @@ func TestLoadMergedLayering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env2, _, _ := cfg2.ResolveProfile("p")
-	if env2["K"] != "base" {
-		t.Fatalf("no-local K = %q, want base", env2["K"])
+	r2, _ := cfg2.ResolveProfile("p")
+	if r2.Env["K"] != "base" {
+		t.Fatalf("no-local K = %q, want base", r2.Env["K"])
 	}
 
 	// Case 2: cwd has no .enver.yaml but a parent dir does → the parent is NOT
@@ -242,9 +242,9 @@ func TestLoadMergedLayering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env3, _, _ := cfg3.ResolveProfile("p")
-	if env3["K"] != "base" {
-		t.Fatalf("K = %q, want base (parent .enver.yaml must not be walked)", env3["K"])
+	r3, _ := cfg3.ResolveProfile("p")
+	if r3.Env["K"] != "base" {
+		t.Fatalf("K = %q, want base (parent .enver.yaml must not be walked)", r3.Env["K"])
 	}
 }
 
@@ -323,7 +323,7 @@ func TestExtendedBy(t *testing.T) {
 	}
 }
 
-func TestResolveComments(t *testing.T) {
+func TestResolveCommentsChainFold(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	const yamlDoc = "profiles:\n" +
@@ -344,27 +344,27 @@ func TestResolveComments(t *testing.T) {
 	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Profiles: map[string]Profile{
-		"base": {Env: map[string]string{"FOO": "base", "BAR": "base"}},
-		"mid":  {Extends: Extends{"base"}, Env: map[string]string{"FOO": "mid"}},
-		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"OWN": "x"}},
-	}}
-	got, err := cfg.ResolveComments(path, "leaf")
+	cfg, err := load(path)
 	if err != nil {
-		t.Fatalf("ResolveComments: %v", err)
+		t.Fatal(err)
 	}
-	// FOO: base comments first, mid overwrites (nearest-with-comment), leaf does
-	// not define FOO — so the nearest commented definer is mid.
-	if got["FOO"] != "mid foo" {
-		t.Fatalf("FOO comment = %q, want %q", got["FOO"], "mid foo")
+	r, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatalf("ResolveProfile: %v", err)
 	}
-	// BAR: defined only by base, with no comment → absent.
-	if _, ok := got["BAR"]; ok {
-		t.Fatalf("BAR should be absent (no comment), got %q", got["BAR"])
+	// FOO: base comments first, mid overwrites (nearest-with-comment), leaf
+	// does not define FOO — so the nearest commented definer is mid.
+	if r.Comments["FOO"] != "mid foo" {
+		t.Fatalf("FOO comment = %q, want %q", r.Comments["FOO"], "mid foo")
 	}
-	// OWN: defined by leaf, no comment → absent.
-	if _, ok := got["OWN"]; ok {
-		t.Fatalf("OWN should be absent (no comment), got %q", got["OWN"])
+	if _, ok := r.Comments["BAR"]; ok {
+		t.Fatalf("BAR should be absent (no comment), got %q", r.Comments["BAR"])
+	}
+	if _, ok := r.Comments["OWN"]; ok {
+		t.Fatalf("OWN should be absent (no comment), got %q", r.Comments["OWN"])
+	}
+	if r.Chain[0] != "leaf" || len(r.Chain) != 3 {
+		t.Fatalf("chain = %v, want [leaf mid base]", r.Chain)
 	}
 }
 
@@ -534,7 +534,7 @@ func TestResolveProfileMultipleExtends(t *testing.T) {
 		"trait2": {Extends: Extends{"base"}, Env: map[string]string{"C": "t2", "D": "t2"}},
 		"mix":    {Extends: Extends{"trait1", "trait2"}, Env: map[string]string{"D": "own"}},
 	}}
-	env, chain, err := cfg.ResolveProfile("mix")
+	r, err := cfg.ResolveProfile("mix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,10 +542,10 @@ func TestResolveProfileMultipleExtends(t *testing.T) {
 	// C=t2 (trait2's direct definition wins), D=own (child wins). base unchanged: A=base.
 	// This is the diamond behavior: later parent's full env (including inherited keys) overwrites earlier.
 	want := map[string]string{"A": "base", "B": "base", "C": "t2", "D": "own"}
-	if !mapEq(env, want) {
-		t.Fatalf("env = %v, want %v", env, want)
+	if !mapEq(r.Env, want) {
+		t.Fatalf("env = %v, want %v", r.Env, want)
 	}
-	if got, want := chain, []string{"mix", "trait1", "base", "trait2"}; !sliceEq(got, want) {
+	if got, want := r.Chain, []string{"mix", "trait1", "base", "trait2"}; !sliceEq(got, want) {
 		t.Fatalf("chain = %v, want %v", got, want)
 	}
 }
@@ -556,7 +556,7 @@ func TestResolveProfileMultiCycle(t *testing.T) {
 		"b": {Extends: Extends{"c"}},
 		"c": {Extends: Extends{"a"}},
 	}}
-	if _, _, err := cfg.ResolveProfile("a"); err == nil {
+	if _, err := cfg.ResolveProfile("a"); err == nil {
 		t.Fatal("multi-parent cycle not detected")
 	}
 }
@@ -609,19 +609,53 @@ func TestResolveCommentsMixinOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := cfg.ResolveProfile("self")
+	r, err := cfg.ResolveProfile("self")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := env["K"], "bv"; got != want {
+	if got, want := r.Env["K"], "bv"; got != want {
 		t.Fatalf("value K = %q, want %q", got, want)
 	}
-	comments, err := cfg.ResolveComments(path, "self")
+	if got, want := r.Comments["K"], "from b"; got != want {
+		t.Fatalf("comment K = %q, want %q (value source is b)", got, want)
+	}
+}
+
+// TestCommentProvenanceMatchesValueProvenance pins the approved delta: for a
+// key defined in both a local parent profile and the global self profile, the
+// value comes from global self (chain position dominates layers) and the
+// comment must now come from the same definer. The old file-major comment
+// walk returned the local parent comment here.
+func TestCommentProvenanceMatchesValueProvenance(t *testing.T) {
+	dir := t.TempDir()
+	global := filepath.Join(dir, "global.yaml")
+	local := filepath.Join(dir, "local.yaml")
+	if err := os.WriteFile(global, []byte("profiles:\n"+
+		"  p1:\n    env:\n      # from global p1\n      FOO: a\n"+
+		"  self:\n    extends: p1\n    env:\n      # from global self\n      FOO: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("profiles:\n"+
+		"  p1:\n    env:\n      # from local p1\n      FOO: c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := load(global)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := comments["K"], "from b"; got != want {
-		t.Fatalf("comment K = %q, want %q (value source is b)", got, want)
+	l, err := load(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Merge(g, l).ResolveProfile("self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := r.Env["FOO"], "b"; got != want {
+		t.Fatalf("value = %q, want %q", got, want)
+	}
+	if got, want := r.Comments["FOO"], "from global self"; got != want {
+		t.Fatalf("comment = %q, want %q (provenance must match value)", got, want)
 	}
 }
 

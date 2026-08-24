@@ -63,8 +63,8 @@ func doList(w io.Writer) error {
 		own := len(p.Env)
 		varsCell := fmt.Sprintf("%d", own)
 		if len(p.Extends) > 0 {
-			if resolved, _, err := cfg.ResolveProfile(n); err == nil {
-				varsCell = fmt.Sprintf("%d (→%d)", own, len(resolved))
+			if r, err := cfg.ResolveProfile(n); err == nil {
+				varsCell = fmt.Sprintf("%d (→%d)", own, len(r.Env))
 			}
 		}
 		rows = append(rows, listRow{marker, n, extends, varsCell})
@@ -109,11 +109,11 @@ func doListJSON(w io.Writer) error {
 		p := cfg.Profiles[n]
 		resolved := len(p.Env)
 		if len(p.Extends) > 0 {
-			r, _, err := cfg.ResolveProfile(n)
+			r, err := cfg.ResolveProfile(n)
 			if err != nil {
 				return err
 			}
-			resolved = len(r)
+			resolved = len(r.Env)
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
 			Name:     n,

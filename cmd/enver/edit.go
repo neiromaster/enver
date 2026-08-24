@@ -159,13 +159,13 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 	tp := probe.Profiles[s.name]
 	tp.Env = nil // resolve parents only
 	probe.Profiles[s.name] = tp
-	parentResolved, _, err := probe.ResolveProfile(s.name)
+	pr, err := probe.ResolveProfile(s.name)
 	if err != nil {
 		return nil
 	}
 	out := make(map[string]bool, len(s.entries))
 	for _, e := range s.entries {
-		if _, ok := parentResolved[e.Key]; ok {
+		if _, ok := pr.Env[e.Key]; ok {
 			out[e.Key] = true
 		}
 	}
@@ -415,7 +415,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			s.upsert(edited)
 		case "inherited":
 			probe := probeConfig(cfg, s)
-			comments, _ := probe.ResolveCommentsAcross(globalFlags.configPath, !globalFlags.noLocal, s.name)
+			var comments map[string]string
+			if pr, perr := probe.ResolveProfile(s.name); perr == nil {
+				comments = pr.Comments
+			}
 			edited, err := ui.EnvCard(overrideSeed(inherited, comments, key))
 			if err != nil {
 				continue
@@ -458,7 +461,7 @@ func commitValidate(cfg config.Config, s editState) error {
 		tp := probe.Profiles[s.name]
 		tp.Extends = s.extends
 		probe.Profiles[s.name] = tp
-		if _, _, err := probe.ResolveProfile(s.name); err != nil {
+		if _, err := probe.ResolveProfile(s.name); err != nil {
 			return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
 		}
 	}
@@ -510,11 +513,11 @@ func probeConfig(cfg config.Config, s editState) config.Config {
 // inherited entries; commitValidate reports the cycle at commit time.
 func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
 	probe := probeConfig(cfg, s)
-	resolved, _, err := probe.ResolveProfile(s.name)
+	r, err := probe.ResolveProfile(s.name)
 	if err != nil {
 		return nil
 	}
-	return inheritedEntries(resolved, s.envMap())
+	return inheritedEntries(r.Env, s.envMap())
 }
 
 // extendsOptions builds the picker for changing extends: (none) plus every other
