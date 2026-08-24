@@ -670,3 +670,31 @@ func TestProfileCommentsCommentWithoutSpace(t *testing.T) {
 		t.Fatalf("comment without space must be kept verbatim, got %q", got)
 	}
 }
+
+func TestMergeCommentsSticky(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{
+		"p": {
+			Env:      map[string]string{"A": "1", "B": "2"},
+			Comments: map[string]string{"A": "global a", "B": "global b"},
+		},
+	}}
+	over := Config{Profiles: map[string]Profile{
+		"p": {
+			Env:      map[string]string{"A": "x", "C": "3"},
+			Comments: map[string]string{"C": "local c"},
+		},
+	}}
+	got := Merge(base, over).Profiles["p"]
+	if v := got.Comments["A"]; v != "global a" {
+		t.Fatalf("A comment = %q, want %q (redefined without comment keeps base)", v, "global a")
+	}
+	if v := got.Comments["B"]; v != "global b" {
+		t.Fatalf("B comment = %q, want %q (untouched key keeps base)", v, "global b")
+	}
+	if v := got.Comments["C"]; v != "local c" {
+		t.Fatalf("C comment = %q, want %q (new commented key)", v, "local c")
+	}
+	if v := got.Env["A"]; v != "x" {
+		t.Fatalf("A value = %q, want %q (values always overwrite)", v, "x")
+	}
+}

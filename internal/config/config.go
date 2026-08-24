@@ -138,6 +138,15 @@ func Merge(base, override Config) Config {
 		for k, v := range p.Env {
 			bp.Env[k] = v
 		}
+		for k, c := range p.Comments {
+			if c == "" {
+				continue
+			}
+			if bp.Comments == nil {
+				bp.Comments = map[string]string{}
+			}
+			bp.Comments[k] = c
+		}
 		out.Profiles[name] = bp
 	}
 	return out
