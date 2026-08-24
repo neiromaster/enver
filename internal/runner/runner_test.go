@@ -1,19 +1,22 @@
 package runner
 
 import (
-	"os"
 	"os/exec"
+	"reflect"
 	"testing"
 )
 
 func TestMergedEnvOverrides(t *testing.T) {
-	t.Setenv("ENVER_TEST_EXISTING", "from-shell")
-	t.Setenv("ENVER_TEST_SHARED", "from-shell")
-
-	env := MergedEnv(map[string]string{
-		"ENVER_TEST_SHARED":  "from-profile",
-		"ENVER_TEST_PROFILE": "from-profile",
-	})
+	env := MergedEnv(
+		map[string]string{
+			"ENVER_TEST_EXISTING": "from-shell",
+			"ENVER_TEST_SHARED":   "from-shell",
+		},
+		map[string]string{
+			"ENVER_TEST_SHARED":  "from-profile",
+			"ENVER_TEST_PROFILE": "from-profile",
+		},
+	)
 
 	m := map[string]string{}
 	for _, kv := range env {
@@ -32,29 +35,25 @@ func TestMergedEnvOverrides(t *testing.T) {
 }
 
 func TestMergedEnvSorted(t *testing.T) {
-	t.Setenv("ZZZ_TEST", "1")
-	t.Setenv("AAA_TEST", "1")
-	env := MergedEnv(map[string]string{"MMM_TEST": "1"})
-	// Compare keys, not full KEY=VALUE entries: values may contain bytes (e.g.
-	// "(x86)" in Windows path env vars) that sort differently from keys.
-	prev := ""
-	for _, kv := range env {
-		key, _, ok := splitKV(kv)
-		if !ok {
-			t.Fatalf("entry missing '=': %q", kv)
-		}
-		if prev > key {
-			t.Fatalf("env keys not sorted: %q before %q", prev, key)
-		}
-		prev = key
+	env := MergedEnv(
+		map[string]string{"ZZZ_TEST": "1", "AAA_TEST": "1"},
+		map[string]string{"MMM_TEST": "1"},
+	)
+	want := []string{"AAA_TEST=1", "MMM_TEST=1", "ZZZ_TEST=1"}
+	if !reflect.DeepEqual(env, want) {
+		t.Fatalf("merged env = %v, want %v", env, want)
 	}
 }
 
-func TestMergedEnvDoesNotMutateOsEnviron(t *testing.T) {
-	t.Setenv("ENVER_TEST_KEEP", "shell")
-	_ = MergedEnv(map[string]string{"ENVER_TEST_KEEP": "profile"})
-	if v, ok := os.LookupEnv("ENVER_TEST_KEEP"); !ok || v != "shell" {
-		t.Fatalf("os.Environ mutated: got %q", v)
+func TestMergedEnvDoesNotMutateInputs(t *testing.T) {
+	osEnv := map[string]string{"ENVER_TEST_KEEP": "shell"}
+	profileEnv := map[string]string{"ENVER_TEST_OVERRIDE": "profile"}
+	_ = MergedEnv(osEnv, profileEnv)
+	if osEnv["ENVER_TEST_KEEP"] != "shell" {
+		t.Fatalf("osEnv mutated: got %q", osEnv["ENVER_TEST_KEEP"])
+	}
+	if profileEnv["ENVER_TEST_OVERRIDE"] != "profile" {
+		t.Fatalf("profileEnv mutated: got %q", profileEnv["ENVER_TEST_OVERRIDE"])
 	}
 }
 
@@ -63,7 +62,7 @@ func TestRunMissingCommandReturns127(t *testing.T) {
 	if _, err := exec.LookPath(missing); err == nil {
 		t.Fatalf("precondition failed: %q unexpectedly resolves on PATH", missing)
 	}
-	code := Run([]string{missing}, MergedEnv(nil), "enver x", "p")
+	code := Run([]string{missing}, MergedEnv(nil, nil), "enver x", "p")
 	if code != 127 {
 		t.Fatalf("expected exit code 127 for missing command, got %d", code)
 	}

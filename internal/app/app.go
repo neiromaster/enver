@@ -106,7 +106,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, runner.MergedEnv(env), opts.Name, profile); code != 0 {
+	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), env), opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil
@@ -224,7 +224,8 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
-// osEnvMap snapshots the process environment as a map for varsubst.Expand.
+// osEnvMap snapshots the process environment as a map for varsubst.Expand and
+// runner.MergedEnv.
 func osEnvMap() map[string]string {
 	m := make(map[string]string)
 	for _, kv := range os.Environ() {

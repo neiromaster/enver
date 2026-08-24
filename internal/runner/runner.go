@@ -3,27 +3,20 @@ package runner
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"sort"
-	"strings"
 
 	"golang.org/x/term"
 )
 
-// MergedEnv starts from the current environment and overlays the profile vars,
-// returning a sorted "K=V" slice suitable for exec.Cmd.Env.
-func MergedEnv(profileEnv map[string]string) []string {
-	curMap := map[string]string{}
-	for _, kv := range os.Environ() {
-		k, v, ok := strings.Cut(kv, "=")
-		if ok {
-			curMap[k] = v
-		}
-	}
-	for k, v := range profileEnv {
-		curMap[k] = v
-	}
+// MergedEnv overlays profileEnv on osEnv, returning a sorted "K=V" slice
+// suitable for exec.Cmd.Env.
+func MergedEnv(osEnv, profileEnv map[string]string) []string {
+	curMap := make(map[string]string, len(osEnv)+len(profileEnv))
+	maps.Copy(curMap, osEnv)
+	maps.Copy(curMap, profileEnv)
 	keys := make([]string, 0, len(curMap))
 	for k := range curMap {
 		keys = append(keys, k)
