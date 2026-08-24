@@ -87,3 +87,29 @@ func TestReadProfileEmptyFileYieldsNotFound(t *testing.T) {
 		t.Fatal("empty file must report the profile as absent")
 	}
 }
+
+func TestReadProfileMalformedYamlErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("profiles as sequence", func(t *testing.T) {
+		path := filepath.Join(dir, "sequence.yaml")
+		if err := os.WriteFile(path, []byte("profiles:\n  - a\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, _, err := ReadProfile(path, "a")
+		if err == nil {
+			t.Fatal("expected error for profiles mapping as sequence, got nil")
+		}
+	})
+
+	t.Run("scalar profile value", func(t *testing.T) {
+		path := filepath.Join(dir, "scalar.yaml")
+		if err := os.WriteFile(path, []byte("profiles:\n  p: foo\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, _, err := ReadProfile(path, "p")
+		if err == nil {
+			t.Fatal("expected error for scalar profile value, got nil")
+		}
+	})
+}

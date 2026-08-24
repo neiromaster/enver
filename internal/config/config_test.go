@@ -368,7 +368,7 @@ func TestResolveCommentsChainFold(t *testing.T) {
 	}
 }
 
-// TestResolveCommentsMergedGlobalOnly mirrors TestResolveComments but through the
+// TestResolveCommentsMergedGlobalOnly mirrors TestResolveCommentsChainFold but through the
 // merged resolver with local layering disabled: a regression guard that the
 // single-file behavior is preserved.
 func TestResolveCommentsMergedGlobalOnly(t *testing.T) {
@@ -477,10 +477,6 @@ func TestResolveCommentsMergedLocalWins(t *testing.T) {
 	}
 }
 
-// TestResolveCommentsAcrossUsesReceiverChain verifies the method resolves
-// comments along the receiver's chain (edit-aware), not the on-disk chain. This
-// is what lets an in-progress edit see its own uncommitted extends change when
-// seeding an override, while still spanning merged layers like dotenv.
 // TestEditProbeResolvesCommentsAlongWorkingChain verifies an in-memory probe
 // (simulating an in-progress edit) resolves comments along its own chain:
 // dev now extends other, not base, so FOO takes the other comment.
@@ -499,7 +495,7 @@ func TestEditProbeResolvesCommentsAlongWorkingChain(t *testing.T) {
 	}
 }
 
-// TestResolveCommentsMergedMissingConfig verifies a missing global file does not
+// TestResolveMissingConfigErrorsOnProfile verifies a missing global file does not
 // panic: LoadMerged yields an empty Config and ResolveProfile reports the
 // missing profile as an error.
 func TestResolveMissingConfigErrorsOnProfile(t *testing.T) {

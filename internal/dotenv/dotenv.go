@@ -94,7 +94,8 @@ func Format(env map[string]string, comments map[string]string, opts Options) []b
 // formatComment normalizes a stored comment into "# "-prefixed line(s). Each line
 // has any leading "#" (and surrounding spaces) stripped before re-prefixing, so
 // output is uniform regardless of how the YAML node tree stored the prefixes —
-// notably the multi-line case where ResolveComments strips only the first line.
+// notably the multi-line case where stripCommentPrefix strips only the first line
+// at extraction and formatComment normalizes the remaining lines.
 // Returns "" when the comment is empty, so callers can always append the result.
 func formatComment(c string) string {
 	c = strings.TrimSpace(c)
