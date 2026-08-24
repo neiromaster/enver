@@ -69,3 +69,21 @@ func TestReadProfileMissingFile(t *testing.T) {
 		t.Fatal("ok = true for missing file")
 	}
 }
+
+// TestReadProfileEmptyFileYieldsNotFound pins the approved delta: an empty
+// config file is an empty config (the struct-path convention), so the profile
+// is simply absent rather than the file being rejected.
+func TestReadProfileEmptyFileYieldsNotFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, ok, err := ReadProfile(path, "p")
+	if err != nil {
+		t.Fatalf("empty file must not error, got %v", err)
+	}
+	if ok {
+		t.Fatal("empty file must report the profile as absent")
+	}
+}

@@ -39,28 +39,6 @@ func (e *Extends) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// readExtendsNode reads an extends node (scalar or sequence) from the raw YAML
-// tree into a slice, mirroring UnmarshalYAML for the node-tree paths
-// (ReadProfile, comments).
-func readExtendsNode(n *yaml.Node) Extends {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		if n.Tag == "!!null" || n.Value == "" {
-			return nil
-		}
-		return Extends{n.Value}
-	case yaml.SequenceNode:
-		var names []string
-		if err := n.Decode(&names); err != nil {
-			return nil
-		}
-		return Extends(names)
-	case yaml.AliasNode:
-		return readExtendsNode(n.Alias)
-	}
-	return nil
-}
-
 // writeExtendsNode writes extends into prof: omitted when empty, a scalar when
 // single, a sequence when multiple. Mirrors the accepted read forms.
 func writeExtendsNode(prof *yaml.Node, extends Extends) {
