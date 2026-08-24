@@ -624,3 +624,49 @@ func TestResolveCommentsMixinOverlap(t *testing.T) {
 		t.Fatalf("comment K = %q, want %q (value source is b)", got, want)
 	}
 }
+
+func TestProfileCommentsExtractedAtDecode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yml := "profiles:\n" +
+		"  p:\n" +
+		"    env:\n" +
+		"      # first line\n" +
+		"      # second\n" +
+		"      A: 1\n" +
+		"      B: 2\n" +
+		"  q: {}\n"
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Profiles["p"]
+	if got, want := p.Comments["A"], "first line\n# second"; got != want {
+		t.Fatalf("A comment = %q, want %q", got, want)
+	}
+	if _, ok := p.Comments["B"]; ok {
+		t.Fatalf("B should have no comment, got %q", p.Comments["B"])
+	}
+	if cfg.Profiles["q"].Comments != nil {
+		t.Fatalf("profile without env should have nil Comments, got %v", cfg.Profiles["q"].Comments)
+	}
+}
+
+func TestProfileCommentsCommentWithoutSpace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yml := "profiles:\n  p:\n    env:\n      #nospace\n      A: 1\n"
+	if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Profiles["p"].Comments["A"]; got != "#nospace" {
+		t.Fatalf("comment without space must be kept verbatim, got %q", got)
+	}
+}

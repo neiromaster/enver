@@ -13,8 +13,45 @@ import (
 
 // Profile is one named environment profile.
 type Profile struct {
-	Extends Extends           `yaml:"extends"`
-	Env     map[string]string `yaml:"env"`
+	Extends  Extends           `yaml:"extends"`
+	Env      map[string]string `yaml:"env"`
+	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
+}
+
+// UnmarshalYAML decodes a profile and, in the same pass, lifts the HeadComment
+// of each env key into Comments — the single place that knows where comments
+// live in the YAML representation.
+func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
+	type raw Profile
+	var r raw
+	if err := value.Decode(&r); err != nil {
+		return err
+	}
+	*p = Profile(r)
+	env := envMapping(value)
+	if env == nil {
+		return nil
+	}
+	for i := 0; i+1 < len(env.Content); i += 2 {
+		keyNode := env.Content[i]
+		if c := keyNode.HeadComment; c != "" {
+			if p.Comments == nil {
+				p.Comments = map[string]string{}
+			}
+			p.Comments[keyNode.Value] = stripCommentPrefix(c)
+		}
+	}
+	return nil
+}
+
+// stripCommentPrefix removes the leading "# " the YAML parser keeps on the
+// first line of a HeadComment. Later lines keep their prefixes; the dotenv
+// formatter normalizes per line at render time.
+func stripCommentPrefix(c string) string {
+	if len(c) >= 2 && c[0] == '#' && c[1] == ' ' {
+		return c[2:]
+	}
+	return c
 }
 
 // Config is the merged top-level document.
