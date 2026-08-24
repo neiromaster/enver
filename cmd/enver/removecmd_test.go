@@ -49,10 +49,10 @@ func TestNotFoundInTarget(t *testing.T) {
 
 	global := filepath.Join(dir, "global.yaml")
 	local := config.LocalPath()
-	if err := config.UpsertProfile(global, "dev", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(global, "dev", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.UpsertProfile(local, "stage", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(local, "stage", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 

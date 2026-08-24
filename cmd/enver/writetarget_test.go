@@ -49,10 +49,10 @@ func twoLayers(t *testing.T) (globalPath, localPath string) {
 	saveGlobalFlags(t)
 	globalPath = filepath.Join(dir, "global.yaml")
 	localPath = config.LocalPath()
-	if err := config.UpsertProfile(globalPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(globalPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, false); err != nil {
 		t.Fatalf("global upsert: %v", err)
 	}
-	if err := config.UpsertProfile(localPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(localPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, false); err != nil {
 		t.Fatalf("local upsert: %v", err)
 	}
 	globalFlags.configPath = globalPath
@@ -218,10 +218,10 @@ func TestEncryptWriteTarget(t *testing.T) {
 
 	gPath := filepath.Join(dir, "global.yaml")
 	lPath := config.LocalPath()
-	if err := config.UpsertProfile(gPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(gPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.UpsertProfile(lPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(lPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	globalFlags.configPath = gPath
@@ -234,8 +234,8 @@ func TestEncryptWriteTarget(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			// Re-create both layers so each subtest starts from plaintext.
-			_ = config.UpsertProfile(gPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, true, nil)
-			_ = config.UpsertProfile(lPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, true, nil)
+			_ = config.UpsertProfile(gPath, "p", config.Profile{Env: map[string]string{"A": "g"}}, false, true)
+			_ = config.UpsertProfile(lPath, "p", config.Profile{Env: map[string]string{"A": "l"}}, false, true)
 			globalFlags.global = global
 			cmd := &cobra.Command{}
 			cmd.Flags().Bool("all", false, "")
@@ -260,7 +260,7 @@ func TestCompleteProfileMergedForReads(t *testing.T) {
 	dir := chdirTemp(t)
 	saveGlobalFlags(t)
 	gPath := filepath.Join(dir, "global.yaml")
-	if err := config.UpsertProfile(gPath, "dev", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(gPath, "dev", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	// No local .enver.yaml in dir -- a global-only setup, the default layout.

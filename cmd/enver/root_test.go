@@ -107,7 +107,7 @@ func TestCompletionAppliesChdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.UpsertProfile(filepath.Join(proj, config.LocalFilename), "projdev", config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(filepath.Join(proj, config.LocalFilename), "projdev", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 

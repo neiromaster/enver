@@ -24,9 +24,8 @@ func TestWriteProfileReplacesEnvAndDeletesAbsentKeys(t *testing.T) {
 	// comments map is authoritative — WriteProfile writes exactly these keys
 	// with exactly these comments (the caller, edit, passes the full set seeded
 	// from ReadProfile).
-	p := Profile{Env: map[string]string{"KEEP": "1", "MODEL": "claude-sonnet-5"}}
-	comments := map[string]string{"KEEP": "kept hint", "MODEL": "chosen model"}
-	if err := WriteProfile(path, "anth", p, false, false, comments); err != nil {
+	p := Profile{Env: map[string]string{"KEEP": "1", "MODEL": "claude-sonnet-5"}, Comments: map[string]string{"KEEP": "kept hint", "MODEL": "chosen model"}}
+	if err := WriteProfile(path, "anth", p, false, false); err != nil {
 		t.Fatalf("WriteProfile: %v", err)
 	}
 	s := string(mustRead(t, path))
@@ -51,7 +50,7 @@ func TestWriteProfileClearsExtendsAndSetsDefault(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  anth:\n    extends: base\n    env:\n      K: v\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteProfile(path, "anth", Profile{Extends: nil, Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
+	if err := WriteProfile(path, "anth", Profile{Extends: nil, Env: map[string]string{"K": "v"}}, true, false); err != nil {
 		t.Fatalf("WriteProfile: %v", err)
 	}
 	s := string(mustRead(t, path))
@@ -69,7 +68,7 @@ func TestWriteProfileClearsDefault(t *testing.T) {
 	if err := os.WriteFile(path, []byte("default: anth\nprofiles:\n  anth:\n    env:\n      K: v\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, false, true, nil); err != nil {
+	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, false, true); err != nil {
 		t.Fatalf("WriteProfile: %v", err)
 	}
 	if strings.Contains(string(mustRead(t, path)), "default") {
@@ -80,7 +79,7 @@ func TestWriteProfileClearsDefault(t *testing.T) {
 func TestWriteProfileCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yaml")
-	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, true, false, nil); err != nil {
+	if err := WriteProfile(path, "anth", Profile{Env: map[string]string{"K": "v"}}, true, false); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if !strings.Contains(string(mustRead(t, path)), "anth") {

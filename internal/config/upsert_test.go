@@ -27,7 +27,7 @@ profiles:
 		t.Fatal(err)
 	}
 	p := Profile{Env: map[string]string{"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}}
-	if err := UpsertProfile(path, "anth", p, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "anth", p, false, false); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -53,7 +53,7 @@ func TestUpsertCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.yaml")
 	p := Profile{Extends: Extends{"anth"}, Env: map[string]string{"K": "v"}}
-	if err := UpsertProfile(path, "new", p, true, false, nil); err != nil {
+	if err := UpsertProfile(path, "new", p, true, false); err != nil {
 		t.Fatalf("upsert into missing file: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -206,9 +206,8 @@ func TestCryptoPrefixMatch(t *testing.T) {
 func TestUpsertWritesEnvCommentAboveEntry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	p := Profile{Env: map[string]string{"API_KEY": "sk-xxx"}}
-	comments := map[string]string{"API_KEY": "get this token from vault X"}
-	if err := UpsertProfile(path, "anth", p, false, false, comments); err != nil {
+	p := Profile{Env: map[string]string{"API_KEY": "sk-xxx"}, Comments: map[string]string{"API_KEY": "get this token from vault X"}}
+	if err := UpsertProfile(path, "anth", p, false, false); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	s := string(mustRead(t, path))
@@ -224,15 +223,15 @@ func TestUpsertKeepsCommentWhenValueUpdatedWithoutComment(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := UpsertProfile(path, "anth",
-		Profile{Env: map[string]string{"API_KEY": "v1"}},
-		false, false, map[string]string{"API_KEY": "from vault"}); err != nil {
+		Profile{Env: map[string]string{"API_KEY": "v1"}, Comments: map[string]string{"API_KEY": "from vault"}},
+		false, false); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 	// Re-upsert the same key with a new value but no comment: value changes,
 	// the existing comment must survive.
 	if err := UpsertProfile(path, "anth",
 		Profile{Env: map[string]string{"API_KEY": "v2"}},
-		false, false, nil); err != nil {
+		false, false); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 	s := string(mustRead(t, path))
@@ -248,8 +247,8 @@ func TestEnvCommentSurvivesEncryptDecrypt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := UpsertProfile(path, "anth",
-		Profile{Env: map[string]string{"API_KEY": "sk-secret"}},
-		false, false, map[string]string{"API_KEY": "from vault"}); err != nil {
+		Profile{Env: map[string]string{"API_KEY": "sk-secret"}, Comments: map[string]string{"API_KEY": "from vault"}},
+		false, false); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	key := make([]byte, 32)
@@ -275,10 +274,10 @@ func TestEnvCommentSurvivesEncryptDecrypt(t *testing.T) {
 func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, true, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, true); err != nil {
 		t.Fatalf("forceExtends clear: %v", err)
 	}
 	prof, _, _, _, err := ReadProfile(path, "p")
@@ -296,10 +295,10 @@ func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 func TestUpsertPreserveExtendsKeepsExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Extends: Extends{"base"}, Env: map[string]string{"A": "1"}}, false, false); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, false, nil); err != nil {
+	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, false); err != nil {
 		t.Fatalf("preserve: %v", err)
 	}
 	prof, _, _, _, err := ReadProfile(path, "p")

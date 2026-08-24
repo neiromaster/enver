@@ -63,7 +63,8 @@ var duplicateCmd = &cobra.Command{
 		if !ok {
 			return notFoundInTarget(src, path)
 		}
-		if err := config.UpsertProfile(path, newName, prof, false, true, comments); err != nil {
+		prof.Comments = comments
+		if err := config.UpsertProfile(path, newName, prof, false, true); err != nil {
 			return err
 		}
 		fmt.Printf("\n✓ duplicated %q → %q\n", src, newName)

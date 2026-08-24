@@ -442,8 +442,8 @@ func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) er
 	if err := commitValidate(cfg, s); err != nil {
 		return err
 	}
-	p := config.Profile{Extends: s.extends, Env: s.envMap()}
-	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault, s.commentsMap())
+	p := config.Profile{Extends: s.extends, Env: s.envMap(), Comments: s.commentsMap()}
+	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault)
 }
 
 // commitValidate checks that the working copy can be committed: the non-empty

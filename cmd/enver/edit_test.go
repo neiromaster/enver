@@ -239,8 +239,8 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := config.UpsertProfile(path, "p",
-		config.Profile{Env: map[string]string{"A": "1", "B": "2"}},
-		true, false, map[string]string{"A": "a-hint", "B": "b-hint"}); err != nil {
+		config.Profile{Env: map[string]string{"A": "1", "B": "2"}, Comments: map[string]string{"A": "a-hint", "B": "b-hint"}},
+		true, false); err != nil {
 		t.Fatal(err)
 	}
 	prof, comments, isDefault, _, err := config.ReadProfile(path, "p")

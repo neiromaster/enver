@@ -16,7 +16,7 @@ func TestCompleteProfileForCryptAndDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	want := []string{"dev", "prod", "stage"}
 	for _, p := range want {
-		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, false, nil); err != nil {
+		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestScanConfigCrypt(t *testing.T) {
 	// Encrypt a value in the local layer: salt and flag are detected.
 	key := make([]byte, 32)
 	local := config.LocalPath()
-	if err := config.UpsertProfile(local, "p", config.Profile{Env: map[string]string{"API_KEY": "secret"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(local, "p", config.Profile{Env: map[string]string{"API_KEY": "secret"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := config.EncryptFile(local, key, []byte("0123456789abcdef"), "", false); err != nil {

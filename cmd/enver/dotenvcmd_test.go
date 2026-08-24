@@ -17,7 +17,7 @@ import (
 func writeTempConfig(t *testing.T, profile string, env map[string]string, comments map[string]string, setDefault bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := config.UpsertProfile(path, profile, config.Profile{Env: env}, setDefault, false, comments); err != nil {
+	if err := config.UpsertProfile(path, profile, config.Profile{Env: env, Comments: comments}, setDefault, false); err != nil {
 		t.Fatalf("UpsertProfile: %v", err)
 	}
 	return path

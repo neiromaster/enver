@@ -181,7 +181,7 @@ func TestDuplicateNonInteractiveWorks(t *testing.T) {
 func TestDuplicateNonInteractiveCopiesExtends(t *testing.T) {
 	setNonInteractive(t)
 	path := writeTempConfig(t, "base", map[string]string{"A": "1"}, nil, false)
-	if err := config.UpsertProfile(path, "dev", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"B": "2"}}, false, false, nil); err != nil {
+	if err := config.UpsertProfile(path, "dev", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"B": "2"}}, false, false); err != nil {
 		t.Fatalf("upsert dev: %v", err)
 	}
 	withGlobalConfig(t, path)

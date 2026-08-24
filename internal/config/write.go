@@ -44,10 +44,10 @@ func removeKey(mapping *yaml.Node, key string) {
 
 // WriteProfile replaces a profile's own env wholesale (keys absent from p.Env are
 // deleted), sets extends when non-empty or clears it when empty, and sets or
-// clears the top-level default. comments[key] (non-empty) renders above that
-// entry; a key absent from the map is written with no comment. Creates
-// the file (and parent dirs) if absent.
-func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool, comments map[string]string) error {
+// clears the top-level default. p.Comments[k] (non-empty) renders above that
+// entry; a key with no comment is written with no comment. Creates the file
+// (and parent dirs) if absent.
+func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) error {
 	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool, c
 		for _, k := range keys {
 			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: k, Tag: "!!str"}
 			valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: p.Env[k], Tag: "!!str"}
-			if c := comments[k]; c != "" {
+			if c := p.Comments[k]; c != "" {
 				keyNode.HeadComment = c
 			}
 			env.Content = append(env.Content, keyNode, valNode)

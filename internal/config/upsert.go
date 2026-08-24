@@ -52,16 +52,16 @@ func setScalar(mapping *yaml.Node, key, val string) {
 // parent dirs) if absent.
 //
 // Env keys merge additively (new values override existing same keys). setDefault
-// updates the top-level `default` key. comments[key] (non-empty) sets/overrides
+// updates the top-level `default` key. p.Comments[k] (non-empty) sets/overrides
 // the comment above that env entry; empty/missing leaves any existing comment
 // untouched.
 //
 // forceExtends governs how extends is written. When false, extends is set only
-// when p.Extends is non-empty, so an existing extends is never cleared (import's
+// when p.Extends is non-empty, so an existing extends is never cleared (import
 // preserve contract). When true, extends is set to exactly p.Extends: empty
 // removes the key, clearing it (mirrors WriteProfile), so callers like add and
 // duplicate honor an explicit (none) choice.
-func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool, comments map[string]string) error {
+func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) error {
 	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err
@@ -85,7 +85,7 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool, 
 		sort.Strings(keys)
 		for _, k := range keys {
 			setScalar(env, k, p.Env[k])
-			if c := comments[k]; c != "" {
+			if c := p.Comments[k]; c != "" {
 				// idx is the value node's position; idx-1 is the key node.
 				// Attaching HeadComment to the key node renders the comment on
 				// the line above the KEY: entry.
