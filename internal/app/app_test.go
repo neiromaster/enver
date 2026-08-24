@@ -68,15 +68,15 @@ func TestResolveLazyKey(t *testing.T) {
 		"p": {Env: map[string]string{"MODEL": "claude-sonnet-5"}},
 	}}
 	t.Setenv("ENVER_KEY", "")
-	env, chain, err := Resolve(cfg, "p", Options{})
+	r, err := Resolve(cfg, "p", Options{})
 	if err != nil {
 		t.Fatalf("plaintext resolve: %v", err)
 	}
-	if env["MODEL"] != "claude-sonnet-5" {
-		t.Fatalf("env = %v", env)
+	if r.Env["MODEL"] != "claude-sonnet-5" {
+		t.Fatalf("env = %v", r.Env)
 	}
-	if len(chain) != 1 || chain[0] != "p" {
-		t.Fatalf("chain = %v", chain)
+	if len(r.Chain) != 1 || r.Chain[0] != "p" {
+		t.Fatalf("chain = %v", r.Chain)
 	}
 
 	// An encrypted profile with no key available → error. Encrypt with a real
@@ -97,17 +97,17 @@ func TestResolveLazyKey(t *testing.T) {
 	encCfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},
 	}}
-	if _, _, err := Resolve(encCfg, "e", Options{KeyPath: "/nonexistent/key"}); err == nil {
+	if _, err := Resolve(encCfg, "e", Options{KeyPath: "/nonexistent/key"}); err == nil {
 		t.Fatal("encrypted profile without key should error")
 	}
 
 	// Same profile with the right key file → decrypts.
-	env2, _, err := Resolve(encCfg, "e", Options{KeyPath: kpath})
+	r2, err := Resolve(encCfg, "e", Options{KeyPath: kpath})
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
-	if env2["API_KEY"] != "secret-value" {
-		t.Fatalf("decrypted = %q, want secret-value", env2["API_KEY"])
+	if r2.Env["API_KEY"] != "secret-value" {
+		t.Fatalf("decrypted = %q, want secret-value", r2.Env["API_KEY"])
 	}
 }
 
@@ -118,20 +118,20 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 	t.Setenv("S", "sec")
 
 	// default: expanded.
-	got, _, err := Resolve(cfg, "p", Options{})
+	got, err := Resolve(cfg, "p", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["URL"] != "h/x" || got["SEC"] != "sec" {
-		t.Errorf("Resolve did not expand: %+v", got)
+	if got.Env["URL"] != "h/x" || got.Env["SEC"] != "sec" {
+		t.Errorf("Resolve did not expand: %+v", got.Env)
 	}
 	// NoExpand: raw templates preserved.
-	got, _, err = Resolve(cfg, "p", Options{NoExpand: true})
+	got, err = Resolve(cfg, "p", Options{NoExpand: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["URL"] != "$HOST/x" || got["SEC"] != "$S" {
-		t.Errorf("NoExpand should keep raw: %+v", got)
+	if got.Env["URL"] != "$HOST/x" || got.Env["SEC"] != "$S" {
+		t.Errorf("NoExpand should keep raw: %+v", got.Env)
 	}
 }
 
@@ -248,12 +248,12 @@ func TestResolveRecovery(t *testing.T) {
 		Interactive = oldInteractive
 	})
 
-	env, _, err := Resolve(cfg, "e", Options{})
+	r, err := Resolve(cfg, "e", Options{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if env["API_KEY"] != "secret" {
-		t.Fatalf("decrypted = %q, want secret", env["API_KEY"])
+	if r.Env["API_KEY"] != "secret" {
+		t.Fatalf("decrypted = %q, want secret", r.Env["API_KEY"])
 	}
 	if _, err := os.Stat(crypto.KeyFilePath()); err != nil {
 		t.Fatalf("cache not written: %v", err)
@@ -282,7 +282,7 @@ func TestResolveRecoveryWrongPassphrase(t *testing.T) {
 		Interactive = oldInteractive
 	})
 
-	if _, _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
+	if _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
 		t.Fatalf("expected wrong-passphrase error, got: %v", err)
 	}
 }
@@ -304,7 +304,7 @@ func TestResolveRecoveryNonInteractive(t *testing.T) {
 	Interactive = func() bool { return false }
 	t.Cleanup(func() { Interactive = oldInteractive })
 
-	if _, _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
+	if _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
 }

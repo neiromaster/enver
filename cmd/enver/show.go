@@ -30,15 +30,15 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		env, chain, err := app.Resolve(cfg, profile, appOpts())
+		r, err := app.Resolve(cfg, profile, appOpts())
 		if err != nil {
 			return err
 		}
 		switch showFormat {
 		case "text":
-			return printEnv(cmd.OutOrStdout(), env, chain, showNoMask)
+			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, showNoMask)
 		case "json":
-			return printEnvJSON(cmd.OutOrStdout(), profile, chain, env)
+			return printEnvJSON(cmd.OutOrStdout(), profile, r.Chain, r.Env)
 		default:
 			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
 		}
@@ -63,7 +63,7 @@ var exportCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		env, _, err := app.Resolve(cfg, profile, appOpts())
+		r, err := app.Resolve(cfg, profile, appOpts())
 		if err != nil {
 			return err
 		}
@@ -72,7 +72,7 @@ var exportCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("unsupported export format %q (use bash or powershell)", exportFormat)
 		}
-		return printExport(cmd.OutOrStdout(), env, exportFormat)
+		return printExport(cmd.OutOrStdout(), r.Env, exportFormat)
 	},
 }
 

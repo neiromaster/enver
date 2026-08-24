@@ -392,18 +392,22 @@ func TestResolveCommentsMergedGlobalOnly(t *testing.T) {
 	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveCommentsMerged(path, false, "leaf")
+	cfg, err := LoadMerged(path, false)
 	if err != nil {
-		t.Fatalf("ResolveCommentsMerged: %v", err)
+		t.Fatal(err)
 	}
-	if got["FOO"] != "mid foo" {
-		t.Fatalf("FOO comment = %q, want %q", got["FOO"], "mid foo")
+	r, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := got["BAR"]; ok {
-		t.Fatalf("BAR should be absent (no comment), got %q", got["BAR"])
+	if r.Comments["FOO"] != "mid foo" {
+		t.Fatalf("FOO comment = %q, want %q", r.Comments["FOO"], "mid foo")
 	}
-	if _, ok := got["OWN"]; ok {
-		t.Fatalf("OWN should be absent (no comment), got %q", got["OWN"])
+	if _, ok := r.Comments["BAR"]; ok {
+		t.Fatalf("BAR should be absent (no comment), got %q", r.Comments["BAR"])
+	}
+	if _, ok := r.Comments["OWN"]; ok {
+		t.Fatalf("OWN should be absent (no comment), got %q", r.Comments["OWN"])
 	}
 }
 
@@ -447,21 +451,29 @@ func TestResolveCommentsMergedLocalWins(t *testing.T) {
 	restore := chdir(t, proj)
 	defer restore()
 
-	got, err := ResolveCommentsMerged("", true, "p")
+	cfg, err := LoadMerged("", true)
 	if err != nil {
-		t.Fatalf("ResolveCommentsMerged: %v", err)
+		t.Fatal(err)
 	}
-	if got["K"] != "local-cmt" {
-		t.Fatalf("K comment = %q, want %q (closer layer should win)", got["K"], "local-cmt")
+	r, err := cfg.ResolveProfile("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Comments["K"] != "local-cmt" {
+		t.Fatalf("K comment = %q, want %q (closer layer should win)", r.Comments["K"], "local-cmt")
 	}
 
 	// With local layering disabled, the global comment is used.
-	gotGlobal, err := ResolveCommentsMerged("", false, "p")
+	cfgG, err := LoadMerged("", false)
 	if err != nil {
-		t.Fatalf("ResolveCommentsMerged (no-local): %v", err)
+		t.Fatal(err)
 	}
-	if gotGlobal["K"] != "global-cmt" {
-		t.Fatalf("K comment = %q, want %q (global only)", gotGlobal["K"], "global-cmt")
+	rG, err := cfgG.ResolveProfile("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rG.Comments["K"] != "global-cmt" {
+		t.Fatalf("K comment = %q, want %q (global only)", rG.Comments["K"], "global-cmt")
 	}
 }
 
@@ -469,61 +481,34 @@ func TestResolveCommentsMergedLocalWins(t *testing.T) {
 // comments along the receiver's chain (edit-aware), not the on-disk chain. This
 // is what lets an in-progress edit see its own uncommitted extends change when
 // seeding an override, while still spanning merged layers like dotenv.
-func TestResolveCommentsAcrossUsesReceiverChain(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	const yamlDoc = "profiles:\n" +
-		"  base:\n" +
-		"    env:\n" +
-		"      # base cmt\n" +
-		"      FOO: bv\n" +
-		"  other:\n" +
-		"    env:\n" +
-		"      # other cmt\n" +
-		"      FOO: ov\n" +
-		"  dev:\n" +
-		"    extends: base\n" +
-		"    env:\n" +
-		"      OWN: x\n"
-	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Receiver simulates an in-progress edit: dev now extends other, not base.
-	cfg := Config{Profiles: map[string]Profile{
-		"base":  {Env: map[string]string{"FOO": "bv"}},
-		"other": {Env: map[string]string{"FOO": "ov"}},
+// TestEditProbeResolvesCommentsAlongWorkingChain verifies an in-memory probe
+// (simulating an in-progress edit) resolves comments along its own chain:
+// dev now extends other, not base, so FOO takes the other comment.
+func TestEditProbeResolvesCommentsAlongWorkingChain(t *testing.T) {
+	probe := Config{Profiles: map[string]Profile{
+		"base":  {Env: map[string]string{"FOO": "bv"}, Comments: map[string]string{"FOO": "base cmt"}},
+		"other": {Env: map[string]string{"FOO": "ov"}, Comments: map[string]string{"FOO": "other cmt"}},
 		"dev":   {Extends: Extends{"other"}, Env: map[string]string{"OWN": "x"}},
 	}}
-	got, err := cfg.ResolveCommentsAcross(path, false, "dev")
+	r, err := probe.ResolveProfile("dev")
 	if err != nil {
-		t.Fatalf("ResolveCommentsAcross: %v", err)
+		t.Fatal(err)
 	}
-	if got["FOO"] != "other cmt" {
-		t.Fatalf("FOO comment = %q, want %q (receiver chain dev→other)", got["FOO"], "other cmt")
-	}
-
-	// The free function, using the on-disk chain (dev→base), disagrees —
-	// confirming the method is edit-aware, not a duplicate of the disk resolver.
-	disk, err := ResolveCommentsMerged(path, false, "dev")
-	if err != nil {
-		t.Fatalf("ResolveCommentsMerged: %v", err)
-	}
-	if disk["FOO"] != "base cmt" {
-		t.Fatalf("disk FOO comment = %q, want %q", disk["FOO"], "base cmt")
+	if r.Comments["FOO"] != "other cmt" {
+		t.Fatalf("FOO comment = %q, want %q (probe chain dev->other)", r.Comments["FOO"], "other cmt")
 	}
 }
 
 // TestResolveCommentsMergedMissingConfig verifies a missing global file does not
 // panic: LoadMerged yields an empty Config and ResolveProfile reports the
 // missing profile as an error.
-func TestResolveCommentsMergedMissingConfig(t *testing.T) {
-	got, err := ResolveCommentsMerged(filepath.Join(t.TempDir(), "missing.yaml"), false, "p")
-	if err == nil {
-		t.Fatalf("expected profile-not-found error for missing config, got map %v", got)
+func TestResolveMissingConfigErrorsOnProfile(t *testing.T) {
+	cfg, err := LoadMerged(filepath.Join(t.TempDir(), "missing.yaml"), false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got != nil {
-		t.Fatalf("expected nil map on error, got %v", got)
+	if _, err := cfg.ResolveProfile("p"); err == nil {
+		t.Fatal("expected profile-not-found error for missing config")
 	}
 }
 

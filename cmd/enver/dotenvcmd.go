@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/neiromaster/enver/internal/app"
-	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -59,19 +58,18 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 	}
 	resolveOpts := appOpts()
 	resolveOpts.NoExpand = true // dotenv emits raw templates, not expanded values
-	env, chain, err := app.Resolve(cfg, profile, resolveOpts)
+	r, err := app.Resolve(cfg, profile, resolveOpts)
 	if err != nil {
 		return err
 	}
-	comments, _ := config.ResolveCommentsMerged(globalFlags.configPath, !globalFlags.noLocal, profile)
 
-	out := dotenv.Format(env, comments, dotenv.Options{Header: !noHeader, Profile: profile, Chain: chain})
+	out := dotenv.Format(r.Env, r.Comments, dotenv.Options{Header: !noHeader, Profile: profile, Chain: r.Chain})
 
 	if outPath == "" {
 		_, err = stdout.Write(out)
 		return err
 	}
-	return writeDotenvFile(stdout, outPath, out, force, confirm, len(env))
+	return writeDotenvFile(stdout, outPath, out, force, confirm, len(r.Env))
 }
 
 // writeDotenvFile writes content to path with mode 0600 (it holds decrypted

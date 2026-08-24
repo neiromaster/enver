@@ -44,43 +44,41 @@ func Chdir(dir string) error {
 	return os.Chdir(dir)
 }
 
-// Resolve walks the profile's extends chain and transparently decrypts any
-// enc:v2: values. A key is required only when encrypted values are present.
-func Resolve(cfg config.Config, profile string, opts Options) (map[string]string, []string, error) {
+// Resolve walks the profile's extends chain, transparently decrypts any
+// enc:v2: values, and expands $VAR interpolation unless opts.NoExpand. A key
+// is required only when encrypted values are present. Comments ride through
+// untouched.
+func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
 	r, err := cfg.ResolveProfile(profile)
 	if err != nil {
-		return nil, r.Chain, err
+		return config.Resolved{}, err
 	}
 	if !hasEncrypted(r.Env) {
-		env := r.Env
 		if !opts.NoExpand {
-			env = varsubst.Expand(env, osEnvMap())
+			r.Env = varsubst.Expand(r.Env, osEnvMap())
 		}
-		return env, r.Chain, nil
+		return r, nil
 	}
 	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, string, error) {
 		salt, sample := firstSaltAndSample(r.Env)
 		return salt, sample, nil
 	})
 	if err != nil {
-		return nil, r.Chain, err
+		return config.Resolved{}, err
 	}
-	env := make(map[string]string, len(r.Env))
 	for k, v := range r.Env {
 		if crypto.IsEncrypted(v) {
 			plain, err := crypto.DecryptValue(v, key)
 			if err != nil {
-				return nil, r.Chain, fmt.Errorf("decrypt %s: %w", k, err)
+				return config.Resolved{}, fmt.Errorf("decrypt %s: %w", k, err)
 			}
-			env[k] = plain
-		} else {
-			env[k] = v
+			r.Env[k] = plain
 		}
 	}
 	if !opts.NoExpand {
-		env = varsubst.Expand(env, osEnvMap())
+		r.Env = varsubst.Expand(r.Env, osEnvMap())
 	}
-	return env, r.Chain, nil
+	return r, nil
 }
 
 // Run is the full run path: parse args, load config, resolve the profile, and
@@ -99,11 +97,11 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	env, _, err := Resolve(cfg, profile, opts)
+	r, err := Resolve(cfg, profile, opts)
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), env), opts.Name, profile); code != 0 {
+	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), r.Env), opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil
