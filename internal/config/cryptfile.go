@@ -138,16 +138,17 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	return count, os.WriteFile(path, out, 0o644)
 }
 
-// FirstEncryptedValue returns the first enc:v2: value in the config at path, or
-// "" when none exists. Used to recover the salt for passphrase key derivation.
-func FirstEncryptedValue(path string) (string, error) {
+// FirstSaltAndSample returns the salt and full value of the first enc:v2:
+// value in the config at path, or (nil, "") when none exists. Used to recover
+// the salt for passphrase key derivation.
+func FirstSaltAndSample(path string) (salt []byte, sample string, err error) {
 	root, err := loadNode(path)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	pm := profilesMapping(root.Content[0])
 	if pm == nil {
-		return "", nil
+		return nil, "", nil
 	}
 	for i := 0; i+1 < len(pm.Content); i += 2 {
 		env := envMapping(pm.Content[i+1])
@@ -159,10 +160,10 @@ func FirstEncryptedValue(path string) (string, error) {
 			if valNode.Kind != yaml.ScalarNode {
 				continue
 			}
-			if _, err := crypto.SaltFromValue(valNode.Value); err == nil {
-				return valNode.Value, nil
+			if s, err := crypto.SaltFromValue(valNode.Value); err == nil {
+				return s, valNode.Value, nil
 			}
 		}
 	}
-	return "", nil
+	return nil, "", nil
 }

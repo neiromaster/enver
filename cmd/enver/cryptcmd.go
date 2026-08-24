@@ -231,30 +231,13 @@ var decryptCmd = &cobra.Command{
 	},
 }
 
-func requireKey() (key, salt []byte, err error) {
-	key, salt, err = app.ResolveKey(appOpts())
-	if err != nil {
-		return nil, nil, err
-	}
-	if key == nil {
-		v, err := config.FirstEncryptedValue(writeTarget())
-		if err != nil {
-			return nil, nil, err
-		}
-		if v == "" {
-			return nil, nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
-		}
-		s, err := crypto.SaltFromValue(v)
-		if err != nil {
-			return nil, nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
-		}
-		key, err = app.RecoverKey(s, v)
-		if err != nil {
-			return nil, nil, err
-		}
-		salt = s
-	}
-	return key, salt, nil
+// requireKey resolves the key for encrypt/decrypt, recovering it from a
+// passphrase when no key is configured. The recovery salt comes from the
+// write target, the same file the commands rewrite.
+func requireKey() ([]byte, []byte, error) {
+	return app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, string, error) {
+		return config.FirstSaltAndSample(writeTarget())
+	})
 }
 
 func init() {

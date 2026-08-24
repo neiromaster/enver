@@ -174,12 +174,48 @@ func TestResolveKeyFromCache(t *testing.T) {
 	if err := crypto.WriteKeyCache(cachePath, crypto.NewKeyCache(salt, key)); err != nil {
 		t.Fatalf("write cache: %v", err)
 	}
-	got, gotSalt, err := ResolveKey(Options{KeyPath: cachePath})
+	got, gotSalt, err := resolveKey(Options{KeyPath: cachePath})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if !bytes.Equal(got, key) || !bytes.Equal(gotSalt, salt) {
 		t.Fatalf("key=%x salt=%x, want %x/%x", got, gotSalt, key, salt)
+	}
+}
+
+func TestResolveKeyOrPromptSkipsSourceWhenKeyResolves(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "key")
+	salt := []byte("0123456789abcdef")
+	key := make([]byte, 32)
+	if err := crypto.WriteKeyCache(cachePath, crypto.NewKeyCache(salt, key)); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+	called := false
+	got, gotSalt, err := ResolveKeyOrPrompt(Options{KeyPath: cachePath}, func() ([]byte, string, error) {
+		called = true
+		return nil, "", nil
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if called {
+		t.Fatal("salt source must stay idle when a key resolves")
+	}
+	if !bytes.Equal(got, key) || !bytes.Equal(gotSalt, salt) {
+		t.Fatalf("key=%x salt=%x, want %x/%x", got, gotSalt, key, salt)
+	}
+}
+
+func TestResolveKeyOrPromptNoSaltErrors(t *testing.T) {
+	t.Setenv("ENVER_KEY", "")
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(t.TempDir(), "absent") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+
+	_, _, err := ResolveKeyOrPrompt(Options{}, func() ([]byte, string, error) { return nil, "", nil })
+	if err == nil || !strings.Contains(err.Error(), "no key found") {
+		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
 }
 

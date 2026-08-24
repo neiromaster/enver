@@ -323,7 +323,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func TestFirstEncryptedValue(t *testing.T) {
+func TestFirstSaltAndSample(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	key := make([]byte, 32)
@@ -336,20 +336,20 @@ func TestFirstEncryptedValue(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \"1\"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err := FirstEncryptedValue(path)
-	if err != nil || got != "" {
-		t.Fatalf("plain config: got %q err=%v, want empty", got, err)
+	gotSalt, gotSample, err := FirstSaltAndSample(path)
+	if err != nil || gotSalt != nil || gotSample != "" {
+		t.Fatalf("plain config: salt=%v sample=%q err=%v, want none", gotSalt, gotSample, err)
 	}
 	// One v2 value.
 	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \""+enc+"\"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got, err = FirstEncryptedValue(path)
-	if err != nil || got != enc {
-		t.Fatalf("v2 config: got %q err=%v, want %q", got, err, enc)
+	gotSalt, gotSample, err = FirstSaltAndSample(path)
+	if err != nil || string(gotSalt) != string(salt) || gotSample != enc {
+		t.Fatalf("v2 config: salt=%q sample=%q err=%v, want %q/%q", gotSalt, gotSample, err, salt, enc)
 	}
 	// Missing file → error.
-	if _, err := FirstEncryptedValue(filepath.Join(dir, "nope.yaml")); err == nil {
+	if _, _, err := FirstSaltAndSample(filepath.Join(dir, "nope.yaml")); err == nil {
 		t.Fatal("missing file must error")
 	}
 }

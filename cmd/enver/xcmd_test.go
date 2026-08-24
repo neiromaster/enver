@@ -14,8 +14,8 @@ import (
 
 // TestXNonInteractiveNoKeyFailsLoudly pins the runner recovery behavior: with
 // an encrypted (enc:v2) config and no key source, `enver x` must fail loudly
-// instead of prompting or hanging. app.RecoverKey gates on app.Interactive
-// (bound at init), so pin the func vars directly.
+// instead of prompting or hanging. The recovery inside app.ResolveKeyOrPrompt
+// gates on app.Interactive (bound at init), so pin the func vars directly.
 func TestXNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

@@ -57,19 +57,12 @@ func Resolve(cfg config.Config, profile string, opts Options) (map[string]string
 		}
 		return env, chain, nil
 	}
-	key, _, err := ResolveKey(opts)
+	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, string, error) {
+		salt, sample := firstSaltAndSample(env)
+		return salt, sample, nil
+	})
 	if err != nil {
 		return nil, chain, err
-	}
-	if key == nil {
-		salt, sample := firstSaltAndSample(env)
-		if salt == nil {
-			return nil, chain, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
-		}
-		key, err = RecoverKey(salt, sample)
-		if err != nil {
-			return nil, chain, err
-		}
 	}
 	for k, v := range env {
 		if crypto.IsEncrypted(v) {
@@ -143,12 +136,39 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 	return profile, nil
 }
 
-// ResolveKey resolves the decryption key from --key, the ENVER_KEY env var, or
+// SaltSource locates the salt and a full sample value of the first enc:v2:
+// value, for passphrase recovery when no key is configured. A nil salt means
+// the source holds no encrypted value. Called only on the no-key path, so
+// expensive sources stay idle when a key resolves.
+type SaltSource func() (salt []byte, sample string, err error)
+
+// ResolveKeyOrPrompt resolves the decryption key from --key, the ENVER_KEY env
+// var, or the default key file, recovering it from a passphrase via saltSource
+// when none is available. salt is nil only for ENVER_KEY keys, which can
+// decrypt (the salt is embedded in each enc:v2: value) but not encrypt.
+func ResolveKeyOrPrompt(opts Options, saltSource SaltSource) (key, salt []byte, err error) {
+	key, salt, err = resolveKey(opts)
+	if err != nil || key != nil {
+		return key, salt, err
+	}
+	salt, sample, err := saltSource()
+	if err != nil {
+		return nil, nil, err
+	}
+	if salt == nil {
+		return nil, nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
+	}
+	key, err = recoverKey(salt, sample)
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, salt, nil
+}
+
+// resolveKey resolves the decryption key from --key, the ENVER_KEY env var, or
 // the default key file. It returns (nil, nil, nil) when no key is available;
-// callers decide whether that is an error. salt is nil only for ENVER_KEY keys,
-// which can decrypt (the salt is embedded in each enc:v2: value) but not
-// encrypt.
-func ResolveKey(opts Options) (key, salt []byte, err error) {
+// callers decide whether that is an error.
+func resolveKey(opts Options) (key, salt []byte, err error) {
 	if opts.KeyPath != "" {
 		return crypto.LoadKey(opts.KeyPath)
 	}
@@ -162,9 +182,9 @@ func ResolveKey(opts Options) (key, salt []byte, err error) {
 	return nil, nil, nil
 }
 
-// RecoverKey prompts for a passphrase, derives the key from salt, verifies it
+// recoverKey prompts for a passphrase, derives the key from salt, verifies it
 // by decrypting sample, and writes the key cache. Returns the derived key.
-func RecoverKey(salt []byte, sample string) ([]byte, error) {
+func recoverKey(salt []byte, sample string) ([]byte, error) {
 	if !Interactive() {
 		return nil, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
 	}
