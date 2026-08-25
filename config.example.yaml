@@ -4,7 +4,7 @@
 #
 # To store secrets encrypted here, run:
 #   enver keygen        # creates ~/.config/enver/key  (NEVER commit the key)
-#   enver encrypt       # encrypts secret-looking values (enc:v2:...) in this file
+#   enver encrypt       # encrypts secret-looking values (enc:v3:argon2id:...) in this file
 # Decryption at runtime is transparent: `enver x <profile> -- <cmd>` just works.
 
 default: anth

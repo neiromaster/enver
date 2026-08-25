@@ -162,7 +162,7 @@ profiles:
   glm:
     env:
       # get this token from https://vault.example/anth
-      ANTHROPIC_API_KEY: enc:v2:...
+      ANTHROPIC_API_KEY: enc:v3:argon2id:...
 ```
 
 Env keys merge additively into an existing profile of the same name.
@@ -278,9 +278,12 @@ path asks for confirmation and `--random` prints a warning, since an overwritten
 key makes the existing ciphertext unreadable. Run `enver decrypt` with the old
 key first if you need to migrate them.
 
-Encrypted values are `enc:v2:<base64(salt||nonce||ciphertext)>` (AES-256-GCM
-with the 16-byte argon2id salt embedded). Encryption is idempotent — re-running
-`encrypt` skips already encrypted values.
+Encrypted values are `enc:v3:argon2id:<t>:<m-KiB>:<p>:<base64(salt||nonce||ciphertext)>`
+(AES-256-GCM, argon2id). KDF parameters travel inside every value, so
+passphrase recovery survives future parameter upgrades — after such an
+upgrade, re-encrypt the whole file (recovery derives the key from the first
+value; a file mixing parameter eras only partially decrypts). Values with
+other `enc:` prefixes (older formats) are rejected with an error.
 
 At runtime `enver x <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
@@ -368,8 +371,9 @@ No file under `~/.claude/` or elsewhere is modified.
 
 ## Security
 
-- **Secrets at rest** — `enver encrypt` stores values as `enc:v2:` ciphertext
-  (AES-256-GCM, argon2id salt embedded). The key cache lives at
+- **Secrets at rest** — `enver encrypt` stores values as `enc:v3:` ciphertext
+  (AES-256-GCM, argon2id with parameters embedded). Values with other `enc:`
+  prefixes (older formats) are rejected. The key cache lives at
   `~/.config/enver/key` (mode `0600`) — **never commit the key**.
 - **Preview masking** — `enver show` redacts `key|token|secret|password|auth|credential`
   values; use `--no-mask` or `enver export` to reveal them.
