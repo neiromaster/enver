@@ -192,9 +192,9 @@ func TestResolveKeyOrPromptSkipsSourceWhenKeyResolves(t *testing.T) {
 		t.Fatalf("write cache: %v", err)
 	}
 	called := false
-	got, gotSalt, err := ResolveKeyOrPrompt(Options{KeyPath: cachePath}, func() ([]byte, string, error) {
+	got, gotSalt, err := ResolveKeyOrPrompt(Options{KeyPath: cachePath}, func() ([]byte, crypto.Argon2Params, string, error) {
 		called = true
-		return nil, "", nil
+		return nil, crypto.Argon2Params{}, "", nil
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -213,7 +213,9 @@ func TestResolveKeyOrPromptNoSaltErrors(t *testing.T) {
 	crypto.KeyFilePath = func() string { return filepath.Join(t.TempDir(), "absent") }
 	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
 
-	_, _, err := ResolveKeyOrPrompt(Options{}, func() ([]byte, string, error) { return nil, "", nil })
+	_, _, err := ResolveKeyOrPrompt(Options{}, func() ([]byte, crypto.Argon2Params, string, error) {
+		return nil, crypto.Argon2Params{}, "", nil
+	})
 	if err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
@@ -306,6 +308,60 @@ func TestResolveRecoveryNonInteractive(t *testing.T) {
 
 	if _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
+	}
+}
+
+func TestResolveForeignEncFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"
+	if err := os.WriteFile(path, []byte(cfgContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(cfg, "p", Options{}); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("err = %v, want unsupported encrypted value", err)
+	}
+}
+
+func TestResolveRecoveryUsesEmbeddedParams(t *testing.T) {
+	dir := t.TempDir()
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "key") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+	t.Setenv("ENVER_KEY", "")
+
+	salt := make([]byte, crypto.SaltSize)
+	custom := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	key, err := crypto.DeriveKey("hunter2", salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"TOKEN": enc}},
+	}}
+	oldPrompt := PromptPassphrase
+	oldInteractive := Interactive
+	PromptPassphrase = func(string) (string, error) { return "hunter2", nil }
+	Interactive = func() bool { return true }
+	t.Cleanup(func() {
+		PromptPassphrase = oldPrompt
+		Interactive = oldInteractive
+	})
+
+	r, err := Resolve(cfg, "p", Options{})
+	if err != nil {
+		t.Fatalf("recovery must derive with embedded params: %v", err)
+	}
+	if r.Env["TOKEN"] != "secret" {
+		t.Fatalf("TOKEN = %q, want secret", r.Env["TOKEN"])
 	}
 }
 

@@ -232,10 +232,10 @@ var decryptCmd = &cobra.Command{
 }
 
 // requireKey resolves the key for encrypt/decrypt, recovering it from a
-// passphrase when no key is configured. The recovery salt comes from the
-// write target, the same file the commands rewrite.
+// passphrase when no key is configured. The recovery salt and KDF parameters
+// come from the write target, the same file the commands rewrite.
 func requireKey() ([]byte, []byte, error) {
-	return app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, string, error) {
+	return app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, crypto.Argon2Params, string, error) {
 		return config.FirstSaltAndSample(writeTarget())
 	})
 }

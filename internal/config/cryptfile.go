@@ -42,9 +42,12 @@ func envMapping(profileNode *yaml.Node) *yaml.Node {
 	return profileNode.Content[idx]
 }
 
-// EncryptFile encrypts secret-looking values (or all values when all is true) in
-// the config at path, preserving structure and comments. profile filters to a
-// single profile; empty means all. Returns the count of newly encrypted values.
+// EncryptFile encrypts secret-looking values (or all values when all is true)
+// in the config at path, preserving structure and comments. profile filters
+// to a single profile; empty means all. salt is shared by every value
+// encrypted in this run: passphrase recovery derives the key from the first
+// value in the file, so per-value salts would strand the rest. Returns the
+// count of newly encrypted values.
 func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
@@ -67,7 +70,13 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 		}
 		for j := 0; j+1 < len(env.Content); j += 2 {
 			keyNode, valNode := env.Content[j], env.Content[j+1]
-			if valNode.Kind != yaml.ScalarNode || crypto.IsEncrypted(valNode.Value) {
+			if valNode.Kind != yaml.ScalarNode {
+				continue
+			}
+			if p := crypto.ForeignEncPrefix(valNode.Value); p != "" {
+				return count, crypto.ForeignEncError(p)
+			}
+			if crypto.IsEncrypted(valNode.Value) {
 				continue
 			}
 			if !all && !IsSensitive(keyNode.Value, valNode.Value) {
@@ -116,7 +125,13 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 		}
 		for j := 0; j+1 < len(env.Content); j += 2 {
 			valNode := env.Content[j+1]
-			if valNode.Kind != yaml.ScalarNode || !crypto.IsEncrypted(valNode.Value) {
+			if valNode.Kind != yaml.ScalarNode {
+				continue
+			}
+			if p := crypto.ForeignEncPrefix(valNode.Value); p != "" {
+				return count, crypto.ForeignEncError(p)
+			}
+			if !crypto.IsEncrypted(valNode.Value) {
 				continue
 			}
 			plain, err := crypto.DecryptValue(valNode.Value, key)
@@ -138,17 +153,18 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	return count, os.WriteFile(path, out, 0o644)
 }
 
-// FirstSaltAndSample returns the salt and full value of the first enc:v2:
-// value in the config at path, or (nil, "") when none exists. Used to recover
-// the salt for passphrase key derivation.
-func FirstSaltAndSample(path string) (salt []byte, sample string, err error) {
+// FirstSaltAndSample returns the salt, KDF parameters, and full value of the
+// first enc:v3: value in the config at path, or (nil, crypto.Argon2Params{},
+// "", nil) when none exists. Used to recover the salt and params for
+// passphrase key derivation.
+func FirstSaltAndSample(path string) (salt []byte, p crypto.Argon2Params, sample string, err error) {
 	root, err := loadNode(path)
 	if err != nil {
-		return nil, "", err
+		return nil, crypto.Argon2Params{}, "", err
 	}
 	pm := profilesMapping(root.Content[0])
 	if pm == nil {
-		return nil, "", nil
+		return nil, crypto.Argon2Params{}, "", nil
 	}
 	for i := 0; i+1 < len(pm.Content); i += 2 {
 		env := envMapping(pm.Content[i+1])
@@ -160,10 +176,10 @@ func FirstSaltAndSample(path string) (salt []byte, sample string, err error) {
 			if valNode.Kind != yaml.ScalarNode {
 				continue
 			}
-			if s, _, err := crypto.SaltFromValue(valNode.Value); err == nil {
-				return s, valNode.Value, nil
+			if s, params, err := crypto.SaltFromValue(valNode.Value); err == nil {
+				return s, params, valNode.Value, nil
 			}
 		}
 	}
-	return nil, "", nil
+	return nil, crypto.Argon2Params{}, "", nil
 }

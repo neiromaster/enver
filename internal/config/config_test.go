@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -711,5 +712,44 @@ func TestMergeCommentsSticky(t *testing.T) {
 	}
 	if v := got.Env["A"]; v != "x" {
 		t.Fatalf("A value = %q, want %q (values always overwrite)", v, "x")
+	}
+}
+
+func TestEncryptFileRejectsForeignEnc(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"
+	if err := os.WriteFile(path, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := make([]byte, 16)
+	n, err := EncryptFile(path, key, salt, "", true)
+	if err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("err = %v, want unsupported encrypted value", err)
+	}
+	if n != 0 {
+		t.Fatalf("n = %d, want 0", n)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "enc:v2:YWJj") || strings.Contains(string(data), "enc:v3:") {
+		t.Fatal("file must be left untouched (no double encryption)")
+	}
+}
+
+func TestDecryptFileRejectsForeignEnc(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"
+	if err := os.WriteFile(path, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	n, err := DecryptFile(path, key, "")
+	if err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("err = %v, want unsupported encrypted value (not fake success)", err)
+	}
+	if n != 0 {
+		t.Fatalf("n = %d, want 0", n)
 	}
 }

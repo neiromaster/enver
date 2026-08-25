@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -332,7 +333,7 @@ func TestFirstSaltAndSample(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \"1\"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	gotSalt, gotSample, err := FirstSaltAndSample(path)
+	gotSalt, _, gotSample, err := FirstSaltAndSample(path)
 	if err != nil || gotSalt != nil || gotSample != "" {
 		t.Fatalf("plain config: salt=%v sample=%q err=%v, want none", gotSalt, gotSample, err)
 	}
@@ -340,12 +341,87 @@ func TestFirstSaltAndSample(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \""+enc+"\"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	gotSalt, gotSample, err = FirstSaltAndSample(path)
+	gotSalt, _, gotSample, err = FirstSaltAndSample(path)
 	if err != nil || string(gotSalt) != string(salt) || gotSample != enc {
 		t.Fatalf("v2 config: salt=%q sample=%q err=%v, want %q/%q", gotSalt, gotSample, err, salt, enc)
 	}
 	// Missing file → error.
-	if _, _, err := FirstSaltAndSample(filepath.Join(dir, "nope.yaml")); err == nil {
+	if _, _, _, err := FirstSaltAndSample(filepath.Join(dir, "nope.yaml")); err == nil {
 		t.Fatal("missing file must error")
+	}
+}
+
+func TestEncryptFileSharesOneSaltPerRun(t *testing.T) {
+	// F3 regression: every value encrypted in one EncryptFile run shares the
+	// caller salt; per-value salts would strand all but the first value for
+	// passphrase recovery.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "default: anth\nprofiles:\n  anth:\n    env:\n      SECRET_1: value-one\n      SECRET_2: value-two\n      SECRET_3: value-three\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	n, err := EncryptFile(path, key, salt, "", true)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("encrypted %d values, want 3", n)
+	}
+	c, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range c.Profiles["anth"].Env {
+		got, _, err := crypto.SaltFromValue(v)
+		if err != nil {
+			t.Fatalf("%s: SaltFromValue: %v", k, err)
+		}
+		if !bytes.Equal(got, salt) {
+			t.Errorf("%s has salt %x, want %x (all values must share one salt)", k, got, salt)
+		}
+	}
+}
+
+func TestEncryptFileSaltStableAcrossRuns(t *testing.T) {
+	// F3 regression across runs: the CLI passes the key-cache salt, which is
+	// stable between invocations; a second run must reuse it, not mint a new
+	// one per value.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "default: anth\nprofiles:\n  anth:\n    env:\n      EXISTING_SECRET: existing-value\n      OTHER_VALUE: new-value-to-encrypt\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	n1, err := EncryptFile(path, key, salt, "", false)
+	if err != nil {
+		t.Fatalf("first encrypt: %v", err)
+	}
+	if n1 != 1 {
+		t.Fatalf("first encrypt encrypted %d values, want 1 (only EXISTING_SECRET is secret-looking)", n1)
+	}
+	n2, err := EncryptFile(path, key, salt, "", true)
+	if err != nil {
+		t.Fatalf("second encrypt: %v", err)
+	}
+	if n2 != 1 {
+		t.Fatalf("second encrypt encrypted %d values, want 1", n2)
+	}
+	c, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range c.Profiles["anth"].Env {
+		got, _, err := crypto.SaltFromValue(v)
+		if err != nil {
+			t.Fatalf("%s: SaltFromValue: %v", k, err)
+		}
+		if !bytes.Equal(got, salt) {
+			t.Errorf("%s has salt %x, want %x (runs must share the caller salt)", k, got, salt)
+		}
 	}
 }

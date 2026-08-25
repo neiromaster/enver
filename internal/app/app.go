@@ -45,7 +45,7 @@ func Chdir(dir string) error {
 }
 
 // Resolve walks the profile's extends chain, transparently decrypts any
-// enc:v2: values, and expands $VAR interpolation unless opts.NoExpand. A key
+// enc:v3: values, and expands $VAR interpolation unless opts.NoExpand. A key
 // is required only when encrypted values are present. Comments ride through
 // untouched.
 func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
@@ -53,15 +53,18 @@ func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 	if err != nil {
 		return config.Resolved{}, err
 	}
+	if prefix := foreignEncPrefix(r.Env); prefix != "" {
+		return config.Resolved{}, crypto.ForeignEncError(prefix)
+	}
 	if !hasEncrypted(r.Env) {
 		if !opts.NoExpand {
 			r.Env = varsubst.Expand(r.Env, osEnvMap())
 		}
 		return r, nil
 	}
-	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, string, error) {
-		salt, sample := firstSaltAndSample(r.Env)
-		return salt, sample, nil
+	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, crypto.Argon2Params, string, error) {
+		salt, params, sample := firstSaltAndSample(r.Env)
+		return salt, params, sample, nil
 	})
 	if err != nil {
 		return config.Resolved{}, err
@@ -138,29 +141,29 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 	return profile, nil
 }
 
-// SaltSource locates the salt and a full sample value of the first enc:v2:
-// value, for passphrase recovery when no key is configured. A nil salt means
-// the source holds no encrypted value. Called only on the no-key path, so
-// expensive sources stay idle when a key resolves.
-type SaltSource func() (salt []byte, sample string, err error)
+// SaltSource locates the salt, KDF parameters, and a full sample value of the
+// first enc:v3: value, for passphrase recovery when no key is configured. A
+// nil salt means the source holds no encrypted value. Called only on the
+// no-key path, so expensive sources stay idle when a key resolves.
+type SaltSource func() (salt []byte, params crypto.Argon2Params, sample string, err error)
 
 // ResolveKeyOrPrompt resolves the decryption key from --key, the ENVER_KEY env
 // var, or the default key file, recovering it from a passphrase via saltSource
 // when none is available. salt is nil only for ENVER_KEY keys, which can
-// decrypt (the salt is embedded in each enc:v2: value) but not encrypt.
+// decrypt (the salt is embedded in each enc:v3: value) but not encrypt.
 func ResolveKeyOrPrompt(opts Options, saltSource SaltSource) (key, salt []byte, err error) {
 	key, salt, err = resolveKey(opts)
 	if err != nil || key != nil {
 		return key, salt, err
 	}
-	salt, sample, err := saltSource()
+	salt, params, sample, err := saltSource()
 	if err != nil {
 		return nil, nil, err
 	}
 	if salt == nil {
 		return nil, nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
 	}
-	key, err = recoverKey(salt, sample)
+	key, err = recoverKey(salt, params, sample)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -184,9 +187,10 @@ func resolveKey(opts Options) (key, salt []byte, err error) {
 	return nil, nil, nil
 }
 
-// recoverKey prompts for a passphrase, derives the key from salt, verifies it
-// by decrypting sample, and writes the key cache. Returns the derived key.
-func recoverKey(salt []byte, sample string) ([]byte, error) {
+// recoverKey prompts for a passphrase, derives the key from salt with the
+// value-embedded KDF parameters, verifies it by decrypting sample, and writes
+// the key cache. Returns the derived key.
+func recoverKey(salt []byte, p crypto.Argon2Params, sample string) ([]byte, error) {
 	if !Interactive() {
 		return nil, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
 	}
@@ -197,7 +201,7 @@ func recoverKey(salt []byte, sample string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	key, err := crypto.DeriveKey(pass, salt, crypto.CurrentParams)
+	key, err := crypto.DeriveKey(pass, salt, p)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +241,15 @@ func hasEncrypted(env map[string]string) bool {
 	return false
 }
 
+func foreignEncPrefix(env map[string]string) string {
+	for _, v := range env {
+		if p := crypto.ForeignEncPrefix(v); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
@@ -258,13 +271,14 @@ func osEnvMap() map[string]string {
 	return m
 }
 
-// firstSaltAndSample returns the salt and full value of the first enc:v2: value
-// in env, or (nil, "") when there is none.
-func firstSaltAndSample(env map[string]string) ([]byte, string) {
+// firstSaltAndSample returns the salt, KDF parameters, and full value of the
+// first enc:v3: value in env, or (nil, crypto.Argon2Params{}, "") when there
+// is none.
+func firstSaltAndSample(env map[string]string) ([]byte, crypto.Argon2Params, string) {
 	for _, v := range env {
-		if s, _, err := crypto.SaltFromValue(v); err == nil {
-			return s, v
+		if s, p, err := crypto.SaltFromValue(v); err == nil {
+			return s, p, v
 		}
 	}
-	return nil, ""
+	return nil, crypto.Argon2Params{}, ""
 }
