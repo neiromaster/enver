@@ -69,11 +69,12 @@ func forEachEnvValue(pm *yaml.Node, fn func(v string) error) error {
 // to a single profile; empty means all. salt is shared by every value
 // encrypted in this run: passphrase recovery derives the key from the first
 // value in the file, so per-value salts would strand the rest. New values
-// carry the KDF params of the file's existing values when the encrypting salt
-// matches theirs — the header must describe how the key in play was derived —
-// and CurrentParams otherwise. Values this build cannot read (foreign enc:
-// prefixes, malformed enc:v3) fail loudly in every profile, filtered or not.
-// Returns the count of newly encrypted values.
+// carry the KDF params of the file's existing values (the header must describe
+// how the key in play was derived). A file whose existing encrypted values use
+// a different salt is refused before anything is written — encrypting would
+// mix two keys and strand the old values. Values this build cannot read
+// (foreign enc: prefixes, malformed enc:v3) fail loudly in every profile,
+// filtered or not. Returns the count of newly encrypted values.
 func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
@@ -88,8 +89,12 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	if err := forEachEnvValue(pm, scan.Add); err != nil {
 		return 0, err
 	}
+	fileSalt, fileParams, _ := scan.Result()
+	if scan.Found() && !bytes.Equal(fileSalt, salt) {
+		return 0, fmt.Errorf("existing encrypted values in %s use a different key; run `enver decrypt` with the matching key first, then re-encrypt", path)
+	}
 	params := crypto.CurrentParams
-	if fileSalt, fileParams, _ := scan.Result(); scan.Found() && bytes.Equal(fileSalt, salt) {
+	if scan.Found() {
 		params = fileParams
 	}
 	count := 0
