@@ -228,7 +228,7 @@ func TestResolveRecovery(t *testing.T) {
 
 	salt := []byte("0123456789abcdef")
 	pass := "hunter2"
-	key, err := crypto.DeriveKey(pass, salt)
+	key, err := crypto.DeriveKey(pass, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestResolveRecoveryWrongPassphrase(t *testing.T) {
 	t.Setenv("ENVER_KEY", "")
 
 	salt := []byte("0123456789abcdef")
-	key, _ := crypto.DeriveKey("right", salt)
+	key, _ := crypto.DeriveKey("right", salt, crypto.CurrentParams)
 	enc, _ := crypto.EncryptValue("secret", key, salt)
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},
@@ -295,7 +295,7 @@ func TestResolveRecoveryNonInteractive(t *testing.T) {
 	t.Setenv("ENVER_KEY", "")
 
 	salt := []byte("0123456789abcdef")
-	key, _ := crypto.DeriveKey("hunter2", salt)
+	key, _ := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
 	enc, _ := crypto.EncryptValue("secret", key, salt)
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},

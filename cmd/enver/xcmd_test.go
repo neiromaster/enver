@@ -22,7 +22,7 @@ func TestXNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	t.Setenv("ENVER_KEY", "")
 
 	salt := []byte("0123456789abcdef")
-	key, err := crypto.DeriveKey("hunter2", salt)
+	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}

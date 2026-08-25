@@ -96,7 +96,7 @@ profiles:
 		t.Fatalf("encrypted %d values, want 1 (only API_KEY is secret-looking)", n)
 	}
 	enc, _ := os.ReadFile(path)
-	if !strings.Contains(string(enc), "enc:v2:") {
+	if !strings.Contains(string(enc), "enc:v3:") {
 		t.Fatal("encrypted value not found in file or lacks enc:v2: prefix")
 	}
 	if !strings.Contains(string(enc), "claude-sonnet-5") {
@@ -154,7 +154,7 @@ func TestEncryptFileEncodesURLSecrets(t *testing.T) {
 		t.Fatalf("encrypted %d values, want 1 (only DATABASE_URL carries credentials)", n)
 	}
 	enc, _ := os.ReadFile(path)
-	if !strings.Contains(string(enc), "enc:v2:") {
+	if !strings.Contains(string(enc), "enc:v3:") {
 		t.Fatal("DATABASE_URL not encrypted")
 	}
 	if strings.Contains(string(enc), "user:pass@db.internal") {
@@ -195,11 +195,8 @@ func TestEncryptFileWrongKeyFailsDecrypt(t *testing.T) {
 }
 
 func TestCryptoPrefixMatch(t *testing.T) {
-	if !crypto.IsEncrypted("enc:v2:YWJj") {
-		t.Fatal("IsEncrypted should match enc:v2:")
-	}
-	if crypto.IsEncrypted("enc:v1:YWJj") {
-		t.Fatal("IsEncrypted must not match the dropped enc:v1: format")
+	if crypto.IsEncrypted("enc:v2:YWJj") {
+		t.Fatal("IsEncrypted must not match foreign enc: prefixes")
 	}
 }
 

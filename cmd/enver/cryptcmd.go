@@ -67,7 +67,7 @@ var keygenCmd = &cobra.Command{
 				return err
 			}
 		}
-		key, err := crypto.DeriveKey(pass, salt)
+		key, err := crypto.DeriveKey(pass, salt, crypto.CurrentParams)
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func scanConfigCrypt() (configCryptScan, error) {
 					scan.hasEncrypted = true
 				}
 				if scan.salt == nil {
-					if s, err := crypto.SaltFromValue(v); err == nil {
+					if s, _, err := crypto.SaltFromValue(v); err == nil {
 						scan.salt = s
 					}
 				}

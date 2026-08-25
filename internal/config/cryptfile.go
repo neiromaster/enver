@@ -160,7 +160,7 @@ func FirstSaltAndSample(path string) (salt []byte, sample string, err error) {
 			if valNode.Kind != yaml.ScalarNode {
 				continue
 			}
-			if s, err := crypto.SaltFromValue(valNode.Value); err == nil {
+			if s, _, err := crypto.SaltFromValue(valNode.Value); err == nil {
 				return s, valNode.Value, nil
 			}
 		}

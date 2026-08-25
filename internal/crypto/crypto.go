@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"golang.org/x/crypto/argon2"
 )
 
-const prefixV2 = "enc:v2:"
+const prefixV3 = "enc:v3:"
 
 const keySize = 32
 
@@ -28,6 +30,16 @@ const (
 
 // SaltSize is the length of the argon2id salt in bytes.
 const SaltSize = saltSize
+
+// Argon2Params are the argon2id parameters carried in every enc:v3 value.
+type Argon2Params struct {
+	Time    uint32
+	Memory  uint32 // KiB
+	Threads uint8
+}
+
+// CurrentParams are the compile-time parameters new values are encrypted with.
+var CurrentParams = Argon2Params{kdfTime, kdfMemory, kdfThreads}
 
 // KeyFilePath is the default location for the enver key file. A var so tests
 // can redirect it.
@@ -86,13 +98,21 @@ func DecodeKey(s string) ([]byte, error) {
 	return key, nil
 }
 
-// IsEncrypted reports whether v carries the enc:v2: prefix.
+// IsEncrypted reports whether v carries the enc:v3: prefix.
 func IsEncrypted(v string) bool {
-	return hasPrefix(v, prefixV2)
+	return hasPrefix(v, prefixV3)
 }
 
-// EncryptValue returns "enc:v2:<base64(salt||nonce||ciphertext)>".
+// EncryptValue returns "enc:v3:argon2id:<t>:<m>:<p>:<base64(salt||nonce||ciphertext)>"
+// with the current KDF parameters.
 func EncryptValue(plain string, key, salt []byte) (string, error) {
+	return EncryptValueWithParams(plain, key, salt, CurrentParams)
+}
+
+// EncryptValueWithParams encrypts with explicit KDF parameters embedded in the
+// value header, so decryption and passphrase recovery never depend on the
+// compile-time constants.
+func EncryptValueWithParams(plain string, key, salt []byte, p Argon2Params) (string, error) {
 	if len(salt) != saltSize {
 		return "", fmt.Errorf("salt must be %d bytes, got %d", saltSize, len(salt))
 	}
@@ -109,16 +129,56 @@ func EncryptValue(plain string, key, salt []byte) (string, error) {
 	payload = append(payload, salt...)
 	payload = append(payload, nonce...)
 	payload = append(payload, sealed...)
-	return prefixV2 + base64.StdEncoding.EncodeToString(payload), nil
+	header := fmt.Sprintf("%sargon2id:%d:%d:%d:", prefixV3, p.Time, p.Memory, p.Threads)
+	return header + base64.StdEncoding.EncodeToString(payload), nil
 }
 
-// DecryptValue reverses EncryptValue. Returns an error if v is not an enc:v2:
+// parseV3 splits an enc:v3 value into its KDF parameters and base64 payload.
+func parseV3(v string) (Argon2Params, string, error) {
+	rest := strings.TrimPrefix(v, prefixV3)
+	parts := strings.SplitN(rest, ":", 5)
+	if len(parts) != 5 {
+		return Argon2Params{}, "", errors.New("malformed enc:v3 header: want argon2id:<t>:<m>:<p>:<payload>")
+	}
+	if parts[0] != "argon2id" {
+		return Argon2Params{}, "", fmt.Errorf("unsupported KDF %q", parts[0])
+	}
+	t, err := strconv.ParseUint(parts[1], 10, 32)
+	if err != nil {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field t: %v", err)
+	}
+	m, err := strconv.ParseUint(parts[2], 10, 32)
+	if err != nil {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: %v", err)
+	}
+	pCount, err := strconv.ParseUint(parts[3], 10, 8)
+	if err != nil {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: %v", err)
+	}
+	p := Argon2Params{Time: uint32(t), Memory: uint32(m), Threads: uint8(pCount)}
+	if p.Time < 1 {
+		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be >= 1")
+	}
+	if p.Threads < 1 {
+		return Argon2Params{}, "", errors.New("malformed enc:v3 header field p: must be >= 1")
+	}
+	if p.Memory < 8*uint32(p.Threads) {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be >= 8*p (%d KiB)", 8*uint32(p.Threads))
+	}
+	return p, parts[4], nil
+}
+
+// DecryptValue reverses EncryptValue. Returns an error if v is not an enc:v3:
 // value or the key/payload are invalid.
 func DecryptValue(v string, key []byte) (string, error) {
-	if !hasPrefix(v, prefixV2) {
+	if !hasPrefix(v, prefixV3) {
 		return "", errors.New("value is not encrypted")
 	}
-	raw, err := base64.StdEncoding.DecodeString(v[len(prefixV2):])
+	_, payload, err := parseV3(v)
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		return "", fmt.Errorf("invalid ciphertext: %w", err)
 	}
@@ -138,28 +198,33 @@ func DecryptValue(v string, key []byte) (string, error) {
 	return string(plain), nil
 }
 
-// DeriveKey derives a 32-byte AES key from a passphrase and salt using argon2id.
-func DeriveKey(passphrase string, salt []byte) ([]byte, error) {
+// DeriveKey derives a 32-byte AES key from a passphrase and salt with the
+// given argon2id parameters.
+func DeriveKey(passphrase string, salt []byte, p Argon2Params) ([]byte, error) {
 	if len(salt) == 0 {
 		return nil, errors.New("salt required")
 	}
-	return argon2.IDKey([]byte(passphrase), salt, kdfTime, kdfMemory, kdfThreads, keySize), nil
+	return argon2.IDKey([]byte(passphrase), salt, p.Time, p.Memory, p.Threads, keySize), nil
 }
 
-// SaltFromValue extracts the salt from an enc:v2: value. Errors for non-v2
-// values.
-func SaltFromValue(v string) ([]byte, error) {
-	if !hasPrefix(v, prefixV2) {
-		return nil, errors.New("value is not enc:v2")
+// SaltFromValue extracts the salt and KDF parameters from an enc:v3 value.
+// Errors for other values.
+func SaltFromValue(v string) ([]byte, Argon2Params, error) {
+	if !hasPrefix(v, prefixV3) {
+		return nil, Argon2Params{}, errors.New("value is not enc:v3")
 	}
-	raw, err := base64.StdEncoding.DecodeString(v[len(prefixV2):])
+	p, payload, err := parseV3(v)
 	if err != nil {
-		return nil, fmt.Errorf("invalid ciphertext: %w", err)
+		return nil, Argon2Params{}, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, Argon2Params{}, fmt.Errorf("invalid ciphertext: %w", err)
 	}
 	if len(raw) < saltSize {
-		return nil, errors.New("ciphertext too short")
+		return nil, Argon2Params{}, errors.New("ciphertext too short")
 	}
-	return raw[:saltSize], nil
+	return raw[:saltSize], p, nil
 }
 
 // KeyCache is the on-disk passphrase key cache.

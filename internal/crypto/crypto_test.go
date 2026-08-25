@@ -70,6 +70,69 @@ func TestDecryptNonEncryptedFails(t *testing.T) {
 	}
 }
 
+func TestEncryptValueV3Format(t *testing.T) {
+	key := make([]byte, 32)
+	salt := make([]byte, SaltSize)
+	enc, err := EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "enc:v3:argon2id:3:65536:4:"
+	if !strings.HasPrefix(enc, want) {
+		t.Fatalf("encrypted value = %q, want prefix %q", enc, want)
+	}
+}
+
+func TestDecryptUsesEmbeddedParams(t *testing.T) {
+	key := make([]byte, 32)
+	salt := make([]byte, SaltSize)
+	custom := Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	enc, err := EncryptValueWithParams("secret", key, salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := DecryptValue(enc, key)
+	if err != nil {
+		t.Fatalf("value with non-current params must decrypt: %v", err)
+	}
+	if plain != "secret" {
+		t.Fatalf("plain = %q", plain)
+	}
+}
+
+func TestSaltFromValueReturnsParams(t *testing.T) {
+	key := make([]byte, 32)
+	salt := make([]byte, SaltSize)
+	custom := Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1}
+	enc, _ := EncryptValueWithParams("s", key, salt, custom)
+	gotSalt, p, err := SaltFromValue(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotSalt, salt) {
+		t.Fatal("salt mismatch")
+	}
+	if p != custom {
+		t.Fatalf("params = %+v, want %+v", p, custom)
+	}
+}
+
+func TestParseV3Errors(t *testing.T) {
+	cases := []string{
+		"enc:v3:scrypt:3:65536:4:AAAA",   // unknown KDF
+		"enc:v3:argon2id:x:65536:4:AAAA", // non-numeric t
+		"enc:v3:argon2id:0:65536:4:AAAA", // t = 0
+		"enc:v3:argon2id:3:8:4:AAAA",     // m < 8*p
+		"enc:v3:argon2id:3:65536:0:AAAA", // p = 0
+		"enc:v3:argon2id:3:65536:4",      // no payload segment
+	}
+	for _, v := range cases {
+		if _, _, err := SaltFromValue(v); err == nil {
+			t.Errorf("SaltFromValue(%q) = nil error, want parse error", v)
+		}
+	}
+}
+
 func TestIsEncrypted(t *testing.T) {
 	if IsEncrypted("sk-ant-xxx") {
 		t.Fatal("plain value reported as encrypted")
@@ -77,8 +140,11 @@ func TestIsEncrypted(t *testing.T) {
 	if IsEncrypted("enc:v1:YWJjZA==") {
 		t.Fatal("enc:v1: is a dropped format and must not be reported as encrypted")
 	}
-	if !IsEncrypted("enc:v2:" + base64.StdEncoding.EncodeToString(make([]byte, 44))) {
-		t.Fatal("enc:v2: value must be recognized as encrypted")
+	if IsEncrypted("enc:v2:YWJj") {
+		t.Fatal("enc:v2: is a dropped format and must not be reported as encrypted")
+	}
+	if !IsEncrypted("enc:v3:argon2id:3:65536:4:" + base64.StdEncoding.EncodeToString(make([]byte, 44))) {
+		t.Fatal("enc:v3: value must be recognized as encrypted")
 	}
 }
 
@@ -150,11 +216,11 @@ func TestDecodeKeyInvalid(t *testing.T) {
 
 func TestDeriveKeyDeterministic(t *testing.T) {
 	salt := make([]byte, 16)
-	key1, err := DeriveKey("hunter2", salt)
+	key1, err := DeriveKey("hunter2", salt, CurrentParams)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	key2, err := DeriveKey("hunter2", salt)
+	key2, err := DeriveKey("hunter2", salt, CurrentParams)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
@@ -163,11 +229,11 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	}
 	otherSalt := make([]byte, 16)
 	otherSalt[0] = 1
-	key3, _ := DeriveKey("hunter2", otherSalt)
+	key3, _ := DeriveKey("hunter2", otherSalt, CurrentParams)
 	if bytes.Equal(key1, key3) {
 		t.Fatal("different salt must derive a different key")
 	}
-	key4, _ := DeriveKey("hunter3", salt)
+	key4, _ := DeriveKey("hunter3", salt, CurrentParams)
 	if bytes.Equal(key1, key4) {
 		t.Fatal("different passphrase must derive a different key")
 	}
@@ -176,15 +242,15 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	}
 }
 
-func TestEncryptV2RoundTrip(t *testing.T) {
+func TestEncryptV3RoundTrip(t *testing.T) {
 	salt := make([]byte, 16)
 	key := make([]byte, keySize)
 	enc, err := EncryptValue("secret", key, salt)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	if !strings.HasPrefix(enc, prefixV2) {
-		t.Fatalf("encrypted value = %q, want enc:v2: prefix", enc)
+	if !strings.HasPrefix(enc, prefixV3) {
+		t.Fatalf("encrypted value = %q, want enc:v3: prefix", enc)
 	}
 	plain, err := DecryptValue(enc, key)
 	if err != nil {
@@ -202,18 +268,21 @@ func TestSaltFromValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	got, err := SaltFromValue(enc)
+	got, _, err := SaltFromValue(enc)
 	if err != nil {
 		t.Fatalf("salt from value: %v", err)
 	}
 	if !bytes.Equal(got, salt) {
 		t.Fatalf("salt = %x, want %x", got, salt)
 	}
-	if _, err := SaltFromValue("enc:v1:AAAA"); err == nil {
+	if _, _, err := SaltFromValue("enc:v1:AAAA"); err == nil {
 		t.Fatal("SaltFromValue on a v1 value must error")
 	}
-	if _, err := SaltFromValue("plain"); err == nil {
+	if _, _, err := SaltFromValue("plain"); err == nil {
 		t.Fatal("SaltFromValue on plaintext must error")
+	}
+	if _, _, err := SaltFromValue("enc:v2:AAAA"); err == nil {
+		t.Fatal("SaltFromValue on a v2 value must error")
 	}
 }
 

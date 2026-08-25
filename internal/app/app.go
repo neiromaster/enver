@@ -197,7 +197,7 @@ func recoverKey(salt []byte, sample string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	key, err := crypto.DeriveKey(pass, salt)
+	key, err := crypto.DeriveKey(pass, salt, crypto.CurrentParams)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func osEnvMap() map[string]string {
 // in env, or (nil, "") when there is none.
 func firstSaltAndSample(env map[string]string) ([]byte, string) {
 	for _, v := range env {
-		if s, err := crypto.SaltFromValue(v); err == nil {
+		if s, _, err := crypto.SaltFromValue(v); err == nil {
 			return s, v
 		}
 	}
