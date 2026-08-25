@@ -129,6 +129,9 @@ func EncryptValueWithParams(plain string, key, salt []byte, p Argon2Params) (str
 	if len(salt) != saltSize {
 		return "", fmt.Errorf("salt must be %d bytes, got %d", saltSize, len(salt))
 	}
+	if err := checkParams(p); err != nil {
+		return "", err
+	}
 	gcm, err := newGCM(key)
 	if err != nil {
 		return "", err
@@ -144,6 +147,34 @@ func EncryptValueWithParams(plain string, key, salt []byte, p Argon2Params) (str
 	payload = append(payload, sealed...)
 	header := fmt.Sprintf("%sargon2id:%d:%d:%d:", prefixV3, p.Time, p.Memory, p.Threads)
 	return header + base64.StdEncoding.EncodeToString(payload), nil
+}
+
+// checkParams applies the enc:v3 parameter bounds to p. parseV3 and
+// EncryptValueWithParams share it, so the writer can never emit a header the
+// reader rejects — the bounds drift together or not at all.
+func checkParams(p Argon2Params) error {
+	if p.Time < 1 {
+		return errors.New("malformed enc:v3 header field t: must be >= 1")
+	}
+	if p.Time > maxKDFTime {
+		return fmt.Errorf("malformed enc:v3 header field t: must be <= %d", maxKDFTime)
+	}
+	if p.Threads < 1 {
+		return errors.New("malformed enc:v3 header field p: must be >= 1")
+	}
+	if p.Threads > maxKDFThreads {
+		return fmt.Errorf("malformed enc:v3 header field p: must be <= %d", maxKDFThreads)
+	}
+	if p.Memory < 8*uint32(p.Threads) {
+		return fmt.Errorf("malformed enc:v3 header field m: must be >= 8*p (%d KiB)", 8*uint32(p.Threads))
+	}
+	if p.Memory > maxKDFMemory {
+		return fmt.Errorf("malformed enc:v3 header field m: must be <= %d KiB", maxKDFMemory)
+	}
+	if cost := uint64(p.Time) * uint64(p.Memory); cost > maxKDFCost {
+		return fmt.Errorf("malformed enc:v3 header: t*m must be <= %d (got %d)", maxKDFCost, cost)
+	}
+	return nil
 }
 
 // parseV3 splits an enc:v3 value into its KDF parameters and base64 payload.
@@ -169,26 +200,8 @@ func parseV3(v string) (Argon2Params, string, error) {
 		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: invalid number")
 	}
 	p := Argon2Params{Time: uint32(t), Memory: uint32(m), Threads: uint8(pCount)}
-	if p.Time < 1 {
-		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be >= 1")
-	}
-	if p.Time > maxKDFTime {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field t: must be <= %d", maxKDFTime)
-	}
-	if p.Threads < 1 {
-		return Argon2Params{}, "", errors.New("malformed enc:v3 header field p: must be >= 1")
-	}
-	if p.Threads > maxKDFThreads {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: must be <= %d", maxKDFThreads)
-	}
-	if p.Memory < 8*uint32(p.Threads) {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be >= 8*p (%d KiB)", 8*uint32(p.Threads))
-	}
-	if p.Memory > maxKDFMemory {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be <= %d KiB", maxKDFMemory)
-	}
-	if cost := uint64(p.Time) * uint64(p.Memory); cost > maxKDFCost {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header: t*m must be <= %d (got %d)", maxKDFCost, cost)
+	if err := checkParams(p); err != nil {
+		return Argon2Params{}, "", err
 	}
 	return p, parts[4], nil
 }

@@ -152,6 +152,23 @@ func TestParseV3AcceptsBoundedCost(t *testing.T) {
 	}
 }
 
+func TestCurrentParamsWithinCaps(t *testing.T) {
+	// What enver writes it must read: CurrentParams has to satisfy the same
+	// bounds parseV3 enforces, or every new value is unreadable by construction.
+	if err := checkParams(CurrentParams); err != nil {
+		t.Fatalf("CurrentParams rejected by the enc:v3 bounds: %v", err)
+	}
+}
+
+func TestEncryptValueWithParamsRejectsOutOfCaps(t *testing.T) {
+	key := make([]byte, 32)
+	salt := make([]byte, SaltSize)
+	bad := Argon2Params{Time: maxKDFTime + 1, Memory: 64 * 1024, Threads: 4}
+	if _, err := EncryptValueWithParams("s", key, salt, bad); err == nil {
+		t.Fatal("params beyond the parse caps must not be writable")
+	}
+}
+
 func TestSaltScan(t *testing.T) {
 	key := make([]byte, 32)
 	saltA := bytes.Repeat([]byte{1}, SaltSize)
@@ -533,9 +550,9 @@ func TestParseV3ErrorEchoBounded(t *testing.T) {
 	if strings.Contains(errMsg, longJunk) {
 		t.Fatalf("error message contains unbounded attacker input: %q", errMsg)
 	}
-	// The error should contain a bounded fragment or field name only.
-	if !strings.Contains(errMsg, "t") && !strings.Contains(errMsg, "malformed") {
-		t.Fatalf("error message should mention field t or malformed: %q", errMsg)
+	// The error names the field and rejects the value without echoing it.
+	if !strings.Contains(errMsg, "field t: invalid number") {
+		t.Fatalf("error should name the field and its fault: %q", errMsg)
 	}
 	// Total error length should be bounded (significantly shorter than the input).
 	if len(errMsg) > len(malformed) {
