@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -154,6 +155,92 @@ func TestScanConfigCrypt(t *testing.T) {
 	}
 	if _, err := scanConfigCrypt(); err == nil {
 		t.Fatal("corrupt config must be an error")
+	}
+	if scan.params != crypto.CurrentParams {
+		t.Fatalf("params = %+v, want %+v", scan.params, crypto.CurrentParams)
+	}
+}
+
+func TestKeygenRejectsForeignEnc(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+	prev := keygenRandom
+	keygenRandom = true
+	t.Cleanup(func() { keygenRandom = prev })
+
+	global := config.GlobalPath(globalFlags.configPath)
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"
+	if err := os.WriteFile(global, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("keygen must reject config with foreign enc: values, got: %v", err)
+	}
+}
+
+func TestKeygenReusesParamsFromConfig(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+
+	salt := make([]byte, crypto.SaltSize)
+	custom := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	key, err := crypto.DeriveKey("test-pass", salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	global := config.GlobalPath(globalFlags.configPath)
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: " + enc + "\n"
+	if err := os.WriteFile(global, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	scan, err := scanConfigCrypt()
+	if err != nil {
+		t.Fatalf("scanConfigCrypt: %v", err)
+	}
+	if !scan.hasEncrypted {
+		t.Fatal("scan should detect encrypted values")
+	}
+	if scan.salt == nil {
+		t.Fatal("scan should capture salt")
+	}
+	if scan.params != custom {
+		t.Fatalf("params = %+v, want %+v", scan.params, custom)
+	}
+
+	globalFlags.keyPath = filepath.Join(dir, "key")
+	oldPassword := uiPassword
+	oldInteractive := uiInteractive
+	uiPassword = func(prompt string) (string, error) { return "test-pass", nil }
+	uiInteractive = func() bool { return true }
+	t.Cleanup(func() {
+		uiPassword = oldPassword
+		uiInteractive = oldInteractive
+	})
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("keygen passphrase failed: %v", err)
+	}
+
+	derivedKey, err := crypto.DeriveKey("test-pass", salt, custom)
+	if err != nil {
+		t.Fatalf("derive key with custom params: %v", err)
+	}
+	n, err := config.DecryptFile(global, derivedKey, "")
+	if err != nil {
+		t.Fatalf("decrypt with derived key: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("decrypted %d values, want 1", n)
 	}
 }
 
