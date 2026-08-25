@@ -70,7 +70,7 @@ func GenerateKey(path string, force bool) error {
 	if _, err := rand.Read(salt); err != nil {
 		return err
 	}
-	return WriteKeyCache(path, KeyCache{Version: 1, KDF: "random", Salt: salt, Key: key})
+	return WriteKeyCache(path, KeyCache{Version: 1, Salt: salt, Key: key})
 }
 
 // LoadKey reads the key cache at path, returning the key and its salt.
@@ -227,28 +227,18 @@ func SaltFromValue(v string) ([]byte, Argon2Params, error) {
 	return raw[:saltSize], p, nil
 }
 
-// KeyCache is the on-disk passphrase key cache.
+// KeyCache is the on-disk passphrase key cache. KDF parameters live in the
+// encrypted values, not here; the cache stores the already-derived key.
 type KeyCache struct {
 	Version int    `json:"v"`
-	KDF     string `json:"kdf"`
-	Time    uint32 `json:"t"`
-	Memory  uint32 `json:"m"`
-	Threads uint8  `json:"p"`
 	Salt    []byte `json:"salt"`
 	Key     []byte `json:"key"`
 }
 
-// NewKeyCache builds a cache entry with the current KDF parameters.
+// NewKeyCache builds a cache entry; KDF parameters live in the values, not
+// here — the cache stores the already-derived key.
 func NewKeyCache(salt, key []byte) KeyCache {
-	return KeyCache{
-		Version: 1,
-		KDF:     "argon2id",
-		Time:    kdfTime,
-		Memory:  kdfMemory,
-		Threads: kdfThreads,
-		Salt:    salt,
-		Key:     key,
-	}
+	return KeyCache{Version: 1, Salt: salt, Key: key}
 }
 
 // WriteKeyCache writes c to path as JSON with 0600 perms.
@@ -263,15 +253,6 @@ func WriteKeyCache(path string, c KeyCache) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
-}
-
-// LoadKeyCache reads and parses a KeyCache from path.
-func LoadKeyCache(path string) (KeyCache, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return KeyCache{}, err
-	}
-	return parseKeyCache(data)
 }
 
 func parseKeyCache(data []byte) (KeyCache, error) {

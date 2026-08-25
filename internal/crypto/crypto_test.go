@@ -362,19 +362,28 @@ func TestKeyCacheRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "key")
 	salt := []byte("0123456789abcdef")
 	key := make([]byte, keySize)
-	c := NewKeyCache(salt, key)
-	if err := WriteKeyCache(path, c); err != nil {
+	if err := WriteKeyCache(path, NewKeyCache(salt, key)); err != nil {
 		t.Fatalf("write cache: %v", err)
 	}
-	got, err := LoadKeyCache(path)
+	got, gotSalt, err := LoadKey(path)
 	if err != nil {
 		t.Fatalf("load cache: %v", err)
 	}
-	if !bytes.Equal(got.Salt, salt) || !bytes.Equal(got.Key, key) {
-		t.Fatalf("cache round-trip mismatch: %+v", got)
+	if !bytes.Equal(got, key) || !bytes.Equal(gotSalt, salt) {
+		t.Fatal("cache round-trip mismatch")
 	}
-	if got.KDF != "argon2id" || got.Time != 3 || got.Memory != 64*1024 || got.Threads != 4 {
-		t.Fatalf("cache params mismatch: %+v", got)
+}
+
+func TestLoadKeyReadsOldCacheFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key")
+	old := `{"v":1,"kdf":"argon2id","t":3,"m":65536,"p":4,"salt":"` +
+		base64.StdEncoding.EncodeToString(make([]byte, SaltSize)) +
+		`","key":"` + base64.StdEncoding.EncodeToString(make([]byte, keySize)) + `"}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadKey(path); err != nil {
+		t.Fatalf("old cache must load: %v", err)
 	}
 }
 
