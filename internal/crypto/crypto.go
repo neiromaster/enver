@@ -141,29 +141,35 @@ func parseV3(v string) (Argon2Params, string, error) {
 		return Argon2Params{}, "", errors.New("malformed enc:v3 header: want argon2id:<t>:<m>:<p>:<payload>")
 	}
 	if parts[0] != "argon2id" {
-		return Argon2Params{}, "", fmt.Errorf("unsupported KDF %q", parts[0])
+		return Argon2Params{}, "", fmt.Errorf("unsupported KDF %q", boundEcho(parts[0]))
 	}
 	t, err := strconv.ParseUint(parts[1], 10, 32)
 	if err != nil {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field t: %v", err)
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field t: invalid number")
 	}
 	m, err := strconv.ParseUint(parts[2], 10, 32)
 	if err != nil {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: %v", err)
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: invalid number")
 	}
 	pCount, err := strconv.ParseUint(parts[3], 10, 8)
 	if err != nil {
-		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: %v", err)
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: invalid number")
 	}
 	p := Argon2Params{Time: uint32(t), Memory: uint32(m), Threads: uint8(pCount)}
 	if p.Time < 1 {
 		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be >= 1")
+	}
+	if p.Time > 100 {
+		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be <= 100")
 	}
 	if p.Threads < 1 {
 		return Argon2Params{}, "", errors.New("malformed enc:v3 header field p: must be >= 1")
 	}
 	if p.Memory < 8*uint32(p.Threads) {
 		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be >= 8*p (%d KiB)", 8*uint32(p.Threads))
+	}
+	if p.Memory > 4194304 {
+		return Argon2Params{}, "", errors.New("malformed enc:v3 header field m: must be <= 4194304 KiB")
 	}
 	return p, parts[4], nil
 }
@@ -294,7 +300,17 @@ func ForeignEncError(prefix string) error {
 }
 
 func hasPrefix(s, p string) bool {
-	return len(s) > len(p) && s[:len(p)] == p
+	return len(s) >= len(p) && s[:len(p)] == p
+}
+
+// boundEcho truncates a string to 16 bytes plus "..." to avoid leaking
+// attacker-controlled values in error messages.
+func boundEcho(s string) string {
+	const maxLen = 16
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func newGCM(key []byte) (cipher.AEAD, error) {

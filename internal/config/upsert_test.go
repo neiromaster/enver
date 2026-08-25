@@ -98,7 +98,7 @@ profiles:
 	}
 	enc, _ := os.ReadFile(path)
 	if !strings.Contains(string(enc), "enc:v3:") {
-		t.Fatal("encrypted value not found in file or lacks enc:v2: prefix")
+		t.Fatal("encrypted value not found in file or lacks enc:v3: prefix")
 	}
 	if !strings.Contains(string(enc), "claude-sonnet-5") {
 		t.Fatal("non-secret value got encrypted")
@@ -337,13 +337,13 @@ func TestFirstSaltAndSample(t *testing.T) {
 	if err != nil || gotSalt != nil || gotSample != "" {
 		t.Fatalf("plain config: salt=%v sample=%q err=%v, want none", gotSalt, gotSample, err)
 	}
-	// One v2 value.
+	// One v3 value.
 	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      A: \""+enc+"\"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	gotSalt, _, gotSample, err = FirstSaltAndSample(path)
 	if err != nil || string(gotSalt) != string(salt) || gotSample != enc {
-		t.Fatalf("v2 config: salt=%q sample=%q err=%v, want %q/%q", gotSalt, gotSample, err, salt, enc)
+		t.Fatalf("v3 config: salt=%q sample=%q err=%v, want %q/%q", gotSalt, gotSample, err, salt, enc)
 	}
 	// Missing file → error.
 	if _, _, _, err := FirstSaltAndSample(filepath.Join(dir, "nope.yaml")); err == nil {

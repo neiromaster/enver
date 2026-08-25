@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -119,12 +120,14 @@ func TestSaltFromValueReturnsParams(t *testing.T) {
 
 func TestParseV3Errors(t *testing.T) {
 	cases := []string{
-		"enc:v3:scrypt:3:65536:4:AAAA",   // unknown KDF
-		"enc:v3:argon2id:x:65536:4:AAAA", // non-numeric t
-		"enc:v3:argon2id:0:65536:4:AAAA", // t = 0
-		"enc:v3:argon2id:3:8:4:AAAA",     // m < 8*p
-		"enc:v3:argon2id:3:65536:0:AAAA", // p = 0
-		"enc:v3:argon2id:3:65536:4",      // no payload segment
+		"enc:v3:scrypt:3:65536:4:AAAA",     // unknown KDF
+		"enc:v3:argon2id:x:65536:4:AAAA",   // non-numeric t
+		"enc:v3:argon2id:0:65536:4:AAAA",   // t = 0
+		"enc:v3:argon2id:3:8:4:AAAA",       // m < 8*p
+		"enc:v3:argon2id:3:65536:0:AAAA",   // p = 0
+		"enc:v3:argon2id:3:65536:4",        // no payload segment
+		"enc:v3:argon2id:101:65536:4:AAAA", // t too big (t > 100)
+		"enc:v3:argon2id:3:4194305:4:AAAA", // m too big (m > 4 GiB)
 	}
 	for _, v := range cases {
 		if _, _, err := SaltFromValue(v); err == nil {
@@ -407,6 +410,7 @@ func TestForeignEncPrefix(t *testing.T) {
 		"plaintext":                      "",
 		"encrypt":                        "",
 		"":                               "",
+		"enc:":                           "enc:",
 	}
 	for v, want := range cases {
 		if got := ForeignEncPrefix(v); got != want {
@@ -429,5 +433,29 @@ func TestForeignEncError(t *testing.T) {
 	err := ForeignEncError("enc:v2:")
 	if err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
 		t.Fatalf("err = %v, want unsupported encrypted value", err)
+	}
+}
+
+func TestParseV3ErrorEchoBounded(t *testing.T) {
+	// Test that attacker-controlled segments in malformed values don't leak
+	// unbounded into error messages.
+	longJunk := strings.Repeat("X", 40) // 40 chars, longer than the 16-byte bound
+	malformed := fmt.Sprintf("enc:v3:argon2id:%s:65536:4:AAAA", longJunk)
+	_, _, err := parseV3(malformed)
+	if err == nil {
+		t.Fatal("malformed value with long t field should error")
+	}
+	errMsg := err.Error()
+	// The error must not contain the full longJunk string.
+	if strings.Contains(errMsg, longJunk) {
+		t.Fatalf("error message contains unbounded attacker input: %q", errMsg)
+	}
+	// The error should contain a bounded fragment or field name only.
+	if !strings.Contains(errMsg, "t") && !strings.Contains(errMsg, "malformed") {
+		t.Fatalf("error message should mention field t or malformed: %q", errMsg)
+	}
+	// Total error length should be bounded (significantly shorter than the input).
+	if len(errMsg) > len(malformed) {
+		t.Fatalf("error message (%d chars) longer than input (%d chars): %q", len(errMsg), len(malformed), errMsg)
 	}
 }
