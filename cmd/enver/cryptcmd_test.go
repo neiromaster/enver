@@ -148,6 +148,9 @@ func TestScanConfigCrypt(t *testing.T) {
 	if string(scan.salt) != "0123456789abcdef" {
 		t.Fatalf("salt = %q, want 0123456789abcdef", scan.salt)
 	}
+	if scan.params != crypto.CurrentParams {
+		t.Fatalf("params = %+v, want %+v", scan.params, crypto.CurrentParams)
+	}
 
 	// A corrupt config must surface as an error, not be skipped.
 	if err := os.WriteFile(local, []byte("[1, 2"), 0o644); err != nil {
@@ -155,9 +158,6 @@ func TestScanConfigCrypt(t *testing.T) {
 	}
 	if _, err := scanConfigCrypt(); err == nil {
 		t.Fatal("corrupt config must be an error")
-	}
-	if scan.params != crypto.CurrentParams {
-		t.Fatalf("params = %+v, want %+v", scan.params, crypto.CurrentParams)
 	}
 }
 
