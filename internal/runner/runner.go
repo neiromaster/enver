@@ -11,12 +11,16 @@ import (
 	"golang.org/x/term"
 )
 
-// MergedEnv overlays profileEnv on osEnv, returning a sorted "K=V" slice
-// suitable for exec.Cmd.Env.
-func MergedEnv(osEnv, profileEnv map[string]string) []string {
+// MergedEnv overlays profileEnv on osEnv, drops the unsets, and returns a
+// sorted "K=V" slice suitable for exec.Cmd.Env. Unsets remove a key even when
+// the shell exports it — that is the point of an unset in the config.
+func MergedEnv(osEnv, profileEnv map[string]string, unsets []string) []string {
 	curMap := make(map[string]string, len(osEnv)+len(profileEnv))
 	maps.Copy(curMap, osEnv)
 	maps.Copy(curMap, profileEnv)
+	for _, u := range unsets {
+		delete(curMap, u)
+	}
 	keys := make([]string, 0, len(curMap))
 	for k := range curMap {
 		keys = append(keys, k)

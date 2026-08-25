@@ -715,6 +715,32 @@ func TestMergeCommentsSticky(t *testing.T) {
 	}
 }
 
+func TestEncryptFileRefusesKeyMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: plain\n"
+	if err := os.WriteFile(path, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	saltA := []byte("aaaaaaaaaaaaaaaa")
+	saltB := []byte("bbbbbbbbbbbbbbbb")
+	if n, err := EncryptFile(path, key, saltA, "", false); err != nil || n != 1 {
+		t.Fatalf("first encrypt: n=%d err=%v, want 1/nil", n, err)
+	}
+	n, err := EncryptFile(path, key, saltB, "", false)
+	if err == nil || !strings.Contains(err.Error(), "different key") {
+		t.Fatalf("second encrypt with mismatched salt: err=%v, want refusal", err)
+	}
+	if n != 0 {
+		t.Fatalf("n = %d, want 0 (nothing written on refusal)", n)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Count(string(data), "enc:v3:") != 1 {
+		t.Fatal("file must keep exactly one encrypted value")
+	}
+}
+
 func TestEncryptFileRejectsForeignEnc(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/neiromaster/enver/internal/config"
 )
 
 func TestPrintEnvMasking(t *testing.T) {
@@ -17,7 +19,7 @@ func TestPrintEnvMasking(t *testing.T) {
 
 	// masked: API_KEY redacted, MODEL shown.
 	var masked bytes.Buffer
-	if err := printEnv(&masked, env, chain, false); err != nil {
+	if err := printEnv(&masked, env, chain, nil, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	if !strings.Contains(masked.String(), "len=24") {
@@ -39,7 +41,7 @@ func TestPrintEnvJSON(t *testing.T) {
 	chain := []string{"anth"}
 
 	var out bytes.Buffer
-	if err := printEnvJSON(&out, "anth", chain, env); err != nil {
+	if err := printEnvJSON(&out, "anth", chain, env, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -60,6 +62,50 @@ func TestPrintEnvJSON(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "len=") {
 		t.Errorf("JSON must not contain masking hints:\n%s", out.String())
+	}
+}
+
+// TestPrintEnvProvenance pins the per-key source annotation: text output marks
+// the defining profile and layer, and JSON carries a structured sources map.
+func TestPrintEnvProvenance(t *testing.T) {
+	env := map[string]string{
+		"API_KEY":         "sk-ant-secret",
+		"ANTHROPIC_MODEL": "claude-sonnet-5",
+	}
+	chain := []string{"dev", "anth"}
+	sources := map[string]config.Source{
+		"API_KEY":         {Profile: "dev", Layer: "local"},
+		"ANTHROPIC_MODEL": {Profile: "anth", Layer: "global"},
+	}
+
+	var out bytes.Buffer
+	if err := printEnv(&out, env, chain, sources, false); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)") {
+		t.Errorf("text output missing global-source annotation:\n%s", s)
+	}
+	if !strings.Contains(s, "# from dev (local)") {
+		t.Errorf("text output missing local-source annotation:\n%s", s)
+	}
+	if !strings.Contains(s, "# profile: dev → anth") {
+		t.Errorf("chain header lost:\n%s", s)
+	}
+
+	var jout bytes.Buffer
+	if err := printEnvJSON(&jout, "dev", chain, env, sources); err != nil {
+		t.Fatalf("printEnvJSON: %v", err)
+	}
+	var got showJSON
+	if err := json.Unmarshal(jout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, jout.String())
+	}
+	if got.Sources["API_KEY"] != sources["API_KEY"] {
+		t.Errorf("JSON source API_KEY = %+v, want %+v", got.Sources["API_KEY"], sources["API_KEY"])
+	}
+	if got.Sources["ANTHROPIC_MODEL"].Layer != "global" {
+		t.Errorf("JSON source ANTHROPIC_MODEL = %+v, want global", got.Sources["ANTHROPIC_MODEL"])
 	}
 }
 
@@ -99,5 +145,27 @@ func TestPrintExportPowerShell(t *testing.T) {
 	}
 	if !strings.Contains(out, "$env:QUOTE = 'it''s'") {
 		t.Errorf("powershell export missing doubled-quote escaping:\n%s", out)
+	}
+}
+
+func TestPrintExportFish(t *testing.T) {
+	env := map[string]string{
+		"API_KEY": "sk-ant-secret-1234567890",
+		"QUOTE":   "it's",
+		"WINPATH": `C:\Users\gavro`,
+	}
+	var exp bytes.Buffer
+	if err := printExport(&exp, env, "fish"); err != nil {
+		t.Fatalf("printExport: %v", err)
+	}
+	out := exp.String()
+	if !strings.Contains(out, "set -gx API_KEY 'sk-ant-secret-1234567890'") {
+		t.Errorf("fish export missing set -gx assignment:\n%s", out)
+	}
+	if !strings.Contains(out, "set -gx QUOTE 'it\\'s'") {
+		t.Errorf("fish export missing backslash-quote escaping:\n%s", out)
+	}
+	if !strings.Contains(out, `set -gx WINPATH 'C:\\Users\\gavro'`) {
+		t.Errorf("fish export must not mangle backslashes:\n%s", out)
 	}
 }

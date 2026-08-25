@@ -39,6 +39,43 @@ func (e *Extends) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// Unsets is the list of env keys a profile removes from the resolved
+// environment and from the child process environment. YAML accepts either a
+// scalar (unset: API_KEY) or a sequence (unset: [A, B]); both normalize to a
+// slice, mirroring extends.
+type Unsets []string
+
+// Has reports whether key is among the unsets.
+func (u Unsets) Has(key string) bool {
+	for _, x := range u {
+		if x == key {
+			return true
+		}
+	}
+	return false
+}
+
+// UnmarshalYAML accepts unset as a scalar or a sequence, normalizing both to a
+// slice. A null or empty scalar yields nil (no unsets).
+func (u *Unsets) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		if value.Tag == "!!null" || value.Value == "" {
+			return nil
+		}
+		*u = Unsets{value.Value}
+	case yaml.SequenceNode:
+		var names []string
+		if err := value.Decode(&names); err != nil {
+			return err
+		}
+		*u = Unsets(names)
+	case yaml.AliasNode:
+		return value.Alias.Decode(u)
+	}
+	return nil
+}
+
 // writeExtendsNode writes extends into prof: omitted when empty, a scalar when
 // single, a sequence when multiple. Mirrors the accepted read forms.
 func writeExtendsNode(prof *yaml.Node, extends Extends) {

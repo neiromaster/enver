@@ -23,6 +23,8 @@ func (i Issue) String() string {
 		return fmt.Sprintf("%s: extends cycle (%s)", i.Profile, i.Detail)
 	case "empty":
 		return fmt.Sprintf("%s: no env vars and no extends", i.Profile)
+	case "contradictory-unset":
+		return fmt.Sprintf("%s: unsets %q which it also defines in env", i.Profile, i.Target)
 	}
 	return fmt.Sprintf("%s: %s", i.Profile, i.Kind)
 }
@@ -50,6 +52,11 @@ func Validate(cfg Config) []Issue {
 		}
 		if len(p.Env) == 0 && len(p.Extends) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
+		}
+		for _, u := range p.Unset {
+			if _, defined := p.Env[u]; defined {
+				issues = append(issues, Issue{Profile: n, Kind: "contradictory-unset", Severity: "warning", Target: u})
+			}
 		}
 	}
 	return issues

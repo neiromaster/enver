@@ -462,25 +462,15 @@ func TestEncryptFileReusesFileKDFParams(t *testing.T) {
 		t.Fatalf("new value params = %+v, want the file's %+v", params, custom)
 	}
 
-	// A run with a different salt starts a new era and stamps CurrentParams:
-	// the file's params describe a key this run does not hold.
+	// A run with a different salt is refused: it would mix two keys and
+	// strand the value already encrypted under the file's key.
 	other := filepath.Join(dir, "other.yaml")
 	if err := os.WriteFile(other, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EncryptFile(other, key, []byte("fedcba9876543210"), "", true); err != nil {
-		t.Fatalf("encrypt with other salt: %v", err)
-	}
-	c, err = LoadFile(other)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, params, err = crypto.SaltFromValue(c.Profiles["p"].Env["SECRET"])
-	if err != nil {
-		t.Fatalf("SaltFromValue: %v", err)
-	}
-	if params != crypto.CurrentParams {
-		t.Fatalf("re-keyed run params = %+v, want %+v", params, crypto.CurrentParams)
+	if _, err := EncryptFile(other, key, []byte("fedcba9876543210"), "", true); err == nil ||
+		!strings.Contains(err.Error(), "different key") {
+		t.Fatalf("encrypt with other salt: err = %v, want refusal", err)
 	}
 }
 

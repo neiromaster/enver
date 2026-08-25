@@ -140,6 +140,28 @@ not warn on overlaps.
 several by editing the YAML (`extends: [a, b]`) or via
 `enver import <file> <name> --extends a,b`.
 
+### Removing variables (`unset`)
+
+Inheritance is additive — a child can override an inherited key but not remove
+it. A profile can also list keys to strip from the resolved environment:
+
+```yaml
+profiles:
+  bare:
+    extends: anth
+    unset: [ANTHROPIC_API_KEY]   # run without this key even if the shell exports it
+```
+
+`unset` accepts a single key (`unset: ANTHROPIC_API_KEY`) or a list. It removes
+the key from the profile's resolved env (so `show`, `export`, and `dotenv`
+drop it) **and** from the child process environment — even when the var is
+already exported in your shell; that is its point, and `enver x bare -- claude`
+runs with the key gone. Unsets accumulate down the chain (a child inherits its
+parents' unsets) and union across layers (global and local both apply).
+Author `unset` in YAML like multi-parent `extends`; an `unset` naming a key the
+same profile also sets in `env` is flagged by `enver validate` (the unset
+wins).
+
 ## Creating profiles interactively
 
 `enver add` walks you through a new profile and writes it into the global
@@ -309,7 +331,7 @@ then on `enver x` runs without prompting.
 ```
 enver x [profile] -- <command> [args...]  Run command with the profile's env
 enver show [profile] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
-enver export [profile] [--format bash|powershell]      Print `export K=V` (unmasked, for eval)
+enver export [profile] [--format bash|fish|powershell] Print `export K=V` (unmasked, for eval)
 enver dotenv [profile] [-o file]                       Write a profile to a .env file (with comments)
 enver import <file> [profile] [--replace]              Import a .env file into a profile (--extends, --force)
 enver list [--format text|json]          List profiles
@@ -339,7 +361,13 @@ enver --version / -h, --help
 > **Breaking:** `enver init` was renamed to `enver add` — `init` implied initialization, but the command only adds a profile.
 
 With no profile, the config's `default` is used. `enver show <profile>` previews
-the resolved env (masked by default); `enver list` lists profiles.
+the resolved env (masked by default); `enver list` lists profiles. Every `show`
+line is annotated with the defining profile and layer
+(`ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)`), so with multi-parent
+`extends` you can see at a glance which profile actually won a key — a variable
+picked up from `./.enver.yaml` is marked `(local)`, one from the global config
+`(global)`. `--format json` carries the same provenance as a structured
+`sources` map.
 
 Profile names may collide with subcommand verbs (`x`, `show`, `export`,
 `dotenv`, `import`, `list`, `add`, `edit`, `remove`, `rename`, `duplicate`,
@@ -352,8 +380,10 @@ case-insensitive, or values that embed credentials in a URL such as
 to reveal) and encrypted by `enver encrypt`. Plain URLs without credentials
 (`https://api.example.com`) are left alone. `enver export` is always unmasked so
 `eval "$(enver export <profile>)"` applies to the current shell. `--format
-powershell` emits `$env:K = 'V'` for PowerShell (`enver export <profile>
---format powershell | iex`); `bash` is the default. `show`/`list` also accept
+fish` emits `set -gx K 'V'` for fish (`enver export <profile> --format fish |
+source`); `--format powershell` emits `$env:K = 'V'` for PowerShell (`enver
+export <profile> --format powershell | iex`); `bash` is the default.
+`show`/`list` also accept
 `--format json` for machine-readable output (`show` still honors `--no-mask`).
 
 ## How it works

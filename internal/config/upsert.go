@@ -76,6 +76,15 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 	case len(p.Extends) > 0:
 		writeExtendsNode(prof, p.Extends)
 	}
+	// unset is additive like extends: written when non-empty, never cleared by
+	// an upsert, so duplicate keeps a hand-authored unset list.
+	switch len(p.Unset) {
+	case 0:
+	case 1:
+		setScalar(prof, "unset", p.Unset[0])
+	default:
+		setSequence(prof, "unset", p.Unset)
+	}
 	if len(p.Env) > 0 {
 		env := ensureMappingEntry(prof, "env")
 		keys := make([]string, 0, len(p.Env))

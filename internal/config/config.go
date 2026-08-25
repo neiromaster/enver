@@ -14,6 +14,7 @@ import (
 // Profile is one named environment profile.
 type Profile struct {
 	Extends  Extends           `yaml:"extends"`
+	Unset    Unsets            `yaml:"unset"` // env keys removed from the resolved env and the child process
 	Env      map[string]string `yaml:"env"`
 	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
 }
@@ -54,10 +55,19 @@ func stripCommentPrefix(c string) string {
 	return c
 }
 
-// Config is the merged top-level document.
+// Layer names recorded in Config.Origins for per-key provenance.
+const (
+	LayerGlobal = "global"
+	LayerLocal  = "local"
+)
+
+// Config is the merged top-level document. Origins records, per profile and env
+// key, which layer ("global" or "local") provided the winning value; it is
+// filled by Merge and never serialized.
 type Config struct {
-	Default  string             `yaml:"default"`
-	Profiles map[string]Profile `yaml:"profiles"`
+	Default  string                       `yaml:"default"`
+	Profiles map[string]Profile           `yaml:"profiles"`
+	Origins  map[string]map[string]string `yaml:"-"` // profile → env key → layer
 }
 
 // GlobalPath resolves the user-level config location:
@@ -132,11 +142,21 @@ func Merge(base, override Config) Config {
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
+		bp.Unset = mergeUniq(bp.Unset, p.Unset)
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
 		for k, v := range p.Env {
 			bp.Env[k] = v
+			if out.Origins == nil {
+				out.Origins = map[string]map[string]string{}
+			}
+			m := out.Origins[name]
+			if m == nil {
+				m = map[string]string{}
+				out.Origins[name] = m
+			}
+			m[k] = LayerLocal
 		}
 		for k, c := range p.Comments {
 			if c == "" {
@@ -152,14 +172,28 @@ func Merge(base, override Config) Config {
 	return out
 }
 
-func mergeExtends(base, add Extends) Extends {
-	out := append(Extends(nil), base...)
+// mergeUniq concatenates base and add, dropping duplicates.
+func mergeUniq(base, add []string) []string {
+	out := append([]string(nil), base...)
 	for _, x := range add {
-		if !out.Has(x) {
+		if !sliceHas(out, x) {
 			out = append(out, x)
 		}
 	}
 	return out
+}
+
+func sliceHas(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeExtends(base, add Extends) Extends {
+	return Extends(mergeUniq(base, add))
 }
 
 // LoadMerged loads the global config then applies local .enver.yaml layers.
@@ -181,12 +215,24 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	return cfg, nil
 }
 
+// Source identifies where a resolved env value came from: the profile that last
+// set it along the chain, and the layer ("global" or "local") whose copy of
+// that profile carried the winning value. A key overridden by a closer parent
+// or child reports the override, matching value provenance.
+type Source struct {
+	Profile string `json:"profile"`
+	Layer   string `json:"layer"`
+}
+
 // Resolved is the outcome of resolving a profile: the merged env, the merged
-// comments (nearest commented definer wins, matching value provenance), and
-// the self-first lineage chain.
+// comments (nearest commented definer wins, matching value provenance), the
+// per-key source provenance, the effective unset list, and the self-first
+// lineage chain.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
+	Sources  map[string]Source
+	Unsets   []string
 	Chain    []string
 }
 
@@ -196,58 +242,103 @@ type Resolved struct {
 // follow the same fold — a definer's comment applies only when it carries
 // one, so a nearer uncommented redefinition keeps the farther comment. The
 // returned chain is a self-first DFS pre-order for display; a cycle,
-// including one spanning multiple parents, is reported as an error.
+// including one spanning multiple parents, is reported as an error. Unset keys
+// are dropped from the env (and comments) and collected into Unsets.
 func (c Config) ResolveProfile(name string) (Resolved, error) {
-	env, comments, err := c.resolveEnv(name, map[string]bool{})
+	f, err := c.resolveEnv(name, map[string]bool{})
 	if err != nil {
 		return Resolved{}, err
 	}
 	return Resolved{
-		Env:      env,
-		Comments: comments,
+		Env:      f.env,
+		Comments: f.comments,
+		Sources:  f.sources,
+		Unsets:   f.unsets,
 		Chain:    c.chainOf(name, map[string]bool{}),
 	}, nil
 }
 
-// resolveEnv returns the fully merged env and comments for name: each parent
-// is resolved transitively and merged left-to-right, then name's own entries
-// are applied last (child wins; comments only when the definer carries one).
-// The visiting set tracks the active path so a cycle (self, mutual, or across
-// multiple parents) is detected; a name is removed from it on the way back up
-// so a diamond is not mistaken for a cycle.
-func (c Config) resolveEnv(name string, visiting map[string]bool) (env, comments map[string]string, err error) {
+// envFold is one resolution step's merged outcome.
+type envFold struct {
+	env      map[string]string
+	comments map[string]string
+	sources  map[string]Source
+	unsets   []string
+}
+
+// resolveEnv returns the fully merged env, comments, sources, and unsets for
+// name: each parent is resolved transitively and merged left-to-right, then
+// name's own entries are applied last (child wins; comments only when the
+// definer carries one). Unset keys are dropped from env and comments and
+// accumulated so a child can report the whole fence. The visiting set tracks
+// the active path so a cycle (self, mutual, or across multiple parents) is
+// detected; a name is removed from it on the way back up so a diamond is not
+// mistaken for a cycle.
+func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
-		return nil, nil, fmt.Errorf("extends cycle at %q", name)
+		return envFold{}, fmt.Errorf("extends cycle at %q", name)
 	}
 	p, ok := c.Profiles[name]
 	if !ok {
-		return nil, nil, fmt.Errorf("profile %q not found", name)
+		return envFold{}, fmt.Errorf("profile %q not found", name)
 	}
 	visiting[name] = true
-	env = map[string]string{}
-	comments = map[string]string{}
+	var out envFold
+	out.env = map[string]string{}
+	out.comments = map[string]string{}
+	out.sources = map[string]Source{}
 	for _, parent := range p.Extends {
-		pe, pc, err := c.resolveEnv(parent, visiting)
+		pf, err := c.resolveEnv(parent, visiting)
 		if err != nil {
-			return nil, nil, err
+			return envFold{}, err
 		}
-		for k, v := range pe {
-			env[k] = v
+		for k, v := range pf.env {
+			out.env[k] = v
 		}
-		for k, cc := range pc {
-			comments[k] = cc
+		for k, cc := range pf.comments {
+			out.comments[k] = cc
 		}
+		for k, s := range pf.sources {
+			out.sources[k] = s
+		}
+		out.unsets = appendUniq(out.unsets, pf.unsets...)
 	}
 	delete(visiting, name)
 	for k, v := range p.Env {
-		env[k] = v
+		out.env[k] = v
+		out.sources[k] = Source{Profile: name, Layer: c.layerOf(name, k)}
 	}
 	for k, cc := range p.Comments {
 		if cc != "" {
-			comments[k] = cc
+			out.comments[k] = cc
 		}
 	}
-	return env, comments, nil
+	for _, u := range p.Unset {
+		delete(out.env, u)
+		delete(out.comments, u)
+		delete(out.sources, u)
+	}
+	out.unsets = appendUniq(out.unsets, p.Unset...)
+	return out, nil
+}
+
+func appendUniq(dst []string, add ...string) []string {
+	for _, x := range add {
+		if !sliceHas(dst, x) {
+			dst = append(dst, x)
+		}
+	}
+	return dst
+}
+
+// layerOf reports which layer ("global" or "local") defined key in profile's
+// own env. Merge records local for keys the local layer overrode; everything
+// else is global by default.
+func (c Config) layerOf(profile, key string) string {
+	if l := c.Origins[profile][key]; l != "" {
+		return l
+	}
+	return LayerGlobal
 }
 
 // chainOf returns name's lineage as a self-first DFS pre-order: name, then each
