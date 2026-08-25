@@ -389,3 +389,36 @@ func TestLoadKeyRejectsRawKeyFile(t *testing.T) {
 		t.Fatal("raw base64 key file must not load; want an invalid key cache error")
 	}
 }
+
+func TestForeignEncPrefix(t *testing.T) {
+	cases := map[string]string{
+		"enc:v2:AAAA":                    "enc:v2:",
+		"enc:v1:AAAA":                    "enc:v1:",
+		"enc:v3:argon2id:3:65536:4:AAAA": "",
+		"plaintext":                      "",
+		"encrypt":                        "",
+		"":                               "",
+	}
+	for v, want := range cases {
+		if got := ForeignEncPrefix(v); got != want {
+			t.Errorf("ForeignEncPrefix(%q) = %q, want %q", v, got, want)
+		}
+	}
+	// No second colon: the echo is bounded so a long value never lands whole
+	// in an error message.
+	if got := ForeignEncPrefix("enc:short"); got != "enc:short" {
+		t.Errorf("ForeignEncPrefix(short no-colon) = %q, want %q", got, "enc:short")
+	}
+	longVal := "enc:this-is-a-very-long-plaintext-secret"
+	wantTruncated := "enc:this-is-a-ve..." // 16 bytes + "..."
+	if got := ForeignEncPrefix(longVal); got != wantTruncated {
+		t.Errorf("ForeignEncPrefix(long no-colon) = %q, want %q", got, wantTruncated)
+	}
+}
+
+func TestForeignEncError(t *testing.T) {
+	err := ForeignEncError("enc:v2:")
+	if err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("err = %v, want unsupported encrypted value", err)
+	}
+}

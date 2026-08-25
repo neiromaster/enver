@@ -288,6 +288,30 @@ func parseKeyCache(data []byte) (KeyCache, error) {
 	return c, nil
 }
 
+// ForeignEncPrefix returns the enc-family prefix of a value this build cannot
+// handle (for example "enc:v2:"), or "" when v is enc:v3 or not enc-family.
+// enver owns the "enc:" namespace in configs.
+func ForeignEncPrefix(v string) string {
+	if !hasPrefix(v, "enc:") || hasPrefix(v, prefixV3) {
+		return ""
+	}
+	if i := strings.IndexByte(v[4:], ':'); i >= 0 {
+		return v[:4+i+1]
+	}
+	// No second colon: bound the echo so a long value (possibly a plaintext
+	// secret) never lands whole in an error message.
+	const maxLen = 16
+	if len(v) <= maxLen {
+		return v
+	}
+	return v[:maxLen] + "..."
+}
+
+// ForeignEncError describes an enc-family value this build cannot read.
+func ForeignEncError(prefix string) error {
+	return fmt.Errorf("unsupported encrypted value %q; this enver build cannot read it — re-encrypt with a compatible version", prefix)
+}
+
 func hasPrefix(s, p string) bool {
 	return len(s) > len(p) && s[:len(p)] == p
 }
