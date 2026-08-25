@@ -28,12 +28,14 @@ var keygenCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
 		path := keygenPath()
-		scan, err := scanConfigCrypt()
-		if err != nil {
-			return err
-		}
 		if keygenRandom {
-			risk, err := keygenRisk(force, path, nil, func() (bool, error) { return scan.hasEncrypted, nil })
+			risk, err := keygenRisk(force, path, nil, func() (bool, error) {
+				scan, err := scanConfigCrypt()
+				if err != nil {
+					return false, err
+				}
+				return scan.hasEncrypted, nil
+			})
 			if err != nil {
 				return err
 			}
@@ -54,6 +56,10 @@ var keygenCmd = &cobra.Command{
 			if _, err := os.Stat(path); err == nil {
 				return fmt.Errorf("key already exists at %s (use --force to overwrite)", path)
 			}
+		}
+		scan, err := scanConfigCrypt()
+		if err != nil {
+			return err
 		}
 		pass, err := uiPassword("Enter passphrase:")
 		if err != nil {
@@ -116,10 +122,11 @@ func keygenPath() string {
 // keygenRisk reports whether force-overwriting the key at path with newKey
 // would strand encrypted values: an existing key that differs plus encrypted
 // values in the configs. newKey is nil when the key is not yet known (--random),
-// in which case any existing key counts as different. hasEncrypted reports the
-// result of an already-eager scan (configs are read once before branching, so
-// the closure merely returns the precomputed result). A corrupt key file is an
-// error: overwriting it cannot be judged safe.
+// in which case any existing key counts as different. hasEncrypted is called
+// only when the risk is real, so paths that can strand nothing (--random or
+// interactive keygen without --force) never read the configs: --random is the
+// bootstrap path and must work beside unreadable or foreign-enc configs. A
+// corrupt key file is an error: overwriting it cannot be judged safe.
 func keygenRisk(force bool, path string, newKey []byte, hasEncrypted func() (bool, error)) (bool, error) {
 	if !force {
 		return false, nil
@@ -151,10 +158,13 @@ type configCryptScan struct {
 // scanConfigCrypt parses each config layer once, reporting whether any value
 // is encrypted (a new key would strand it) and the first enc:v3 salt and KDF
 // params (reused so a re-run with the same passphrase derives the same key).
-// A corrupt layer is an error rather than a silent skip: keygen must not
-// overwrite a key while it cannot tell what the configs hold.
+// Values from different eras — disagreeing salt or KDF params — are an error:
+// one passphrase cannot recover both. A corrupt layer is an error rather than
+// a silent skip: keygen must not overwrite a key while it cannot tell what
+// the configs hold.
 func scanConfigCrypt() (configCryptScan, error) {
 	var scan configCryptScan
+	var salts crypto.SaltScan
 	for _, p := range []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()} {
 		c, err := config.LoadFile(p)
 		if err != nil {
@@ -162,20 +172,17 @@ func scanConfigCrypt() (configCryptScan, error) {
 		}
 		for _, prof := range c.Profiles {
 			for _, v := range prof.Env {
-				if p := crypto.ForeignEncPrefix(v); p != "" {
-					return scan, crypto.ForeignEncError(p)
-				}
 				if crypto.IsEncrypted(v) {
 					scan.hasEncrypted = true
 				}
-				if scan.salt == nil {
-					if s, params, err := crypto.SaltFromValue(v); err == nil {
-						scan.salt = s
-						scan.params = params
-					}
+				if err := salts.Add(v); err != nil {
+					return scan, err
 				}
 			}
 		}
+	}
+	if salts.Found() {
+		scan.salt, scan.params, _ = salts.Result()
 	}
 	return scan, nil
 }

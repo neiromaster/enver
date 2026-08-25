@@ -161,7 +161,32 @@ func TestScanConfigCrypt(t *testing.T) {
 	}
 }
 
-func TestKeygenRejectsForeignEnc(t *testing.T) {
+func TestScanConfigCryptConflictingEras(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+
+	key := make([]byte, 32)
+	encA, err := crypto.EncryptValue("a", key, []byte("0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encB, err := crypto.EncryptValue("b", key, []byte("fedcba9876543210"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := "profiles:\n  p:\n    env:\n      A: \"" + encA + "\"\n      B: \"" + encB + "\"\n"
+	if err := os.WriteFile(config.LocalPath(), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanConfigCrypt(); err == nil || !strings.Contains(err.Error(), "disagree") {
+		t.Fatalf("scan must reject values from two eras, got: %v", err)
+	}
+}
+
+func TestKeygenRandomIgnoresBrokenConfigs(t *testing.T) {
+	// --random is the non-interactive bootstrap path: with no key to overwrite
+	// there is nothing to strand, so unreadable configs must not block it.
 	dir := chdirTemp(t)
 	saveGlobalFlags(t)
 	globalFlags.configPath = filepath.Join(dir, "global.yaml")
@@ -171,13 +196,48 @@ func TestKeygenRejectsForeignEnc(t *testing.T) {
 	t.Cleanup(func() { keygenRandom = prev })
 
 	global := config.GlobalPath(globalFlags.configPath)
+	if err := os.WriteFile(global, []byte("profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.LocalPath(), []byte("[1, 2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("keygen --random must not read configs when nothing can be stranded: %v", err)
+	}
+	if _, err := os.Stat(globalFlags.keyPath); err != nil {
+		t.Fatalf("key not written: %v", err)
+	}
+}
+
+func TestKeygenForceRejectsForeignEnc(t *testing.T) {
+	// A forced overwrite cannot judge what it would strand while configs hold
+	// values this build cannot read, so the risk-gating scan rejects them.
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+	prev := keygenRandom
+	keygenRandom = true
+	t.Cleanup(func() { keygenRandom = prev })
+
+	if err := crypto.GenerateKey(globalFlags.keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keygenCmd.Flags().Set("force", "false") })
+
+	global := config.GlobalPath(globalFlags.configPath)
 	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"
 	if err := os.WriteFile(global, []byte(cfgContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := keygenCmd.RunE(keygenCmd, nil); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
-		t.Fatalf("keygen must reject config with foreign enc: values, got: %v", err)
+		t.Fatalf("forced keygen must reject config with foreign enc: values, got: %v", err)
 	}
 }
 

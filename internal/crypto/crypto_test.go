@@ -126,12 +126,95 @@ func TestParseV3Errors(t *testing.T) {
 		"enc:v3:argon2id:3:8:4:AAAA",       // m < 8*p
 		"enc:v3:argon2id:3:65536:0:AAAA",   // p = 0
 		"enc:v3:argon2id:3:65536:4",        // no payload segment
-		"enc:v3:argon2id:101:65536:4:AAAA", // t too big (t > 100)
-		"enc:v3:argon2id:3:4194305:4:AAAA", // m too big (m > 4 GiB)
+		"enc:v3:argon2id:33:65536:4:AAAA",  // t too big (t > 32)
+		"enc:v3:argon2id:3:65536:33:AAAA",  // p too big (p > 32)
+		"enc:v3:argon2id:3:1048577:4:AAAA", // m too big (m > 1 GiB)
+		// t and m each within their caps but t*m above the cost bound.
+		"enc:v3:argon2id:32:1048576:4:AAAA",
 	}
 	for _, v := range cases {
 		if _, _, err := SaltFromValue(v); err == nil {
 			t.Errorf("SaltFromValue(%q) = nil error, want parse error", v)
+		}
+	}
+}
+
+func TestParseV3AcceptsBoundedCost(t *testing.T) {
+	// t*m exactly at the bound parses: the caps bound what a committed config
+	// can make recovery pay per attempt, not what a legitimate params upgrade
+	// may carry.
+	p, _, err := parseV3("enc:v3:argon2id:16:196608:4:AAAA")
+	if err != nil {
+		t.Fatalf("parseV3: %v", err)
+	}
+	if p.Time != 16 || p.Memory != 196608 {
+		t.Fatalf("params = %+v", p)
+	}
+}
+
+func TestSaltScan(t *testing.T) {
+	key := make([]byte, 32)
+	saltA := bytes.Repeat([]byte{1}, SaltSize)
+	saltB := bytes.Repeat([]byte{2}, SaltSize)
+	paramsA := Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	paramsB := Argon2Params{Time: 4, Memory: 32 * 1024, Threads: 2}
+
+	encA, err := EncryptValueWithParams("a", key, saltA, paramsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encA2, err := EncryptValueWithParams("b", key, saltA, paramsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encSaltB, err := EncryptValueWithParams("c", key, saltB, paramsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encParamsB, err := EncryptValueWithParams("d", key, saltA, paramsB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var empty SaltScan
+	if empty.Found() {
+		t.Fatal("zero scan must not be Found")
+	}
+	if salt, p, sample := empty.Result(); salt != nil || p != (Argon2Params{}) || sample != "" {
+		t.Fatalf("zero scan Result = %v/%+v/%q, want zero values", salt, p, sample)
+	}
+	if err := empty.Add("plaintext"); err != nil || empty.Found() {
+		t.Fatalf("plaintext must be ignored, got err=%v found=%v", err, empty.Found())
+	}
+
+	var scan SaltScan
+	for _, v := range []string{"plaintext", encA, encA2} {
+		if err := scan.Add(v); err != nil {
+			t.Fatalf("Add(%q): %v", v, err)
+		}
+	}
+	salt, p, sample := scan.Result()
+	if !bytes.Equal(salt, saltA) || p != paramsA || sample != encA {
+		t.Fatalf("Result = %x/%+v/%q, want the first value %x/%+v", salt, p, sample, saltA, paramsA)
+	}
+
+	for name, pair := range map[string][2]string{
+		"salt disagreement":   {encA, encSaltB},
+		"params disagreement": {encA, encParamsB},
+	} {
+		var s SaltScan
+		if err := s.Add(pair[0]); err != nil {
+			t.Fatalf("%s: first Add: %v", name, err)
+		}
+		if err := s.Add(pair[1]); err == nil {
+			t.Fatalf("%s: disagreement must be an error", name)
+		}
+	}
+
+	for _, v := range []string{"enc:v2:YWJj", "enc:v3:"} {
+		var s SaltScan
+		if err := s.Add(v); err == nil {
+			t.Fatalf("Add(%q) must be an error", v)
 		}
 	}
 }

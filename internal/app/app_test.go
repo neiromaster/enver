@@ -376,3 +376,36 @@ func sliceEq(a, b []string) bool {
 	}
 	return true
 }
+
+func TestResolveRecoveryConflictingEras(t *testing.T) {
+	// Two eras in one profile cannot share a passphrase-derived key; picking a
+	// salt by map order would flip recovery between working and failing per
+	// run, so Resolve must report the conflict instead.
+	dir := t.TempDir()
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "key") }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+	t.Setenv("ENVER_KEY", "")
+
+	saltA := []byte("0123456789abcdef")
+	saltB := []byte("fedcba9876543210")
+	keyA, _ := crypto.DeriveKey("hunter2", saltA, crypto.CurrentParams)
+	keyB, _ := crypto.DeriveKey("hunter2", saltB, crypto.CurrentParams)
+	encA, _ := crypto.EncryptValue("a", keyA, saltA)
+	encB, _ := crypto.EncryptValue("b", keyB, saltB)
+	oldPrompt := PromptPassphrase
+	oldInteractive := Interactive
+	PromptPassphrase = func(prompt string) (string, error) { return "hunter2", nil }
+	Interactive = func() bool { return true }
+	t.Cleanup(func() {
+		PromptPassphrase = oldPrompt
+		Interactive = oldInteractive
+	})
+
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"e": {Env: map[string]string{"A": encA, "B": encB}},
+	}}
+	if _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "disagree") {
+		t.Fatalf("expected era-conflict error, got: %v", err)
+	}
+}

@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -26,6 +27,18 @@ const (
 	kdfMemory  = 64 * 1024 // KiB
 	kdfThreads = 4
 	saltSize   = 16
+)
+
+// Bounds on the KDF parameters an enc:v3 value may carry. The header is
+// attacker-controllable input: passphrase recovery derives with whatever it
+// says, so the bounds keep a committed config from turning each attempt into
+// a multi-gigabyte, minute-long computation. maxKDFCost caps t*m, the dominant
+// argon2id cost, at 16x CurrentParams.
+const (
+	maxKDFTime    = 32
+	maxKDFMemory  = 1048576 // KiB (1 GiB)
+	maxKDFThreads = 32
+	maxKDFCost    = 3145728 // t*m
 )
 
 // SaltSize is the length of the argon2id salt in bytes.
@@ -100,7 +113,7 @@ func DecodeKey(s string) ([]byte, error) {
 
 // IsEncrypted reports whether v carries the enc:v3: prefix.
 func IsEncrypted(v string) bool {
-	return hasPrefix(v, prefixV3)
+	return strings.HasPrefix(v, prefixV3)
 }
 
 // EncryptValue returns "enc:v3:argon2id:<t>:<m>:<p>:<base64(salt||nonce||ciphertext)>"
@@ -159,17 +172,23 @@ func parseV3(v string) (Argon2Params, string, error) {
 	if p.Time < 1 {
 		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be >= 1")
 	}
-	if p.Time > 100 {
-		return Argon2Params{}, "", errors.New("malformed enc:v3 header field t: must be <= 100")
+	if p.Time > maxKDFTime {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field t: must be <= %d", maxKDFTime)
 	}
 	if p.Threads < 1 {
 		return Argon2Params{}, "", errors.New("malformed enc:v3 header field p: must be >= 1")
 	}
+	if p.Threads > maxKDFThreads {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field p: must be <= %d", maxKDFThreads)
+	}
 	if p.Memory < 8*uint32(p.Threads) {
 		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be >= 8*p (%d KiB)", 8*uint32(p.Threads))
 	}
-	if p.Memory > 4194304 {
-		return Argon2Params{}, "", errors.New("malformed enc:v3 header field m: must be <= 4194304 KiB")
+	if p.Memory > maxKDFMemory {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header field m: must be <= %d KiB", maxKDFMemory)
+	}
+	if cost := uint64(p.Time) * uint64(p.Memory); cost > maxKDFCost {
+		return Argon2Params{}, "", fmt.Errorf("malformed enc:v3 header: t*m must be <= %d (got %d)", maxKDFCost, cost)
 	}
 	return p, parts[4], nil
 }
@@ -177,7 +196,7 @@ func parseV3(v string) (Argon2Params, string, error) {
 // DecryptValue reverses EncryptValue. Returns an error if v is not an enc:v3:
 // value or the key/payload are invalid.
 func DecryptValue(v string, key []byte) (string, error) {
-	if !hasPrefix(v, prefixV3) {
+	if !strings.HasPrefix(v, prefixV3) {
 		return "", errors.New("value is not encrypted")
 	}
 	_, payload, err := parseV3(v)
@@ -216,7 +235,7 @@ func DeriveKey(passphrase string, salt []byte, p Argon2Params) ([]byte, error) {
 // SaltFromValue extracts the salt and KDF parameters from an enc:v3 value.
 // Errors for other values.
 func SaltFromValue(v string) ([]byte, Argon2Params, error) {
-	if !hasPrefix(v, prefixV3) {
+	if !strings.HasPrefix(v, prefixV3) {
 		return nil, Argon2Params{}, errors.New("value is not enc:v3")
 	}
 	p, payload, err := parseV3(v)
@@ -231,6 +250,51 @@ func SaltFromValue(v string) ([]byte, Argon2Params, error) {
 		return nil, Argon2Params{}, errors.New("ciphertext too short")
 	}
 	return raw[:saltSize], p, nil
+}
+
+// SaltScan accumulates the salt, KDF parameters, and a sample value across
+// enc:v3 values for passphrase recovery. One passphrase-derived key serves the
+// whole config, so a value whose salt or parameters disagree with the first
+// one recorded is a conflict, not a tie to break by map order. Foreign enc:
+// values and malformed enc:v3 values are errors: recovery must not silently
+// skip what it cannot read. The zero value accepts its first Add.
+type SaltScan struct {
+	salt   []byte
+	params Argon2Params
+	sample string
+}
+
+// Add records v when it is enc:v3. Plaintext values are ignored.
+func (s *SaltScan) Add(v string) error {
+	if p := ForeignEncPrefix(v); p != "" {
+		return ForeignEncError(p)
+	}
+	if !IsEncrypted(v) {
+		return nil
+	}
+	salt, params, err := SaltFromValue(v)
+	if err != nil {
+		return err
+	}
+	if s.salt == nil {
+		s.salt, s.params, s.sample = salt, params, v
+		return nil
+	}
+	if !bytes.Equal(s.salt, salt) || s.params != params {
+		return errors.New("enc:v3 values disagree on salt or KDF parameters; decrypt and re-encrypt with one key")
+	}
+	return nil
+}
+
+// Found reports whether any enc:v3 value was recorded.
+func (s *SaltScan) Found() bool {
+	return s.salt != nil
+}
+
+// Result returns the recorded salt, KDF parameters, and the full sample value
+// they came from; zero values when nothing was recorded.
+func (s *SaltScan) Result() (salt []byte, p Argon2Params, sample string) {
+	return s.salt, s.params, s.sample
 }
 
 // KeyCache is the on-disk passphrase key cache. KDF parameters live in the
@@ -279,7 +343,7 @@ func parseKeyCache(data []byte) (KeyCache, error) {
 // handle (for example "enc:v2:"), or "" when v is enc:v3 or not enc-family.
 // enver owns the "enc:" namespace in configs.
 func ForeignEncPrefix(v string) string {
-	if !hasPrefix(v, "enc:") || hasPrefix(v, prefixV3) {
+	if !strings.HasPrefix(v, "enc:") || strings.HasPrefix(v, prefixV3) {
 		return ""
 	}
 	if i := strings.IndexByte(v[4:], ':'); i >= 0 {
@@ -287,20 +351,12 @@ func ForeignEncPrefix(v string) string {
 	}
 	// No second colon: bound the echo so a long value (possibly a plaintext
 	// secret) never lands whole in an error message.
-	const maxLen = 16
-	if len(v) <= maxLen {
-		return v
-	}
-	return v[:maxLen] + "..."
+	return boundEcho(v)
 }
 
 // ForeignEncError describes an enc-family value this build cannot read.
 func ForeignEncError(prefix string) error {
 	return fmt.Errorf("unsupported encrypted value %q; this enver build cannot read it — re-encrypt with a compatible version", prefix)
-}
-
-func hasPrefix(s, p string) bool {
-	return len(s) >= len(p) && s[:len(p)] == p
 }
 
 // boundEcho truncates a string to 16 bytes plus "..." to avoid leaking

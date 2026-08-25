@@ -63,8 +63,7 @@ func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 		return r, nil
 	}
 	key, _, err := ResolveKeyOrPrompt(opts, func() ([]byte, crypto.Argon2Params, string, error) {
-		salt, params, sample := firstSaltAndSample(r.Env)
-		return salt, params, sample, nil
+		return firstSaltAndSample(r.Env)
 	})
 	if err != nil {
 		return config.Resolved{}, err
@@ -225,7 +224,7 @@ func MatchingProfiles(opts Options, toComplete string) []string {
 	names := cfg.ProfileNames()
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if hasPrefix(n, toComplete) {
+		if strings.HasPrefix(n, toComplete) {
 			out = append(out, n)
 		}
 	}
@@ -255,10 +254,6 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
 // osEnvMap snapshots the process environment as a map for varsubst.Expand and
 // runner.MergedEnv.
 func osEnvMap() map[string]string {
@@ -272,13 +267,17 @@ func osEnvMap() map[string]string {
 }
 
 // firstSaltAndSample returns the salt, KDF parameters, and full value of the
-// first enc:v3: value in env, or (nil, crypto.Argon2Params{}, "") when there
-// is none.
-func firstSaltAndSample(env map[string]string) ([]byte, crypto.Argon2Params, string) {
+// first enc:v3: value in env, or (nil, crypto.Argon2Params{}, "", nil) when
+// there is none. Values disagreeing on salt or KDF parameters are an error:
+// one passphrase cannot recover two eras, and picking one by map order would
+// make recovery flip between working and failing per run.
+func firstSaltAndSample(env map[string]string) ([]byte, crypto.Argon2Params, string, error) {
+	var scan crypto.SaltScan
 	for _, v := range env {
-		if s, p, err := crypto.SaltFromValue(v); err == nil {
-			return s, p, v
+		if err := scan.Add(v); err != nil {
+			return nil, crypto.Argon2Params{}, "", err
 		}
 	}
-	return nil, crypto.Argon2Params{}, ""
+	salt, params, sample := scan.Result()
+	return salt, params, sample, nil
 }

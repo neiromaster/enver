@@ -425,3 +425,133 @@ func TestEncryptFileSaltStableAcrossRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestEncryptFileReusesFileKDFParams(t *testing.T) {
+	// Recovery derives the key from any value's header, so a new value must
+	// carry the params of the era its key actually came from, not what the
+	// current build would mint.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	custom := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	enc, err := crypto.EncryptValueWithParams("existing", key, salt, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := "profiles:\n  p:\n    env:\n      TOKEN: \"" + enc + "\"\n      SECRET: new-secret\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n, err := EncryptFile(path, key, salt, "", true)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("encrypted %d values, want 1", n)
+	}
+	c, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, params, err := crypto.SaltFromValue(c.Profiles["p"].Env["SECRET"])
+	if err != nil {
+		t.Fatalf("SaltFromValue: %v", err)
+	}
+	if params != custom {
+		t.Fatalf("new value params = %+v, want the file's %+v", params, custom)
+	}
+
+	// A run with a different salt starts a new era and stamps CurrentParams:
+	// the file's params describe a key this run does not hold.
+	other := filepath.Join(dir, "other.yaml")
+	if err := os.WriteFile(other, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EncryptFile(other, key, []byte("fedcba9876543210"), "", true); err != nil {
+		t.Fatalf("encrypt with other salt: %v", err)
+	}
+	c, err = LoadFile(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, params, err = crypto.SaltFromValue(c.Profiles["p"].Env["SECRET"])
+	if err != nil {
+		t.Fatalf("SaltFromValue: %v", err)
+	}
+	if params != crypto.CurrentParams {
+		t.Fatalf("re-keyed run params = %+v, want %+v", params, crypto.CurrentParams)
+	}
+}
+
+func TestEncryptDecryptFileForeignEncAnyProfile(t *testing.T) {
+	// Foreign enc: values fail loudly even when the command targets another
+	// profile: the file as a whole is unreadable by this build, and a scoped
+	// success would leave the impression it was handled.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	cfg := "profiles:\n  a:\n    env:\n      TOKEN: enc:v2:YWJj\n  b:\n    env:\n      PLAIN: value\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	if _, err := EncryptFile(path, key, salt, "b", true); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("EncryptFile(b) must reject foreign enc: in profile a, got: %v", err)
+	}
+	if _, err := DecryptFile(path, key, "b"); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("DecryptFile(b) must reject foreign enc: in profile a, got: %v", err)
+	}
+}
+
+func TestEncryptFileMalformedEncV3Fails(t *testing.T) {
+	// A truncated enc:v3 value must not ride the idempotence branch: encrypt
+	// reports the parse error instead of a silent success that leaves the file
+	// broken for the next resolve.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      TOKEN: \"enc:v3:\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	if _, err := EncryptFile(path, key, salt, "", true); err == nil || !strings.Contains(err.Error(), "malformed enc:v3 header") {
+		t.Fatalf("EncryptFile must reject malformed enc:v3 value, got: %v", err)
+	}
+}
+
+func TestFirstSaltAndSampleForeignEnc(t *testing.T) {
+	// A v2-only config must surface the unsupported-value error, not "no key
+	// found": the keygen advice would be a dead end.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      TOKEN: enc:v2:YWJj\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("FirstSaltAndSample must reject foreign enc: values, got: %v", err)
+	}
+}
+
+func TestFirstSaltAndSampleConflictingSalts(t *testing.T) {
+	// Two eras in one file cannot share one passphrase-derived key; sampling
+	// one at random would make recovery nondeterministic, so it is an error.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	key := make([]byte, 32)
+	a, err := crypto.EncryptValue("a", key, []byte("0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := crypto.EncryptValue("b", key, []byte("fedcba9876543210"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := "profiles:\n  p:\n    env:\n      A: \"" + a + "\"\n      B: \"" + b + "\"\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "disagree") {
+		t.Fatalf("FirstSaltAndSample must reject conflicting salts, got: %v", err)
+	}
+}
