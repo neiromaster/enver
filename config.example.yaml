@@ -36,7 +36,8 @@ profiles:
       ANTHROPIC_BASE_URL: http://localhost:8082
 
   # Inherit from `anth`, but strip the API key from the child process entirely
-  # (even if it is exported in the shell). The `unset` list unions down the chain.
+  # (even if it is exported in the shell). The `unset` list unions down the chain
+  # and wins over a later re-definition of the key.
   bare:
     extends: anth
     unset: [ANTHROPIC_API_KEY]

@@ -156,11 +156,21 @@ profiles:
 the key from the profile's resolved env (so `show`, `export`, and `dotenv`
 drop it) **and** from the child process environment — even when the var is
 already exported in your shell; that is its point, and `enver x bare -- claude`
-runs with the key gone. Unsets accumulate down the chain (a child inherits its
-parents' unsets) and union across layers (global and local both apply).
-Author `unset` in YAML like multi-parent `extends`; an `unset` naming a key the
-same profile also sets in `env` is flagged by `enver validate` (the unset
-wins).
+runs with the key gone. `export` emits the matching strip lines (`unset K` in
+bash, `set -e K` in fish, `Remove-Item Env:K` in PowerShell), so
+`eval "$(enver export bare)"` removes the key from the current shell too.
+`$VAR` interpolation does not see unset keys: a fenced key contributes nothing
+when another value references it, instead of leaking the shell's live value.
+
+Unsets accumulate down the chain (a child inherits its parents' unsets) and
+union across layers (global and local both apply). The fence wins over
+redefinition: a key unset by any profile in the chain stays removed even when a
+closer profile sets it again. Author `unset` in YAML like multi-parent
+`extends` — a single name or a list, never a mapping; `enver validate` flags an
+`unset` naming a key the same profile also sets in `env` (`contradictory-unset`)
+and a key that a chain member unsets but this profile re-defines
+(`unset-shadowed`), since that definition is dead. On Windows, where env names
+are case-insensitive, unset matching is case-insensitive too.
 
 ## Creating profiles interactively
 
@@ -263,8 +273,9 @@ enver import prod.env prod --replace   # reset prod to exactly prod.env (confirm
 Imported values are stored **raw** — `$VAR` references stay as templates, not
 expanded — so layered profiles survive the round-trip. `import` **merges** by
 default (imported keys override existing same-named keys); `--replace` wipes the
-profile's own env first and confirms when it would remove keys (decline to abort;
-`--force` skips the prompt; a non-interactive pipe without `--force` errors).
+profile's own env and `unset` list first and confirms when it would remove keys
+(decline to abort; `--force` skips the prompt; a non-interactive pipe without
+`--force` errors).
 `--extends <profile>` sets or overrides `extends` (otherwise it is preserved,
 including across `--replace`); an empty import without `--extends` is refused.
 The summary prints a masked diff of what changed: `+` added, `~` overridden,
@@ -290,9 +301,11 @@ enver decrypt                   # restore plaintext (for editing)
 `enver keygen` prompts for a passphrase twice and writes a key cache to
 `~/.config/enver/key` (JSON, mode `0600`). The same passphrase always derives
 the same key (argon2id; the salt comes from your encrypted values), so the key
-can be regenerated from memory on any machine. `enver keygen --random` writes a
-random key cache instead — non-derivable, for CI and other non-interactive
-setups.
+can be regenerated from memory on any machine. When the configs already hold
+encrypted values, the passphrase is verified against them — a typo errors out
+instead of silently deriving a key that cannot read them. `enver keygen
+--random` writes a random key cache instead — non-derivable, for CI and other
+non-interactive setups.
 
 `enver keygen --force` refuses to overwrite silently: when the configs contain
 encrypted values and the new key differs from the current one, the interactive
@@ -305,7 +318,11 @@ Encrypted values are `enc:v3:argon2id:<t>:<m-KiB>:<p>:<base64(salt||nonce||ciphe
 passphrase recovery survives future parameter upgrades — after such an
 upgrade, re-encrypt the whole file (recovery derives the key from the first
 value; a file mixing parameter eras only partially decrypts). Values with
-other `enc:` prefixes (older formats) are rejected with an error.
+other `enc:` prefixes (older formats) are rejected with an error, in every
+profile. `enver encrypt` refuses to write values under a key whose salt differs
+from the encrypted values already present in the profiles it touches — decrypt
+with the matching key first; targeting one profile is not blocked by stranded
+different-key values in profiles you are not touching.
 
 At runtime `enver x <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this
