@@ -182,6 +182,42 @@ func TestMergeLocalRefillThroughAncestorBeatsGlobalChainFence(t *testing.T) {
 	}
 }
 
+// TestMergeSelfFenceStaysStrippedAcrossLayers pins the self-fence fate: a
+// fence that consumed its own entry must still ride against extends
+// ancestors, or the presence of an unrelated local file alone would flip a
+// stripped key back on; a same-name local refill still wins at its turn.
+func TestMergeSelfFenceStaysStrippedAcrossLayers(t *testing.T) {
+	selfFenceGlobal := func() Config {
+		return Config{Profiles: map[string]Profile{
+			"anth": {Env: map[string]string{"K": "g"}},
+			"bare": {Extends: Extends{"anth"}, Env: map[string]string{"K": "s"}, Unset: Unsets{"K"}},
+		}}
+	}
+	base, err := selfFenceGlobal().ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := base.Env["K"]; ok {
+		t.Fatalf("unmerged global leaked K: %v", base.Env)
+	}
+	unrelated := Config{Profiles: map[string]Profile{"foo": {Env: map[string]string{"X": "1"}}}}
+	merged, err := Merge(selfFenceGlobal(), unrelated).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := merged.Env["K"]; ok {
+		t.Fatalf("K = %q (%v): an unrelated local file must not undo the global fence", merged.Env["K"], merged.Env)
+	}
+	refill := Config{Profiles: map[string]Profile{"bare": {Env: map[string]string{"K": "l"}}}}
+	won, err := Merge(selfFenceGlobal(), refill).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if won.Env["K"] != "l" {
+		t.Fatalf("K = %q (%v), want l — the refill layer's turn comes last", won.Env["K"], won.Env)
+	}
+}
+
 // TestResolveSiblingParentUnsetStaysInItsOwnBranch pins multi-parent
 // composition: an unset removes what came up its OWN branch (b alone is
 // clean), while a sibling parent supplies fresh values into the child

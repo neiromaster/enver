@@ -246,19 +246,19 @@ func Merge(base, override Config) Config {
 	return out
 }
 
-// splitUnsets applies inherited-copy unsets that hit the profile's own env
-// right at the fold, and moves chain-origin fences — targets surfacing only
-// through extends ancestors — into Carried, where resolveEnv applies them
-// era-gated. The declared list becomes fresh verbatim: that layer's turn
-// comes after this copy's contributions.
+// splitUnsets sheds the inherited copy's era in favor of the overriding one:
+// every inherited declared fence rides forward in Carried for era-gated
+// application at resolve time (so an ancestor's value cannot resurface just
+// because a local file exists), and a fence whose target sits in this copy's
+// own env additionally drops that entry right at the fold — leaving it would
+// resurrect the value through the own-env overlay.
 func splitUnsets(bp *Profile, fresh Unsets) {
 	for _, u := range bp.Unset {
-		if !hasEnvKey(bp.Env, u) {
-			bp.Carried = appendUniq(bp.Carried, u)
-			continue
+		bp.Carried = appendUniq(bp.Carried, u)
+		if hasEnvKey(bp.Env, u) {
+			deleteEnvKey(bp.Env, u)
+			deleteEnvKey(bp.Comments, u)
 		}
-		deleteEnvKey(bp.Env, u)
-		deleteEnvKey(bp.Comments, u)
 	}
 	bp.Unset = slices.Clone(fresh)
 }
