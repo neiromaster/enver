@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,6 +63,35 @@ func TestImportReplaceRemovesAbsent(t *testing.T) {
 	}
 	if prof.Env["NEW"] != "2" {
 		t.Errorf("replace should add NEW: %+v", prof.Env)
+	}
+}
+
+// TestImportReplaceClearsUnset pins the --replace contract: like the profile's
+// own env, the unset list is wiped, so an imported key the old profile fenced
+// survives the import instead of being silently stripped.
+func TestImportReplaceClearsUnset(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"K": "old"}, Unset: config.Unsets{"A"}}, false, false)
+	if _, err := runImport(bytes.NewReader([]byte("A=1\n")), cfgPath, "p", true, true, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "unset") {
+		t.Errorf("replace should drop the unset field:\n%s", data)
+	}
+	cfg, err := config.LoadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof := cfg.Profiles["p"]
+	if prof.Env["A"] != "1" {
+		t.Errorf("replace should import A unfenced: %+v", prof.Env)
+	}
+	if len(prof.Unset) != 0 {
+		t.Errorf("replace should clear unset, got %v", prof.Unset)
 	}
 }
 

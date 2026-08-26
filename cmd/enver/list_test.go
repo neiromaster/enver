@@ -64,6 +64,82 @@ func TestDoListVarsColumn(t *testing.T) {
 	}
 }
 
+// writeFencedConfig builds the unset-fencing fixture: base (one var, no unset)
+// as the control, fenced (its only key stripped by its own unset list, no
+// extends), and fencedext (same shape over a var-less parent so the extends
+// branch resolves to an empty env).
+func writeFencedConfig(t *testing.T) string {
+	t.Helper()
+	path := writeTempConfig(t, "base", map[string]string{"X": "1"}, nil, false)
+	if err := config.UpsertProfile(path, "fenced", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"A"}}, false, false); err != nil {
+		t.Fatalf("upsert fenced: %v", err)
+	}
+	if err := config.UpsertProfile(path, "bare", config.Profile{}, false, false); err != nil {
+		t.Fatalf("upsert bare: %v", err)
+	}
+	if err := config.UpsertProfile(path, "fencedext", config.Profile{Extends: config.Extends{"bare"}, Env: map[string]string{"A": "1"}, Unset: config.Unsets{"A"}}, false, false); err != nil {
+		t.Fatalf("upsert fencedext: %v", err)
+	}
+	return path
+}
+
+// TestDoListVarsColumnExcludesUnsetFenced pins list against show: a key fenced
+// by the profile's own unset list is absent from the resolved env, so both the
+// own count and the resolved count must exclude it.
+func TestDoListVarsColumnExcludesUnsetFenced(t *testing.T) {
+	withGlobalConfig(t, writeFencedConfig(t))
+
+	var out bytes.Buffer
+	if err := doList(&out); err != nil {
+		t.Fatalf("doList: %v", err)
+	}
+
+	header := strings.Split(out.String(), "\n")[0]
+	varsCol := strings.Index(header, "VARS")
+	if varsCol < 0 {
+		t.Fatalf("missing VARS column in header:\n%s", out.String())
+	}
+	cases := []struct{ profile, want string }{
+		{"base", "1"},
+		{"fenced", "0"},
+		{"fencedext", "0 (→0)"},
+	}
+	for _, c := range cases {
+		line := findListLine(out.String(), c.profile)
+		if line == "" {
+			t.Fatalf("profile %q not found in output:\n%s", c.profile, out.String())
+		}
+		if got := strings.TrimRight(line[varsCol:], " "); got != c.want {
+			t.Errorf("profile %q vars cell = %q, want %q (line: %q)", c.profile, got, c.want, line)
+		}
+	}
+}
+
+func TestDoListJSONUnsetFencedCounts(t *testing.T) {
+	withGlobalConfig(t, writeFencedConfig(t))
+
+	var out bytes.Buffer
+	if err := doListJSON(&out); err != nil {
+		t.Fatalf("doListJSON: %v", err)
+	}
+	var got listJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+	}
+	byName := make(map[string]listJSONEntry, len(got.Profiles))
+	for _, p := range got.Profiles {
+		byName[p.Name] = p
+	}
+	for _, name := range []string{"fenced", "fencedext"} {
+		if p := byName[name]; p.Vars != 0 || p.Resolved != 0 {
+			t.Errorf("%s vars=%d resolved=%d, want 0/0", name, p.Vars, p.Resolved)
+		}
+	}
+	if b := byName["base"]; b.Vars != 1 || b.Resolved != 1 {
+		t.Errorf("base vars=%d resolved=%d, want 1/1 (control without unset)", b.Vars, b.Resolved)
+	}
+}
+
 func TestDoListAlignsLongProfileNames(t *testing.T) {
 	const long = "a-very-long-profile-name-thirty-chars"
 	path := writeTempConfig(t, long, map[string]string{"X": "1"}, nil, true)

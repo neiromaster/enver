@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +62,7 @@ func doList(w io.Writer) error {
 		if extends == "" {
 			extends = "-"
 		}
-		own := len(p.Env)
+		own := ownVars(p)
 		varsCell := fmt.Sprintf("%d", own)
 		if len(p.Extends) > 0 {
 			if r, err := cfg.ResolveProfile(n); err == nil {
@@ -85,6 +87,20 @@ func doList(w io.Writer) error {
 	return err
 }
 
+// ownVars counts the env keys the profile itself contributes after its own
+// unset list: a fenced key never reaches the resolved env, so len(p.Env) would
+// overstate the profile. Matching goes through config.EnvKeyEqual for the same
+// case rules resolution applies.
+func ownVars(p config.Profile) int {
+	n := 0
+	for k := range p.Env {
+		if !slices.ContainsFunc(p.Unset, func(u string) bool { return config.EnvKeyEqual(u, k) }) {
+			n++
+		}
+	}
+	return n
+}
+
 // listJSON is the machine-readable shape of `enver list --format json`.
 type listJSON struct {
 	Profiles []listJSONEntry `json:"profiles"`
@@ -107,20 +123,16 @@ func doListJSON(w io.Writer) error {
 	out := listJSON{Profiles: make([]listJSONEntry, 0, len(names))}
 	for _, n := range names {
 		p := cfg.Profiles[n]
-		resolved := len(p.Env)
-		if len(p.Extends) > 0 {
-			r, err := cfg.ResolveProfile(n)
-			if err != nil {
-				return err
-			}
-			resolved = len(r.Env)
+		r, err := cfg.ResolveProfile(n)
+		if err != nil {
+			return err
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
 			Name:     n,
 			Default:  n == cfg.Default,
 			Extends:  p.Extends,
-			Vars:     len(p.Env),
-			Resolved: resolved,
+			Vars:     ownVars(p),
+			Resolved: len(r.Env),
 		})
 	}
 	enc := json.NewEncoder(w)

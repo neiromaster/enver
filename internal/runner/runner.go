@@ -8,18 +8,21 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/neiromaster/enver/internal/config"
 	"golang.org/x/term"
 )
 
 // MergedEnv overlays profileEnv on osEnv, drops the unsets, and returns a
 // sorted "K=V" slice suitable for exec.Cmd.Env. Unsets remove a key even when
-// the shell exports it — that is the point of an unset in the config.
+// the shell exports it — that is the point of an unset in the config. Matching
+// goes through config.DeleteEnvKey so a case-mismatched unset still lands on
+// Windows, where env names are case-insensitive (Path vs PATH).
 func MergedEnv(osEnv, profileEnv map[string]string, unsets []string) []string {
 	curMap := make(map[string]string, len(osEnv)+len(profileEnv))
 	maps.Copy(curMap, osEnv)
 	maps.Copy(curMap, profileEnv)
 	for _, u := range unsets {
-		delete(curMap, u)
+		config.DeleteEnvKey(curMap, u)
 	}
 	keys := make([]string, 0, len(curMap))
 	for k := range curMap {

@@ -135,6 +135,34 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 	}
 }
 
+func TestResolveExpansionSkipsUnsets(t *testing.T) {
+	// A fenced key must not interpolate from the shell: the fence covers the
+	// resolved env and the child env alike, so expansion sees the same hole.
+	t.Setenv("ENVER_TEST_TOKEN_SRC", "live-value")
+
+	fenced := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"DERIVED": "${ENVER_TEST_TOKEN_SRC}"}, Unset: config.Unsets{"ENVER_TEST_TOKEN_SRC"}},
+	}}
+	got, err := Resolve(fenced, "p", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["DERIVED"] != "" {
+		t.Fatalf("DERIVED = %q, want empty: an unset key must not interpolate", got.Env["DERIVED"])
+	}
+
+	control := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"DERIVED": "${ENVER_TEST_TOKEN_SRC}"}},
+	}}
+	got, err = Resolve(control, "p", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["DERIVED"] != "live-value" {
+		t.Fatalf("DERIVED = %q, want live-value: expansion must still see ordinary shell vars", got.Env["DERIVED"])
+	}
+}
+
 func TestRunNoProfileNoDefault(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

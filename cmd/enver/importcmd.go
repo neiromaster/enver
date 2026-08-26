@@ -80,16 +80,18 @@ var importCmd = &cobra.Command{
 }
 
 func init() {
-	importCmd.Flags().BoolVar(&importReplace, "replace", false, "wipe the profile's own env before importing")
+	importCmd.Flags().BoolVar(&importReplace, "replace", false, "wipe the profile's own env and unset list before importing")
 	importCmd.Flags().BoolVar(&importForce, "force", false, "skip the --replace removal confirmation")
 	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends (comma-separated for multiple)")
 }
 
 // runImport parses .env data from r into profile name at cfgPath. Imported keys
 // override existing same-named keys (merge); when replace is true the profile's
-// own env is wiped first. The extends value is preserved unless extendsFlag is
-// non-empty, in which case it is set (and the parent must already exist). force
-// and confirm gate destructive replaces (Task 6). Returns a one-line summary.
+// own env and unset list are wiped first, so an imported key the old profile
+// fenced survives the import. The extends value is preserved unless extendsFlag
+// is non-empty, in which case it is set (and the parent must already exist).
+// force and confirm gate destructive replaces (Task 6). Returns a one-line
+// summary.
 func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFlag string, confirm confirmFunc) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -153,7 +155,9 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 				return "", nil
 			}
 		}
-		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported, Comments: comments}, false, false); err != nil {
+		// Unset stays nil: --replace clears the unset list like the profile's
+		// own env, because WriteProfile writes the field wholesale.
+		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments}, false, false); err != nil {
 			return "", err
 		}
 		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends), nil
