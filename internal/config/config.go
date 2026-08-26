@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -180,8 +179,9 @@ func Merge(base, override Config) Config {
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
-		for k, v := range p.Env {
-			bp.Env[k] = v
+		ownKeys := sortedEnvKeys(p.Env)
+		for _, k := range ownKeys {
+			SetEnvKey(bp.Env, k, p.Env[k])
 			if out.Origins == nil {
 				out.Origins = map[string]map[string]string{}
 			}
@@ -190,31 +190,24 @@ func Merge(base, override Config) Config {
 				m = map[string]string{}
 				out.Origins[name] = m
 			}
-			m[k] = LayerLocal
+			setEnvKeyed(m, k, LayerLocal)
 		}
-		for k, c := range p.Comments {
-			if c == "" {
-				continue
+		for _, k := range ownKeys {
+			if c := p.Comments[k]; c != "" {
+				if bp.Comments == nil {
+					bp.Comments = map[string]string{}
+				}
+				setEnvKeyed(bp.Comments, k, c)
 			}
-			if bp.Comments == nil {
-				bp.Comments = map[string]string{}
-			}
-			bp.Comments[k] = c
 		}
 		out.Profiles[name] = bp
 	}
 	return out
 }
 
-// mergeUniq concatenates base and add, dropping duplicates.
+// mergeUniq concatenates base and add, deduplicated by EnvKeyEqual.
 func mergeUniq(base, add []string) []string {
-	out := append([]string(nil), base...)
-	for _, x := range add {
-		if !slices.Contains(out, x) {
-			out = append(out, x)
-		}
-	}
-	return out
+	return appendUniq(slices.Clone(base), add...)
 }
 
 func mergeExtends(base, add Extends) Extends {
@@ -321,19 +314,29 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		if err != nil {
 			return envFold{}, err
 		}
-		maps.Copy(out.env, pf.env)
-		maps.Copy(out.comments, pf.comments)
-		maps.Copy(out.sources, pf.sources)
+		for k, v := range pf.env {
+			setEnvKeyed(out.env, k, v)
+		}
+		for k, v := range pf.comments {
+			setEnvKeyed(out.comments, k, v)
+		}
+		for k, v := range pf.sources {
+			setEnvKeyed(out.sources, k, v)
+		}
 		out.unsets = appendUniq(out.unsets, pf.unsets...)
 	}
 	delete(visiting, name)
-	for k, v := range p.Env {
-		out.env[k] = v
-		out.sources[k] = Source{Profile: name, Layer: c.layerOf(name, k)}
+	// Own entries apply last (child wins). Sorted so a hand-authored
+	// case-variant pair (PATH and path in one env block) resolves
+	// deterministically on Windows, where the later spelling wins; POSIX
+	// keeps both keys, as authored.
+	for _, k := range sortedEnvKeys(p.Env) {
+		setEnvKeyed(out.env, k, p.Env[k])
+		setEnvKeyed(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
 	}
-	for k, cc := range p.Comments {
-		if cc != "" {
-			out.comments[k] = cc
+	for _, k := range sortedEnvKeys(p.Comments) {
+		if cc := p.Comments[k]; cc != "" {
+			setEnvKeyed(out.comments, k, cc)
 		}
 	}
 	out.unsets = appendUniq(out.unsets, p.Unset...)
@@ -345,9 +348,12 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	return out, nil
 }
 
+// appendUniq appends entries not already present by EnvKeyEqual semantics —
+// on Windows a case-variant counts as present, keeping one entry per real
+// variable.
 func appendUniq(dst []string, add ...string) []string {
 	for _, x := range add {
-		if !slices.Contains(dst, x) {
+		if !slices.ContainsFunc(dst, func(d string) bool { return EnvKeyEqual(d, x) }) {
 			dst = append(dst, x)
 		}
 	}

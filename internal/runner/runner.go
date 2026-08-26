@@ -3,7 +3,6 @@ package runner
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
 	"sort"
@@ -16,11 +15,17 @@ import (
 // sorted "K=V" slice suitable for exec.Cmd.Env. Unsets remove a key even when
 // the shell exports it — that is the point of an unset in the config. Matching
 // goes through config.DeleteEnvKey so a case-mismatched unset still lands on
-// Windows, where env names are case-insensitive (Path vs PATH).
+// Windows, where env names are case-insensitive (Path vs PATH). The profile
+// overlay is case-aware on Windows: a profile's Path replaces the shell's PATH
+// rather than shadowing it as a second key.
 func MergedEnv(osEnv, profileEnv map[string]string, unsets []string) []string {
 	curMap := make(map[string]string, len(osEnv)+len(profileEnv))
-	maps.Copy(curMap, osEnv)
-	maps.Copy(curMap, profileEnv)
+	for k, v := range osEnv {
+		curMap[k] = v
+	}
+	for k, v := range profileEnv {
+		config.SetEnvKey(curMap, k, v)
+	}
 	for _, u := range unsets {
 		config.DeleteEnvKey(curMap, u)
 	}

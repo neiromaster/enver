@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -793,5 +794,50 @@ func TestLoadRejectsInvalidEnvNames(t *testing.T) {
 		if _, err := LoadFile(path); err == nil {
 			t.Errorf("%s: load must reject invalid names loudly", name)
 		}
+	}
+}
+
+func TestMergeCaseVariantOverlay(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"PATH": "g"}}}}
+	over := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"Path": "l"}}}}
+	got := Merge(base, over).Profiles["p"].Env
+	if runtime.GOOS == "windows" {
+		if len(got) != 1 || got["Path"] != "l" {
+			t.Fatalf("merged env = %v, want the local variant only: {Path: l}", got)
+		}
+	} else if len(got) != 2 {
+		t.Fatalf("merged env = %v, want both spellings on POSIX", got)
+	}
+}
+
+func TestResolveCaseVariantChildWins(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base":  {Env: map[string]string{"PATH": "g"}},
+		"child": {Extends: Extends{"base"}, Env: map[string]string{"path": "l"}},
+	}}
+	r, err := cfg.ResolveProfile("child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if len(r.Env) != 1 || r.Env["path"] != "l" {
+			t.Fatalf("resolved env = %v, want {path: l}", r.Env)
+		}
+		if len(r.Sources) != 1 || r.Sources["path"].Profile != "child" {
+			t.Fatalf("sources = %v, want the stale base entry collapsed too", r.Sources)
+		}
+	} else if len(r.Env) != 2 {
+		t.Fatalf("resolved env = %v, want both spellings on POSIX", r.Env)
+	}
+}
+
+func TestUnsetDedupCaseVariants(t *testing.T) {
+	got := mergeUniq([]string{"PATH"}, []string{"Path"})
+	want := 2
+	if runtime.GOOS == "windows" {
+		want = 1
+	}
+	if len(got) != want {
+		t.Fatalf("mergeUniq = %v, want %d entries", got, want)
 	}
 }

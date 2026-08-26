@@ -62,6 +62,29 @@ func unsetsHasKey(unsets []string, key string) bool {
 	return false
 }
 
+// SetEnvKey sets m[key] = val, first removing any case-variant of key on
+// Windows, where PATH and Path denote one variable: an exact-key assignment
+// would leave both spellings in the map, and the fence would then have to
+// delete both. POSIX is a plain assignment.
+func SetEnvKey(m map[string]string, key, val string) {
+	setEnvKeyed(m, key, val)
+}
+
+// setEnvKeyed is the shape-generic core of SetEnvKey: env, comments, sources,
+// and origins maps all overlay with the same case rules.
+func setEnvKeyed[V any](m map[string]V, key string, val V) {
+	if runtime.GOOS != "windows" {
+		m[key] = val
+		return
+	}
+	for k := range m {
+		if strings.EqualFold(k, key) {
+			delete(m, k)
+		}
+	}
+	m[key] = val
+}
+
 // ValidEnvKey reports whether k is a name enver accepts for an env key or an
 // unset entry: [A-Za-z_][A-Za-z0-9_]* — the identifier rule the dotenv
 // parser has always enforced on import. Names reach eval'd export lines and

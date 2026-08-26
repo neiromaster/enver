@@ -3,6 +3,7 @@ package runner
 import (
 	"os/exec"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -121,4 +122,15 @@ func splitKV(kv string) (string, string, bool) {
 		}
 	}
 	return kv, "", false
+}
+
+func TestMergedEnvCaseVariantOverlay(t *testing.T) {
+	got := MergedEnv(map[string]string{"PATH": "shell"}, map[string]string{"Path": "profile"}, nil)
+	if runtime.GOOS == "windows" {
+		if len(got) != 1 || got[0] != "Path=profile" {
+			t.Fatalf("MergedEnv = %v, want [Path=profile] — the profile variant replaces the shell one", got)
+		}
+	} else if len(got) != 2 {
+		t.Fatalf("MergedEnv = %v, want both spellings on POSIX", got)
+	}
 }
