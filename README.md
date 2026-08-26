@@ -168,7 +168,7 @@ redefinition: a key unset by any profile in the chain stays removed even when a
 closer profile sets it again. Author `unset` in YAML like multi-parent
 `extends` — a single name or a list, never a mapping; `enver validate` flags an
 `unset` naming a key the same profile also sets in the same layer's env (`contradictory-unset` — a local unset fencing a global definition is the intended cross-layer pattern)
-and a key that a chain member unsets but this profile re-defines
+and a key that a chain member unsets but this profile re-defines or that the other layer's copy of the same profile unsets
 (`unset-shadowed`), since that definition is dead. On Windows, where env names
 are case-insensitive, unset matching is case-insensitive too.
 

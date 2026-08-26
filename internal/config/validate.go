@@ -79,8 +79,8 @@ func Validate(cfg Config) []Issue {
 // and the author should hear about it. Keys unset by the profile itself are
 // skipped; contradictory-unset already covers them. A key an ancestor defines
 // and this profile unsets is the feature working as intended and is not
-// reported. A definition fenced by the other layer's unset is reported too —
-// the local layer's, when the global layer's copy of the profile unsets the key.
+// reported. The reverse cross-layer direction is dead and reported: a local
+// definition the global layer's copy of the profile unsets.
 func shadowedUnsets(cfg Config, name string) []Issue {
 	p := cfg.Profiles[name]
 	if len(p.Env) == 0 {

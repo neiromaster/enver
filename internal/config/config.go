@@ -168,7 +168,9 @@ func findLocal() []string {
 
 // Merge folds override into base: override wins for default and per-key env;
 // extends concatenates as [base…, override…] deduped, so local mixins compose
-// with rather than replace global ones.
+// with rather than replace global ones. Merge folds override into base's maps in
+// place; the returned config shares state with base, which must not be used as
+// the pre-merge view afterwards.
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
