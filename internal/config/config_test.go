@@ -833,13 +833,13 @@ func TestResolveCaseVariantChildWins(t *testing.T) {
 }
 
 func TestUnsetDedupCaseVariants(t *testing.T) {
-	got := mergeUniq([]string{"PATH"}, []string{"Path"})
+	got := appendUniq([]string{"PATH"}, "Path")
 	want := 2
 	if runtime.GOOS == "windows" {
 		want = 1
 	}
 	if len(got) != want {
-		t.Fatalf("mergeUniq = %v, want %d entries", got, want)
+		t.Fatalf("appendUniq = %v, want %d entries", got, want)
 	}
 }
 
@@ -857,14 +857,14 @@ func TestMergeExtendsKeepsCaseDistinctNames(t *testing.T) {
 
 func TestOriginLookupPlatformSemantics(t *testing.T) {
 	m := map[string]string{"Token": "local"}
-	got := originLookup(m, "TOKEN")
+	got, found := originLookup(m, "TOKEN")
 	if runtime.GOOS == "windows" {
-		if got != "local" {
-			t.Fatalf("windows originLookup = %q, want local", got)
+		if !found || got != "local" {
+			t.Fatalf("windows originLookup = %q, %v; want local, true", got, found)
 		}
 		return
 	}
-	if got != "" {
-		t.Fatalf("posix originLookup = %q, want empty", got)
+	if found {
+		t.Fatalf("posix originLookup = %q, %v; want zero, false", got, found)
 	}
 }

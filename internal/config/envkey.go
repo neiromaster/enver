@@ -54,21 +54,21 @@ func hasEnvKey(m map[string]string, key string) bool {
 	return false
 }
 
-// originLookup reads m[key] by EnvKeyEqual semantics, so on Windows a
-// case-variant spelling still finds the layer Merge recorded under the
-// override's own spelling.
-func originLookup(m map[string]string, key string) string {
+// originLookup finds m[key] by EnvKeyEqual semantics: direct hit anywhere,
+// plus a Windows case-variant scan, mirroring how env maps are matched.
+func originLookup[V any](m map[string]V, key string) (V, bool) {
 	if v, ok := m[key]; ok {
-		return v
+		return v, true
 	}
 	if runtime.GOOS == "windows" {
 		for k, v := range m {
 			if EnvKeyEqual(k, key) {
-				return v
+				return v, true
 			}
 		}
 	}
-	return ""
+	var zero V
+	return zero, false
 }
 
 // UnsetsHasKey reports whether key is fenced by any entry of unsets.

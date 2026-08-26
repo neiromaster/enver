@@ -139,6 +139,49 @@ func TestMergeUnsetListIsTheOverridingLayers(t *testing.T) {
 	}
 }
 
+// TestMergeCarriedChainFenceBeatsAncestorDefine pins the chain half of
+// layer-scoped unsets: a fence whose key lives in an extends ancestor is
+// carried to resolve time, so adding a local copy that never mentions the
+// key cannot resurrect it.
+func TestMergeCarriedChainFenceBeatsAncestorDefine(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"ANTHROPIC_API_KEY": "k", "MODEL": "m"}},
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"ANTHROPIC_API_KEY"}},
+	}}
+	local := Config{Profiles: map[string]Profile{"bare": {Env: map[string]string{"MODEL": "lm"}}}}
+	r, err := Merge(global, local).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env["ANTHROPIC_API_KEY"]; ok {
+		t.Fatalf("fenced key resurrected: %v — a global chain fence must survive an unrelated local override", r.Env)
+	}
+	if r.Env["MODEL"] != "lm" {
+		t.Fatalf("MODEL = %q (%v), want lm from the local copy", r.Env["MODEL"], r.Env)
+	}
+}
+
+// TestMergeLocalRefillThroughAncestorBeatsGlobalChainFence pins the era gate:
+// a carried fence strips what the earlier layer supplied, but a value the
+// later layer explicitly puts into the ancestor is a closer mention and wins.
+func TestMergeLocalRefillThroughAncestorBeatsGlobalChainFence(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"API_KEY": "g"}},
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"API_KEY"}},
+	}}
+	local := Config{Profiles: map[string]Profile{"anth": {Env: map[string]string{"API_KEY": "l"}}}}
+	r, err := Merge(global, local).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Env["API_KEY"] != "l" {
+		t.Fatalf("API_KEY = %q (%v), want l — a later-era mention outranks an earlier-era fence", r.Env["API_KEY"], r.Env)
+	}
+	if s := r.Sources["API_KEY"]; s.Layer != LayerLocal {
+		t.Fatalf("API_KEY source = %+v, want layer local", s)
+	}
+}
+
 // TestResolveSiblingParentUnsetStaysInItsOwnBranch pins multi-parent
 // composition: an unset removes what came up its OWN branch (b alone is
 // clean), while a sibling parent supplies fresh values into the child
@@ -329,7 +372,7 @@ func TestWriteProfileUnsetRoundTrip(t *testing.T) {
 	}
 }
 
-// TestUnsetCoversBothSpellingsWindows pins the all-variants deletion: with
+// TestUnsetCoversBothSpellings pins the all-variants deletion: with
 // both spellings authored (the shape that regressed under first-match
 // removal), an unset of either spelling must leave nothing behind on
 // Windows, while POSIX keeps the unpicked spelling a distinct variable.

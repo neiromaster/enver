@@ -14,8 +14,14 @@ import (
 
 // Profile is one named environment profile.
 type Profile struct {
-	Extends  Extends           `yaml:"extends"`
-	Unset    Unsets            `yaml:"unset"` // env keys enver must not set in the resolved env
+	Extends Extends `yaml:"extends"`
+	Unset   Unsets  `yaml:"unset"` // env keys enver must not set in the resolved env
+	// Carried holds earlier-layer fences whose targets arrive only through
+	// extends ancestors, so Merge could not consume them in place. resolveEnv
+	// applies them between the inherited fold and the profile's own entries,
+	// going silent when the winning mention already belongs to the later
+	// layer. Never serialized; always empty for load-built profiles.
+	Carried  Unsets            `yaml:"-"`
 	Env      map[string]string `yaml:"env"`
 	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
 }
@@ -169,13 +175,15 @@ func findLocal() []string {
 // Merge folds override into base: override wins for default and per-key env;
 // extends concatenates as [base…, override…] deduped, so local mixins compose
 // with rather than replace global ones. Unsets are layer-scoped, not unioned:
-// folding a shared profile consumes the inherited copy's unsets against the
-// entries gathered above it (env and comments), and the overriding copy may
-// add keys back — closest mention across layers wins. The merged profile
-// therefore carries only the overriding layer's unset list, and UnsetOrigins
-// attributes exactly those entries. Merge folds override into base's maps in
-// place; the returned config shares state with base, which must not be used
-// as the pre-merge view afterwards.
+// folding a shared profile applies the inherited copy's fence to its own env
+// right here — the overriding copy may refill those keys — while a fence whose
+// target arrives only through extends ancestors moves to Profile.Carried,
+// where resolveEnv applies it era-gated after the inherited fold. The merged
+// profile's declared list is the overriding layer's own, and UnsetOrigins
+// attributes exactly those entries; profiles absent from the override shed
+// their earlier-era declared fences the same way. Merge folds override into
+// base's maps in place; the returned config shares state with base, which
+// must not be used as the pre-merge view afterwards.
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
@@ -186,16 +194,8 @@ func Merge(base, override Config) Config {
 	}
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
-		// Layer-scoped unsets: this inherited copy applies its own list at
-		// its merge point — stripping its entries before the override adds
-		// anything — so an override refilling a key beats the inherited
-		// unset, and the inherited list never rides forward.
-		for _, u := range bp.Unset {
-			deleteEnvKey(bp.Env, u)
-			deleteEnvKey(bp.Comments, u)
-		}
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
-		bp.Unset = appendUniq(slices.Clone(p.Unset))
+		splitUnsets(&bp, p.Unset)
 		for _, u := range p.Unset {
 			if out.UnsetOrigins == nil {
 				out.UnsetOrigins = map[string]map[string]string{}
@@ -233,12 +233,34 @@ func Merge(base, override Config) Config {
 		}
 		out.Profiles[name] = bp
 	}
+	// Profiles without an overriding copy resolve exactly as before; only
+	// their era-declared fences need the same consume-or-carry split.
+	for name := range out.Profiles {
+		if _, overlaid := override.Profiles[name]; overlaid {
+			continue
+		}
+		bp := out.Profiles[name]
+		splitUnsets(&bp, nil)
+		out.Profiles[name] = bp
+	}
 	return out
 }
 
-// mergeUniq concatenates base and add, deduplicated by EnvKeyEqual.
-func mergeUniq(base, add []string) []string {
-	return appendUniq(slices.Clone(base), add...)
+// splitUnsets applies inherited-copy unsets that hit the profile's own env
+// right at the fold, and moves chain-origin fences — targets surfacing only
+// through extends ancestors — into Carried, where resolveEnv applies them
+// era-gated. The declared list becomes fresh verbatim: that layer's turn
+// comes after this copy's contributions.
+func splitUnsets(bp *Profile, fresh Unsets) {
+	for _, u := range bp.Unset {
+		if !hasEnvKey(bp.Env, u) {
+			bp.Carried = appendUniq(bp.Carried, u)
+			continue
+		}
+		deleteEnvKey(bp.Env, u)
+		deleteEnvKey(bp.Comments, u)
+	}
+	bp.Unset = slices.Clone(fresh)
 }
 
 // mergeExtends concatenates base and add, deduplicated byte-exactly: profile
@@ -361,6 +383,17 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		}
 	}
 	delete(visiting, name)
+	// Carried earlier-era fences act between the inherited contributions and
+	// this profile's own entries: they strip what the earlier layer supplied,
+	// and go silent the moment a later-era mention owns the key.
+	for _, u := range p.Carried {
+		if s, ok := originLookup(out.sources, u); ok && s.Layer == LayerLocal {
+			continue
+		}
+		deleteEnvKey(out.env, u)
+		deleteEnvKey(out.comments, u)
+		deleteEnvKey(out.sources, u)
+	}
 	// Own entries apply last (child wins). Sorted so a hand-authored
 	// case-variant pair (PATH and path in one env block) resolves
 	// deterministically on Windows, where the later spelling wins; POSIX
@@ -402,7 +435,7 @@ func appendUniq(dst []string, add ...string) []string {
 // own env. Merge records local for keys the local layer overrode; everything
 // else is global by default.
 func (c Config) layerOf(profile, key string) string {
-	if l := originLookup(c.Origins[profile], key); l != "" {
+	if l, ok := originLookup(c.Origins[profile], key); ok {
 		return l
 	}
 	return LayerGlobal
@@ -415,7 +448,7 @@ func (c Config) layerOf(profile, key string) string {
 // env origin is global). enver validate still surfaces it only because
 // validatecmd.go runs an extra ValidateGlobal pass.
 func (c Config) unsetLayer(profile, key string) string {
-	if l := originLookup(c.UnsetOrigins[profile], key); l != "" {
+	if l, ok := originLookup(c.UnsetOrigins[profile], key); ok {
 		return l
 	}
 	return LayerGlobal
