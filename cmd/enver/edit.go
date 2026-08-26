@@ -22,12 +22,13 @@ const (
 )
 
 // editState is the in-memory working copy of the profile being edited: own env
-// entries (with comments), the extends pointer, whether it is the default, and a
-// pending-delete flag. Nothing is written until commit.
+// entries (with comments), the extends pointer, the unset list, whether it is
+// the default, and a pending-delete flag. Nothing is written until commit.
 type editState struct {
 	name          string
 	entries       []ui.EnvEntry
 	extends       config.Extends
+	unset         config.Unsets
 	isDefault     bool
 	deleteProfile bool
 
@@ -52,6 +53,7 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 		name:          name,
 		entries:       entries,
 		extends:       prof.Extends,
+		unset:         prof.Unset,
 		isDefault:     isDefault,
 		origExtends:   prof.Extends,
 		origIsDefault: isDefault,
@@ -109,8 +111,8 @@ func (s editState) commentsMap() map[string]string {
 }
 
 func (s editState) canCommit() error {
-	if len(s.entries) == 0 && len(s.extends) == 0 {
-		return fmt.Errorf("a profile needs at least one env var or an extends")
+	if len(s.entries) == 0 && len(s.extends) == 0 && len(s.unset) == 0 {
+		return fmt.Errorf("a profile needs at least one env var, an extends, or an unset")
 	}
 	return nil
 }
@@ -442,7 +444,7 @@ func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) er
 	if err := commitValidate(cfg, s); err != nil {
 		return err
 	}
-	p := config.Profile{Extends: s.extends, Env: s.envMap(), Comments: s.commentsMap()}
+	p := config.Profile{Extends: s.extends, Unset: s.unset, Env: s.envMap(), Comments: s.commentsMap()}
 	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault)
 }
 

@@ -179,3 +179,100 @@ func TestUpsertPreservesUnsetOnDuplicate(t *testing.T) {
 		t.Fatalf("unset lost on duplicate:\n%s", s)
 	}
 }
+
+func TestResolveInheritedUnsetFencesChildRedefinition(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"A": "base"}},
+		"mid":  {Extends: Extends{"base"}, Unset: Unsets{"A"}},
+		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"A": "child", "B": "2"}, Comments: map[string]string{"A": "hint"}},
+	}}
+	r, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env["A"]; ok {
+		t.Fatalf("redefined key survived the inherited fence: %v", r.Env)
+	}
+	if r.Env["B"] != "2" {
+		t.Fatalf("env = %v, want B=2 only", r.Env)
+	}
+	if _, ok := r.Comments["A"]; ok {
+		t.Fatalf("redefined key's comment survived the fence: %v", r.Comments)
+	}
+	if _, ok := r.Sources["A"]; ok {
+		t.Fatalf("redefined key's source survived the fence: %v", r.Sources)
+	}
+	if !sliceEq(r.Unsets, []string{"A"}) {
+		t.Fatalf("Unsets = %v, want [A]", r.Unsets)
+	}
+}
+
+func TestUnsetMappingYAMLIsError(t *testing.T) {
+	for _, doc := range []string{
+		"profiles:\n  a:\n    unset:\n      FOO: reason\n    env:\n      K: v\n",
+		"profiles:\n  a:\n    extends:\n      anth: null\n    env:\n      K: v\n",
+	} {
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(doc), &cfg); err == nil {
+			t.Fatalf("mapping node silently accepted:\n%s", doc)
+		}
+	}
+}
+
+func TestValidateUnsetOnlyProfileIsNotEmpty(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"bare": {Unset: Unsets{"ANTHROPIC_API_KEY"}},
+	}}
+	for _, is := range Validate(cfg) {
+		if is.Kind == "empty" {
+			t.Fatalf("unset-only profile flagged empty: %v", is)
+		}
+	}
+}
+
+func TestValidateUnsetShadowed(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"A": "1", "MODEL": "m"}},
+		"mid":  {Extends: Extends{"base"}, Unset: Unsets{"A"}},
+		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"A": "child"}},
+		"bare": {Extends: Extends{"base"}, Unset: Unsets{"MODEL"}},
+	}}
+	var shadowed []Issue
+	for _, is := range Validate(cfg) {
+		if is.Kind != "unset-shadowed" {
+			continue
+		}
+		shadowed = append(shadowed, is)
+		if is.Profile != "leaf" || is.Target != "A" || is.Detail != "mid" || is.Severity != "warning" {
+			t.Errorf("shadowed issue = %+v, want leaf/A from mid", is)
+		}
+	}
+	if len(shadowed) != 1 {
+		t.Fatalf("shadowed issues = %d, want 1 (stripping an inherited key is not shadowing): %v", len(shadowed), shadowed)
+	}
+}
+
+func TestWriteProfileUnsetRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := WriteProfile(path, "p", Profile{Unset: Unsets{"A", "B"}, Env: map[string]string{"K": "v"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(got); !strings.Contains(s, "unset:") || !strings.Contains(s, "- A") || !strings.Contains(s, "- B") {
+		t.Fatalf("unset not written:\n%s", s)
+	}
+	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"K": "v"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(got); strings.Contains(s, "unset") {
+		t.Fatalf("empty Unsets did not clear the field:\n%s", s)
+	}
+}

@@ -2,16 +2,17 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // Issue is one config-health finding.
 type Issue struct {
 	Profile  string
-	Kind     string // "dangling-extends" | "cycle" | "empty"
+	Kind     string // "dangling-extends" | "cycle" | "empty" | "contradictory-unset" | "unset-shadowed"
 	Severity string // "error" | "warning"
-	Target   string // dangling target
-	Detail   string // cycle detail
+	Target   string // dangling target, unset key
+	Detail   string // cycle detail, unset-declaring profile
 	File     string // source scope when known (e.g. "global"); "" means the merged view
 }
 
@@ -22,14 +23,17 @@ func (i Issue) String() string {
 	case "cycle":
 		return fmt.Sprintf("%s: extends cycle (%s)", i.Profile, i.Detail)
 	case "empty":
-		return fmt.Sprintf("%s: no env vars and no extends", i.Profile)
+		return fmt.Sprintf("%s: no env vars, no extends, and no unset", i.Profile)
 	case "contradictory-unset":
 		return fmt.Sprintf("%s: unsets %q which it also defines in env", i.Profile, i.Target)
+	case "unset-shadowed":
+		return fmt.Sprintf("%s: %q is unset by %s but defined here; the unset wins", i.Profile, i.Target, i.Detail)
 	}
 	return fmt.Sprintf("%s: %s", i.Profile, i.Kind)
 }
 
-// Validate audits cfg for dangling extends, cycles, and no-op profiles.
+// Validate audits cfg for dangling extends, cycles, no-op profiles, and unset
+// contradictions.
 func Validate(cfg Config) []Issue {
 	exists := map[string]bool{}
 	for n := range cfg.Profiles {
@@ -50,16 +54,78 @@ func Validate(cfg Config) []Issue {
 				}
 			}
 		}
-		if len(p.Env) == 0 && len(p.Extends) == 0 {
+		if len(p.Env) == 0 && len(p.Extends) == 0 && len(p.Unset) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
 		}
 		for _, u := range p.Unset {
-			if _, defined := p.Env[u]; defined {
+			if hasEnvKey(p.Env, u) {
 				issues = append(issues, Issue{Profile: n, Kind: "contradictory-unset", Severity: "warning", Target: u})
 			}
 		}
+		issues = append(issues, shadowedUnsets(cfg, n)...)
 	}
 	return issues
+}
+
+// shadowedUnsets warns about own env keys the resolved profile drops because
+// an inherited unset fences them: the definition is dead — the unset wins —
+// and the author should hear about it. Keys unset by the profile itself are
+// skipped; contradictory-unset already covers them. A key an ancestor defines
+// and this profile unsets is the feature working as intended and is not
+// reported.
+func shadowedUnsets(cfg Config, name string) []Issue {
+	p := cfg.Profiles[name]
+	if len(p.Env) == 0 {
+		return nil
+	}
+	r, err := cfg.ResolveProfile(name)
+	if err != nil {
+		return nil // dangling-extends or cycle is reported elsewhere
+	}
+	if len(r.Unsets) == 0 {
+		return nil
+	}
+	var issues []Issue
+	for _, k := range sortedEnvKeys(p.Env) {
+		if unsetsHasKey(p.Unset, k) {
+			continue
+		}
+		if hasEnvKey(r.Env, k) {
+			continue
+		}
+		issues = append(issues, Issue{
+			Profile:  name,
+			Kind:     "unset-shadowed",
+			Severity: "warning",
+			Target:   k,
+			Detail:   unsetDeclarer(r.Chain, cfg, k),
+		})
+	}
+	return issues
+}
+
+// unsetDeclarer names the chain profile whose own unset fences key, or
+// "an ancestor" when none matches (an unset inherited transitively).
+func unsetDeclarer(chain []string, cfg Config, key string) string {
+	for _, m := range chain {
+		if m == chain[0] {
+			continue
+		}
+		if unsetsHasKey(cfg.Profiles[m].Unset, key) {
+			return m
+		}
+	}
+	return "an ancestor"
+}
+
+// sortedEnvKeys returns the keys of env sorted, for stable issue order.
+func sortedEnvKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // ValidateGlobal audits the global config in isolation (File="global"), catching

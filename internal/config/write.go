@@ -43,7 +43,8 @@ func removeKey(mapping *yaml.Node, key string) {
 }
 
 // WriteProfile replaces a profile's own env wholesale (keys absent from p.Env are
-// deleted), sets extends when non-empty or clears it when empty, and sets or
+// deleted), sets extends when non-empty or clears it when empty, writes unset
+// with the same wholesale rule (an empty Unsets clears the field), and sets or
 // clears the top-level default. p.Comments[k] (non-empty) renders above that
 // entry; a key with no comment is written with no comment. Creates the file
 // (and parent dirs) if absent.
@@ -57,6 +58,7 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) e
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
 
 	writeExtendsNode(prof, p.Extends)
+	writeUnsetNode(prof, p.Unset)
 
 	switch {
 	case len(p.Env) == 0:

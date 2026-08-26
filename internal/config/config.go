@@ -3,9 +3,11 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -176,20 +178,11 @@ func Merge(base, override Config) Config {
 func mergeUniq(base, add []string) []string {
 	out := append([]string(nil), base...)
 	for _, x := range add {
-		if !sliceHas(out, x) {
+		if !slices.Contains(out, x) {
 			out = append(out, x)
 		}
 	}
 	return out
-}
-
-func sliceHas(s []string, x string) bool {
-	for _, v := range s {
-		if v == x {
-			return true
-		}
-	}
-	return false
 }
 
 func mergeExtends(base, add Extends) Extends {
@@ -242,8 +235,11 @@ type Resolved struct {
 // follow the same fold — a definer's comment applies only when it carries
 // one, so a nearer uncommented redefinition keeps the farther comment. The
 // returned chain is a self-first DFS pre-order for display; a cycle,
-// including one spanning multiple parents, is reported as an error. Unset keys
-// are dropped from the env (and comments) and collected into Unsets.
+// including one spanning multiple parents, is reported as an error. Unset
+// keys are dropped from the env (and comments) and collected into Unsets;
+// unsets accumulate down the chain and are re-applied after each profile's
+// own env, so a key an ancestor unset stays removed even when a closer
+// profile redefines it — the unset wins.
 func (c Config) ResolveProfile(name string) (Resolved, error) {
 	f, err := c.resolveEnv(name, map[string]bool{})
 	if err != nil {
@@ -269,11 +265,12 @@ type envFold struct {
 // resolveEnv returns the fully merged env, comments, sources, and unsets for
 // name: each parent is resolved transitively and merged left-to-right, then
 // name's own entries are applied last (child wins; comments only when the
-// definer carries one). Unset keys are dropped from env and comments and
-// accumulated so a child can report the whole fence. The visiting set tracks
-// the active path so a cycle (self, mutual, or across multiple parents) is
-// detected; a name is removed from it on the way back up so a diamond is not
-// mistaken for a cycle.
+// definer carries one). The accumulated fence — inherited unsets plus name's
+// own — is applied after name's own env, so the unset wins over a
+// redefinition anywhere below the profile that declared it. The visiting set
+// tracks the active path so a cycle (self, mutual, or across multiple
+// parents) is detected; a name is removed from it on the way back up so a
+// diamond is not mistaken for a cycle.
 func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
 		return envFold{}, fmt.Errorf("extends cycle at %q", name)
@@ -292,15 +289,9 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		if err != nil {
 			return envFold{}, err
 		}
-		for k, v := range pf.env {
-			out.env[k] = v
-		}
-		for k, cc := range pf.comments {
-			out.comments[k] = cc
-		}
-		for k, s := range pf.sources {
-			out.sources[k] = s
-		}
+		maps.Copy(out.env, pf.env)
+		maps.Copy(out.comments, pf.comments)
+		maps.Copy(out.sources, pf.sources)
 		out.unsets = appendUniq(out.unsets, pf.unsets...)
 	}
 	delete(visiting, name)
@@ -313,18 +304,18 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 			out.comments[k] = cc
 		}
 	}
-	for _, u := range p.Unset {
-		delete(out.env, u)
-		delete(out.comments, u)
-		delete(out.sources, u)
-	}
 	out.unsets = appendUniq(out.unsets, p.Unset...)
+	for _, u := range out.unsets {
+		deleteEnvKey(out.env, u)
+		deleteEnvKey(out.comments, u)
+		deleteEnvKey(out.sources, u)
+	}
 	return out, nil
 }
 
 func appendUniq(dst []string, add ...string) []string {
 	for _, x := range add {
-		if !sliceHas(dst, x) {
+		if !slices.Contains(dst, x) {
 			dst = append(dst, x)
 		}
 	}
