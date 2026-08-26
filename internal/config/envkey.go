@@ -17,15 +17,10 @@ func EnvKeyEqual(a, b string) bool {
 	return a == b
 }
 
-// DeleteEnvKey removes key from m by EnvKeyEqual semantics.
-func DeleteEnvKey(m map[string]string, key string) {
-	deleteEnvKey(m, key)
-}
-
-// deleteEnvKey is the shape-generic core of DeleteEnvKey: env, comments, and
-// sources maps all strip fenced keys with the same matching rules. On Windows
-// every case-variant is removed — PATH and Path are one variable, so an unset
-// of either spelling must not leave the other alive.
+// deleteEnvKey removes key from m by EnvKeyEqual semantics: env, comments,
+// and sources maps all strip fenced keys with the same matching rules. On
+// Windows every case-variant is removed — PATH and Path are one variable, so
+// an unset of either spelling must not leave the other alive.
 func deleteEnvKey[V any](m map[string]V, key string) {
 	if runtime.GOOS == "windows" {
 		for k := range m {
@@ -36,6 +31,12 @@ func deleteEnvKey[V any](m map[string]V, key string) {
 		return
 	}
 	delete(m, key)
+}
+
+// HasEnvKey reports whether m carries key by EnvKeyEqual semantics, so
+// callers outside the package read resolutions the way resolveEnv writes them.
+func HasEnvKey(m map[string]string, key string) bool {
+	return hasEnvKey(m, key)
 }
 
 // hasEnvKey reports whether m carries key by EnvKeyEqual semantics.
@@ -51,6 +52,23 @@ func hasEnvKey(m map[string]string, key string) bool {
 		}
 	}
 	return false
+}
+
+// originLookup reads m[key] by EnvKeyEqual semantics, so on Windows a
+// case-variant spelling still finds the layer Merge recorded under the
+// override's own spelling.
+func originLookup(m map[string]string, key string) string {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		for k, v := range m {
+			if EnvKeyEqual(k, key) {
+				return v
+			}
+		}
+	}
+	return ""
 }
 
 // UnsetsHasKey reports whether key is fenced by any entry of unsets.

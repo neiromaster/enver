@@ -234,7 +234,8 @@ func removedKeys(oldEnv, imported map[string]string) []diffEntry {
 // unset — dead on arrival at every consumption point. An inherited unset does
 // not fence a closer redefinition, so only the profile's own fence can drop
 // an imported key from the resolved env. A nil resolve (tests) or an
-// unresolvable profile (validate reports it) disables the reporting.
+// unresolvable profile (validate reports it) disables the reporting. Matching
+// follows EnvKeyEqual, as resolution does.
 func fencedImportedKeys(resolve func(string) (config.Resolved, error), name string, imported map[string]string) map[string]bool {
 	if resolve == nil {
 		return nil
@@ -245,7 +246,7 @@ func fencedImportedKeys(resolve func(string) (config.Resolved, error), name stri
 	}
 	var out map[string]bool
 	for k := range imported {
-		if _, ok := r.Env[k]; !ok {
+		if !config.HasEnvKey(r.Env, k) {
 			if out == nil {
 				out = map[string]bool{}
 			}

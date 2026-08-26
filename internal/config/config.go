@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"sort"
 
@@ -397,23 +396,6 @@ func appendUniq(dst []string, add ...string) []string {
 		}
 	}
 	return dst
-}
-
-// originLookup reads m[key] by EnvKeyEqual semantics, so on Windows a
-// case-variant spelling still finds the layer Merge recorded under the
-// override's own spelling.
-func originLookup(m map[string]string, key string) string {
-	if v, ok := m[key]; ok {
-		return v
-	}
-	if runtime.GOOS == "windows" {
-		for k, v := range m {
-			if EnvKeyEqual(k, key) {
-				return v
-			}
-		}
-	}
-	return ""
 }
 
 // layerOf reports which layer ("global" or "local") defined key in profile's

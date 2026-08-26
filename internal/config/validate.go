@@ -12,7 +12,7 @@ type Issue struct {
 	Kind     string // "dangling-extends" | "cycle" | "empty" | "contradictory-unset"
 	Severity string // "error" | "warning"
 	Target   string // dangling target, unset key
-	Detail   string // cycle detail, unset-declaring profile
+	Detail   string // cycle detail (chain path)
 	File     string // source scope when known (e.g. "global"); "" means the merged view
 }
 
