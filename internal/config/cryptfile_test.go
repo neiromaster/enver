@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,5 +84,42 @@ func TestEncryptFileRejectsUnreadableOutsideWrittenProfile(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("n = %d, want 0", n)
+	}
+}
+
+// TestEncryptFileJoinsFileWideSameSaltEra pins the era rule: when the written
+// profile holds no encrypted values but the file carries same-salt values in
+// another profile, new values join their KDF-parameter era. Same salt with
+// different params derives a different key, so stamping CurrentParams beside
+// an older era would leave a file no single passphrase recovers.
+func TestEncryptFileJoinsFileWideSameSaltEra(t *testing.T) {
+	key := make([]byte, 32)
+	salt := []byte("aaaaaaaaaaaaaaaa")
+	old := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	enc, err := crypto.EncryptValueWithParams("old", key, salt, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := "profiles:\n  q:\n    env:\n      OLD: " + enc + "\n  p:\n    env:\n      TOKEN: plain\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := EncryptFile(path, key, salt, "p", false); err != nil || n != 1 {
+		t.Fatalf("encrypt p: n=%d err=%v, want 1/nil", n, err)
+	}
+	prof, _, _, _, err := ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSalt, gotParams, err := crypto.SaltFromValue(prof.Env["TOKEN"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotSalt, salt) || gotParams != old {
+		t.Fatalf("TOKEN era = %v (salt match %t), want the file's era %v", gotParams, bytes.Equal(gotSalt, salt), old)
+	}
+	if _, _, _, err := FirstSaltAndSample(path); err != nil {
+		t.Fatalf("file must stay one era for passphrase recovery: %v", err)
 	}
 }

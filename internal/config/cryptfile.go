@@ -67,14 +67,43 @@ func forEachEnvValue(pm *yaml.Node, profile string, fn func(v string) error) err
 	return nil
 }
 
+// sameSaltEra returns the KDF parameters of the enc:v3 values under salt
+// anywhere in the file. When the profiles being written hold no encrypted
+// values of their own, new values still join the era of same-salt values in
+// the rest of the file: same salt plus different params derives a different
+// key, so stamping CurrentParams beside an older era would split the file
+// under one passphrase. Values under other salts (stranded under a lost key)
+// are skipped.
+func sameSaltEra(pm *yaml.Node, salt []byte) (crypto.Argon2Params, bool, error) {
+	var scan crypto.SaltScan
+	err := forEachEnvValue(pm, "", func(v string) error {
+		if !crypto.IsEncrypted(v) {
+			return nil
+		}
+		vSalt, _, err := crypto.SaltFromValue(v)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(vSalt, salt) {
+			return nil
+		}
+		return scan.Add(v)
+	})
+	if err != nil {
+		return crypto.Argon2Params{}, false, err
+	}
+	if !scan.Found() {
+		return crypto.Argon2Params{}, false, nil
+	}
+	_, p, _ := scan.Result()
+	return p, true, nil
+}
+
 // EncryptFile encrypts secret-looking values (or all values when all is true)
 // in the config at path, preserving structure and comments. profile filters
 // to a single profile; empty means all. salt is shared by every value
 // encrypted in this run: passphrase recovery derives the key from the first
-// value in the file, so per-value salts would strand the rest. New values
-// carry the KDF params of the encrypted values already in the profiles being
-// written (the header must describe how the key in play was derived), and
-// those values using a different salt are refused before anything is written
+// value in the file, so per-value salts would strand the rest. New values carry the KDF params of the encrypted values already under the write key — those in the profiles being written, else same-salt values elsewhere in the file (the header must describe how the key in play was derived) — and those values using a different salt are refused before anything is written
 // — encrypting beside them would mix two keys and strand them. Values
 // stranded under other profiles do not block the write. Values this build
 // cannot read (foreign enc: prefixes, malformed enc:v3) fail loudly in every
@@ -103,6 +132,10 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	params := crypto.CurrentParams
 	if scan.Found() {
 		params = fileParams
+	} else if era, ok, err := sameSaltEra(pm, salt); err != nil {
+		return 0, err
+	} else if ok {
+		params = era
 	}
 	count := 0
 	for i := 0; i+1 < len(pm.Content); i += 2 {
