@@ -85,23 +85,27 @@ var keygenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		risk, err := keygenRisk(force, path, key, func() (bool, error) { return scan.hasEncrypted, nil })
+		// The key reuses the configs' salt, so a passphrase that cannot decrypt
+		// the sample is not the one the existing values were encrypted with.
+		// Verified before the risk gate: a passphrase that decrypts the sample
+		// strands nothing, so it is never warned about as stranding — it is the
+		// recovery path for a lost or rotated key cache. Every non-force path
+		// must refuse rather than cache a key no value in the configs opens with.
+		matches := false
+		if scan.hasEncrypted {
+			_, derr := crypto.DecryptValue(scan.sample, key)
+			matches = derr == nil
+		}
+		risk, err := keygenRisk(force, path, key, func() (bool, error) { return scan.hasEncrypted && !matches, nil })
 		if err != nil {
 			return err
 		}
-		// The key reuses the configs' salt, so a passphrase that cannot decrypt
-		// the sample is not the one the existing values were encrypted with. A
-		// --force overwrite of a different key already strands them through the
-		// confirm gate below; every other path must refuse rather than cache a
-		// key no value in the configs opens with.
-		if scan.hasEncrypted && !risk {
-			if _, derr := crypto.DecryptValue(scan.sample, key); derr != nil {
-				return fmt.Errorf("passphrase does not match the encrypted values in the configs; they stay tied to the passphrase that encrypted them — use it, or remove those values first")
-			}
+		if scan.hasEncrypted && !matches && !risk {
+			return fmt.Errorf("passphrase does not match the encrypted values in the configs; they stay tied to the passphrase that encrypted them — use it, or remove those values first")
 		}
 		if risk {
 			ok, cerr := uiConfirm(
-				"This passphrase derives a key different from the current one. Overwriting strands existing encrypted values (run `enver decrypt` with the old key first). Overwrite anyway?",
+				"This passphrase derives a key different from the current one. Overwriting strands existing encrypted values (recover them first with the key that encrypted them). Overwrite anyway?",
 				false)
 			if cerr != nil {
 				return cerr
@@ -130,14 +134,15 @@ func keygenPath() string {
 }
 
 // keygenRisk reports whether force-overwriting the key at path with newKey
-// would strand encrypted values: an existing key that differs plus encrypted
-// values in the configs. newKey is nil when the key is not yet known (--random),
-// in which case any existing key counts as different. hasEncrypted is called
-// only when the risk is real, so paths that can strand nothing (--random or
+// would strand encrypted values: an existing key that differs plus values the
+// replacement cannot read. newKey is nil when the key is not yet known
+// (--random), in which case any existing key counts as different and any
+// encrypted value counts as stranded. wouldStrand is called only when the
+// overwrite is real, so paths that can strand nothing (--random or
 // interactive keygen without --force) never read the configs: --random is the
 // bootstrap path and must work beside unreadable or foreign-enc configs. A
 // corrupt key file is an error: overwriting it cannot be judged safe.
-func keygenRisk(force bool, path string, newKey []byte, hasEncrypted func() (bool, error)) (bool, error) {
+func keygenRisk(force bool, path string, newKey []byte, wouldStrand func() (bool, error)) (bool, error) {
 	if !force {
 		return false, nil
 	}
@@ -154,7 +159,7 @@ func keygenRisk(force bool, path string, newKey []byte, hasEncrypted func() (boo
 	if newKey != nil && bytes.Equal(old, newKey) {
 		return false, nil // same key: safe to rewrite
 	}
-	return hasEncrypted()
+	return wouldStrand()
 }
 
 // configCryptScan is the single-pass result of scanning both config layers:

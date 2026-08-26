@@ -369,3 +369,106 @@ func TestKeygenPath(t *testing.T) {
 		t.Fatalf("keygen path with --key = %q, want /custom/key", got)
 	}
 }
+
+func TestKeygenForceMatchingPassphraseSkipsStrandingConfirm(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+
+	params := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	salt := []byte("0123456789abcdef")
+	right, err := crypto.DeriveKey("right-pass", salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", right, salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := config.GlobalPath(globalFlags.configPath)
+	if err := os.WriteFile(global, []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A stale random key cache: force-overwriting it with the matching
+	// passphrase key is recovery, not stranding.
+	if err := crypto.GenerateKey(globalFlags.keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPassword, oldInteractive, oldConfirm := uiPassword, uiInteractive, uiConfirm
+	uiInteractive = func() bool { return true }
+	uiPassword = func(prompt string) (string, error) { return "right-pass", nil }
+	uiConfirm = func(msg string, _ bool) (bool, error) {
+		t.Errorf("matching passphrase must not be confirmed as stranding: %q", msg)
+		return false, nil
+	}
+	t.Cleanup(func() {
+		uiPassword, uiInteractive, uiConfirm = oldPassword, oldInteractive, oldConfirm
+	})
+	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keygenCmd.Flags().Set("force", "false") })
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("keygen --force with matching passphrase: %v", err)
+	}
+	key, _, err := crypto.LoadKey(globalFlags.keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, derr := crypto.DecryptValue(enc, key); derr != nil || plain != "secret" {
+		t.Fatalf("decrypt with installed key = (%q, %v), want (secret, nil)", plain, derr)
+	}
+}
+
+func TestKeygenForceWrongPassphraseConfirmsStranding(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+
+	params := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	salt := []byte("0123456789abcdef")
+	right, err := crypto.DeriveKey("right-pass", salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", right, salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.GlobalPath(globalFlags.configPath), []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := crypto.GenerateKey(globalFlags.keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+
+	confirmed := false
+	oldPassword, oldInteractive, oldConfirm := uiPassword, uiInteractive, uiConfirm
+	uiInteractive = func() bool { return true }
+	uiPassword = func(prompt string) (string, error) { return "wrong-pass", nil }
+	uiConfirm = func(msg string, _ bool) (bool, error) {
+		confirmed = true
+		if !strings.Contains(msg, "strands") {
+			t.Errorf("confirm prompt should say what overwriting does: %q", msg)
+		}
+		return true, nil
+	}
+	t.Cleanup(func() {
+		uiPassword, uiInteractive, uiConfirm = oldPassword, oldInteractive, oldConfirm
+	})
+	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keygenCmd.Flags().Set("force", "false") })
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("accepted confirm must install the key: %v", err)
+	}
+	if !confirmed {
+		t.Fatal("a wrong passphrase under --force really strands the values; it must go through the confirm gate")
+	}
+}

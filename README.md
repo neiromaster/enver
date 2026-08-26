@@ -303,7 +303,7 @@ enver decrypt                   # restore plaintext (for editing)
 the same key (argon2id; the salt comes from your encrypted values), so the key
 can be regenerated from memory on any machine. When the configs already hold
 encrypted values, the passphrase is verified against them — a typo errors out
-instead of silently deriving a key that cannot read them. `enver keygen
+instead of silently deriving a key that cannot read them. A passphrase that *does* decrypt them is never treated as stranding, so `enver keygen --force` with the original passphrase is the recovery path for a lost or rotated key cache. `enver keygen
 --random` writes a random key cache instead — non-derivable, for CI and other
 non-interactive setups.
 
