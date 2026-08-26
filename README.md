@@ -158,7 +158,7 @@ drop it) **and** from the child process environment — even when the var is
 already exported in your shell; that is its point, and `enver x bare -- claude`
 runs with the key gone. `export` emits the matching strip lines (`unset K` in
 bash, `set -e K` in fish, `Remove-Item Env:K` in PowerShell), so
-`eval "$(enver export bare)"` removes the key from the current shell too. Env key and unset names must be valid identifiers (`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies): names ride unquoted inside eval'd export lines, so enver refuses anything looser at config load.
+`eval "$(enver export bare)"` removes the key from the current shell too. Env key and unset names must be valid identifiers (`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies): names ride unquoted inside eval'd export lines, so enver refuses anything looser at config load, at every write boundary, and at TUI input time.
 `$VAR` interpolation does not see unset keys: a fenced key contributes nothing
 when another value references it, instead of leaking the shell's live value.
 
@@ -324,7 +324,7 @@ other `enc:` prefixes (older formats) are rejected with an error, in every
 profile. `enver encrypt` refuses to write values under a key whose salt differs
 from the encrypted values already present in the profiles it touches — install
 the matching key first (keygen --force with the original passphrase, or restore its key file; decrypt pre-checks the key and names the same remedy); targeting one profile is not blocked by stranded
-different-key values in profiles you are not touching. New values join the KDF-parameter era of same-salt values anywhere in the file, so a per-profile encrypt cannot split the file into two eras under one passphrase.
+different-key values in profiles you are not touching. Scoped encrypt beside stranded values is allowed by design and leaves the file mixed-salt, which makes keygen refuse until the stranded values are removed. New values join the KDF-parameter era of same-salt values anywhere in the file, so a per-profile encrypt cannot split the file into two eras under one passphrase.
 
 At runtime `enver x <profile> -- <command>` **transparently decrypts** with no
 prompt, so the day-to-day command is unchanged. The key is resolved in this

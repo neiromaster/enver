@@ -25,15 +25,15 @@ func DeleteEnvKey(m map[string]string, key string) {
 // deleteEnvKey is the shape-generic core of DeleteEnvKey: env, comments, and
 // sources maps all strip fenced keys with the same matching rules.
 func deleteEnvKey[V any](m map[string]V, key string) {
-	if runtime.GOOS != "windows" {
-		delete(m, key)
-		return
-	}
-	for k := range m {
-		if strings.EqualFold(k, key) {
-			delete(m, k)
+	if runtime.GOOS == "windows" {
+		for k := range m {
+			if EnvKeyEqual(k, key) {
+				delete(m, k)
+				return
+			}
 		}
 	}
+	delete(m, key)
 }
 
 // hasEnvKey reports whether m carries key by EnvKeyEqual semantics.
@@ -41,12 +41,11 @@ func hasEnvKey(m map[string]string, key string) bool {
 	if _, ok := m[key]; ok {
 		return true
 	}
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	for k := range m {
-		if strings.EqualFold(k, key) {
-			return true
+	if runtime.GOOS == "windows" {
+		for k := range m {
+			if EnvKeyEqual(k, key) {
+				return true
+			}
 		}
 	}
 	return false
@@ -73,13 +72,12 @@ func SetEnvKey(m map[string]string, key, val string) {
 // setEnvKeyed is the shape-generic core of SetEnvKey: env, comments, sources,
 // and origins maps all overlay with the same case rules.
 func setEnvKeyed[V any](m map[string]V, key string, val V) {
-	if runtime.GOOS != "windows" {
-		m[key] = val
-		return
-	}
-	for k := range m {
-		if strings.EqualFold(k, key) {
-			delete(m, k)
+	if runtime.GOOS == "windows" {
+		for k := range m {
+			if EnvKeyEqual(k, key) {
+				delete(m, k)
+				break
+			}
 		}
 	}
 	m[key] = val

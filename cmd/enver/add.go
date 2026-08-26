@@ -160,6 +160,10 @@ func doAdd(cmd *cobra.Command, args []string) error {
 			fmt.Println("  skip: invalid key (no spaces)")
 			continue
 		}
+		if !config.ValidEnvKey(entry.Key) {
+			fmt.Println("  skip: invalid key (want [A-Za-z_][A-Za-z0-9_]*)")
+			continue
+		}
 		entries = upsertEntry(entries, entry)
 	}
 	if len(entries) == 0 && extends == "" {

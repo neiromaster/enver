@@ -359,6 +359,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  skip: invalid key (no spaces)")
 					continue
 				}
+				if !config.ValidEnvKey(entry.Key) {
+					fmt.Println("  skip: invalid key (want [A-Za-z_][A-Za-z0-9_]*)")
+					continue
+				}
 				s.upsert(entry)
 			case actionExtends:
 				picked, err := ui.Select("Extends", append(extendsOptions(pickerCfg, name), pickerTail()...))
@@ -411,6 +415,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			if edited.Key = strings.TrimSpace(edited.Key); edited.Key == "" {
 				continue // blank name cancels the edit of this var
 			}
+			if !config.ValidEnvKey(edited.Key) {
+				fmt.Println("  skip: invalid key (want [A-Za-z_][A-Za-z0-9_]*)")
+				continue
+			}
 			if edited.Key != key {
 				s.deleteKey(key)
 			}
@@ -423,6 +431,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			}
 			edited, err := ui.EnvCard(overrideSeed(inherited, comments, key))
 			if err != nil {
+				continue
+			}
+			if !config.ValidEnvKey(edited.Key) {
+				fmt.Println("  skip: invalid key (want [A-Za-z_][A-Za-z0-9_]*)")
 				continue
 			}
 			if edited.Key = strings.TrimSpace(edited.Key); edited.Key == "" {

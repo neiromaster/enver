@@ -103,8 +103,7 @@ func sameSaltEra(pm *yaml.Node, salt []byte) (crypto.Argon2Params, bool, error) 
 // in the config at path, preserving structure and comments. profile filters
 // to a single profile; empty means all. salt is shared by every value
 // encrypted in this run: passphrase recovery derives the key from the first
-// value in the file, so per-value salts would strand the rest. New values carry the KDF params of the encrypted values already under the write key — those in the profiles being written, else same-salt values elsewhere in the file (the header must describe how the key in play was derived) — and those values using a different salt are refused before anything is written
-// — encrypting beside them would mix two keys and strand them. Values
+// value in the file, so per-value salts would strand the rest. New values carry the KDF params of the encrypted values already under the write key — those in the profiles being written, else same-salt values elsewhere in the file (the header must describe how the key in play was derived). Values under a different salt are refused before anything is written: encrypting beside them would mix two keys and strand them. Values
 // stranded under other profiles do not block the write. Values this build
 // cannot read (foreign enc: prefixes, malformed enc:v3) fail loudly in every
 // profile, filtered or not. Returns the count of newly encrypted values.
