@@ -9,6 +9,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
+	"github.com/neiromaster/enver/internal/runner"
 )
 
 func TestParseProfileAndCmd(t *testing.T) {
@@ -427,5 +428,36 @@ func TestResolveRecoveryConflictingEras(t *testing.T) {
 	}}
 	if _, err := Resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "disagree") {
 		t.Fatalf("expected era-conflict error, got: %v", err)
+	}
+}
+
+// TestChildSeesShellValueThroughUnset pins the headline contract end to end:
+// the profile suppresses the key, yet the child inherits the shell's live
+// value because suppression merely omits it from the overlay.
+func TestChildSeesShellValueThroughUnset(t *testing.T) {
+	const k = "ENVER_TEST_PASS_THROUGH"
+	t.Setenv(k, "shell-live")
+	cfg := config.Config{Profiles: map[string]config.Profile{"p": {
+		Env:   map[string]string{"OTHER": "x"},
+		Unset: config.Unsets{k},
+	}}}
+	r, err := Resolve(cfg, "p", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env[k]; ok {
+		t.Fatalf("resolved env carries the unset key: %v", r.Env)
+	}
+	seen := 0
+	for _, kv := range runner.MergedEnv(osEnvMap(), r.Env) {
+		if strings.HasPrefix(kv, k+"=") {
+			seen++
+			if kv != k+"=shell-live" {
+				t.Fatalf("child got %q, want the shell value", kv)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("child env mentions %s %d times, want exactly once with the shell value", k, seen)
 	}
 }

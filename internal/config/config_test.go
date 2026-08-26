@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -839,5 +840,31 @@ func TestUnsetDedupCaseVariants(t *testing.T) {
 	}
 	if len(got) != want {
 		t.Fatalf("mergeUniq = %v, want %d entries", got, want)
+	}
+}
+
+// TestMergeExtendsKeepsCaseDistinctNames pins byte-exact extends dedup:
+// profile names are case-sensitive on every platform, so [prod] and [Prod]
+// compose rather than collapse.
+func TestMergeExtendsKeepsCaseDistinctNames(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{"c": {Extends: Extends{"prod"}}}}
+	over := Config{Profiles: map[string]Profile{"c": {Extends: Extends{"Prod"}}}}
+	got := Merge(base, over).Profiles["c"].Extends
+	if !reflect.DeepEqual([]string(got), []string{"prod", "Prod"}) {
+		t.Fatalf("extends = %v, want [prod Prod] (names are case-sensitive everywhere)", got)
+	}
+}
+
+func TestOriginLookupPlatformSemantics(t *testing.T) {
+	m := map[string]string{"Token": "local"}
+	got := originLookup(m, "TOKEN")
+	if runtime.GOOS == "windows" {
+		if got != "local" {
+			t.Fatalf("windows originLookup = %q, want local", got)
+		}
+		return
+	}
+	if got != "" {
+		t.Fatalf("posix originLookup = %q, want empty", got)
 	}
 }

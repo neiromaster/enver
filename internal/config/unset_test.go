@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -325,5 +326,32 @@ func TestWriteProfileUnsetRoundTrip(t *testing.T) {
 	}
 	if s := string(got); strings.Contains(s, "unset") {
 		t.Fatalf("empty Unsets did not clear the field:\n%s", s)
+	}
+}
+
+// TestUnsetCoversBothSpellingsWindows pins the all-variants deletion: with
+// both spellings authored (the shape that regressed under first-match
+// removal), an unset of either spelling must leave nothing behind on
+// Windows, while POSIX keeps the unpicked spelling a distinct variable.
+func TestUnsetCoversBothSpellings(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{"p": {
+		Env:   map[string]string{"PATH": "/bin", "Path": "/win"},
+		Unset: Unsets{"Path"},
+	}}}
+	r, err := cfg.ResolveProfile("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if len(r.Env) != 0 {
+			t.Fatalf("windows env = %v, want empty — deleting one spelling must take every case-variant", r.Env)
+		}
+		return
+	}
+	if r.Env["PATH"] != "/bin" {
+		t.Fatalf("posix env = %v, want PATH intact (distinct variable)", r.Env)
+	}
+	if _, ok := r.Env["Path"]; ok {
+		t.Fatalf("posix env = %v, want Path deleted by its own unset", r.Env)
 	}
 }
