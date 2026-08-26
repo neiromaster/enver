@@ -35,9 +35,9 @@ profiles:
     env:
       ANTHROPIC_BASE_URL: http://localhost:8082
 
-  # Inherit from `anth`, but strip the API key from the child process entirely
-  # (even if it is exported in the shell). The `unset` list unions down the chain
-  # and wins over a later re-definition of the key.
+  # Inherit from `anth`, but suppress the API key: enver will not set it from
+  # the config. Anything your shell already exports passes through untouched,
+  # and a layer or profile defined later may still introduce the key anew.
   bare:
     extends: anth
     unset: [ANTHROPIC_API_KEY]

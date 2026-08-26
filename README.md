@@ -108,7 +108,7 @@ profiles:
 
 Merge rules: `default` is overridden when set; profiles union; per-profile env
 keys are overridden per-key; `extends` lists merge as `[global…, local…]`, so a
-local parent wins over a global parent on a shared key.
+local parent takes priority over a global parent on a shared key.
 
 ### Inheriting from multiple profiles
 
@@ -140,7 +140,7 @@ not warn on overlaps.
 several by editing the YAML (`extends: [a, b]`) or via
 `enver import <file> <name> --extends a,b`.
 
-### Removing variables (`unset`)
+### Suppressing variables (`unset`)
 
 Inheritance is additive — a child can override an inherited key but not remove
 it. A profile can also list keys enver must not set in the resolved
@@ -167,14 +167,18 @@ load, at every write boundary, and at TUI input time.
 does not set is simply absent from the resolved env, so a reference to it
 expands to whatever the shell exports — matching what the child process gets.
 
-Unsets union across layers (global and local both apply) and the closest
-mention of a key wins: a profile's own unset strips a parent's definition, and
-a closer redefinition overrides an ancestor's unset. Author `unset` in YAML
-like multi-parent `extends` — a single name or a list, never a mapping;
-`enver validate` flags an `unset` naming a key the same profile also sets in
-the same layer's env (`contradictory-unset` — a local unset fencing a global
-definition is the intended cross-layer pattern). On Windows, where env names
-are case-insensitive, unset matching is case-insensitive too.
+Unsets apply where they are written, never inherited forward: each copy of a
+profile applies its own unset at its turn — the global file's copy first, the
+cwd file's second — so a key the later copy defines survives an earlier copy's
+unset. Down an extends chain the same rule works branch-by-branch: a profile's
+own unset strips what its ancestors supplied, while a sibling parent listed
+alongside contributes fresh values regardless of unsets inside the other
+parent's branch. Author `unset` in YAML like multi-parent `extends` — a single
+name or a list, never a mapping; `enver validate` flags an `unset` naming a
+key the same profile also sets in the same layer's env (`contradictory-unset`;
+a cross-layer pair — say a local unset suppressing a global definition —
+resolves by ordering instead and draws no warning). On Windows, where env
+names are case-insensitive, unset matching is case-insensitive too.
 
 ## Creating profiles interactively
 
