@@ -123,3 +123,31 @@ func TestEncryptFileJoinsFileWideSameSaltEra(t *testing.T) {
 		t.Fatalf("file must stay one era for passphrase recovery: %v", err)
 	}
 }
+
+// TestDecryptFileWrongKeyActionableError pins the pre-verify contract: a key
+// that cannot read the target profile's values fails once, naming the
+// recovery path, instead of a per-value wrong-key error mid-run. The advised
+// remedy must be executable even when a stale key cache blocks plain decrypt —
+// keygen --force with the original passphrase installs the matching key.
+func TestDecryptFileWrongKeyActionableError(t *testing.T) {
+	keyA := make([]byte, 32)
+	keyB := make([]byte, 32)
+	keyB[0] = 1
+	salt := []byte("aaaaaaaaaaaaaaaa")
+	enc, err := crypto.EncryptValue("v", keyA, salt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = DecryptFile(path, keyB, "")
+	if err == nil || !strings.Contains(err.Error(), "keygen --force") {
+		t.Fatalf("err = %v, want wrong-key error naming the keygen --force remedy", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), enc) {
+		t.Fatal("a refused decrypt must not rewrite the file")
+	}
+}

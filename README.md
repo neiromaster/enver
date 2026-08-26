@@ -320,8 +320,8 @@ upgrade, re-encrypt the whole file (recovery derives the key from the first
 value; a file mixing parameter eras only partially decrypts). Values with
 other `enc:` prefixes (older formats) are rejected with an error, in every
 profile. `enver encrypt` refuses to write values under a key whose salt differs
-from the encrypted values already present in the profiles it touches — decrypt
-with the matching key first; targeting one profile is not blocked by stranded
+from the encrypted values already present in the profiles it touches — install
+the matching key first (keygen --force with the original passphrase, or restore its key file; decrypt pre-checks the key and names the same remedy); targeting one profile is not blocked by stranded
 different-key values in profiles you are not touching. New values join the KDF-parameter era of same-salt values anywhere in the file, so a per-profile encrypt cannot split the file into two eras under one passphrase.
 
 At runtime `enver x <profile> -- <command>` **transparently decrypts** with no

@@ -127,7 +127,7 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	}
 	fileSalt, fileParams, _ := scan.Result()
 	if scan.Found() && !bytes.Equal(fileSalt, salt) {
-		return 0, fmt.Errorf("existing encrypted values in %s use a different key; run `enver decrypt` with the matching key first, then re-encrypt", path)
+		return 0, fmt.Errorf("existing encrypted values in %s use a different key; install the matching key (`enver keygen --force` with the passphrase that encrypted them, or restore their key file), then re-encrypt", path)
 	}
 	params := crypto.CurrentParams
 	if scan.Found() {
@@ -177,9 +177,7 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	return count, os.WriteFile(path, out, 0o644)
 }
 
-// DecryptFile reverses EncryptFile for the encrypted values it finds. Foreign
-// enc: values fail loudly in every profile, filtered or not. Returns the
-// count of decrypted values.
+// DecryptFile reverses EncryptFile for the encrypted values it finds. The key is pre-verified against the first encrypted value in the target profiles, so a wrong key fails once with the recovery path instead of mid-run. Foreign enc: values fail loudly in every profile, filtered or not. Returns the count of decrypted values.
 func DecryptFile(path string, key []byte, profile string) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
@@ -197,6 +195,20 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 		return nil
 	}); err != nil {
 		return 0, err
+	}
+	// The key is verified against the first encrypted value in the target
+	// profiles before anything is decrypted: a wrong key fails once with the
+	// recovery path in the message, not per value mid-run. Stranded values in
+	// profiles this run does not touch stay out of scope, mirroring EncryptFile.
+	var verify crypto.SaltScan
+	if err := forEachEnvValue(pm, profile, verify.Add); err != nil {
+		return 0, err
+	}
+	if verify.Found() {
+		_, _, sample := verify.Result()
+		if _, derr := crypto.DecryptValue(sample, key); derr != nil {
+			return 0, fmt.Errorf("the key does not decrypt the existing values in %s; install the matching key (`enver keygen --force` with the passphrase that encrypted them, or restore their key file), then retry", path)
+		}
 	}
 	count := 0
 	for i := 0; i+1 < len(pm.Content); i += 2 {
