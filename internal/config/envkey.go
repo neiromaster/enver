@@ -61,3 +61,24 @@ func unsetsHasKey(unsets []string, key string) bool {
 	}
 	return false
 }
+
+// ValidEnvKey reports whether k is a name enver accepts for an env key or an
+// unset entry: [A-Za-z_][A-Za-z0-9_]* — the identifier rule the dotenv
+// parser has always enforced on import. Names reach eval'd export lines and
+// child environments unquoted, so a looser rule is code execution, and one
+// rule everywhere keeps hand-authored YAML and imported .env files in the
+// same namespace.
+func ValidEnvKey(k string) bool {
+	if k == "" || !envKeyStart(k[0]) {
+		return false
+	}
+	for i := 1; i < len(k); i++ {
+		if !envKeyPart(k[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func envKeyStart(c byte) bool { return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') }
+func envKeyPart(c byte) bool  { return envKeyStart(c) || (c >= '0' && c <= '9') }

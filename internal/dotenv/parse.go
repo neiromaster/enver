@@ -1,6 +1,10 @@
 package dotenv
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/neiromaster/enver/internal/config"
+)
 
 // Entry is one parsed KEY=VALUE pair with the comment block that immediately
 // preceded it (lines joined with newlines), if any.
@@ -10,20 +14,7 @@ type Entry struct {
 	Comment string
 }
 
-func keyStart(c byte) bool { return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') }
-func keyPart(c byte) bool  { return keyStart(c) || (c >= '0' && c <= '9') }
-
-func validKey(k string) bool {
-	if k == "" || !keyStart(k[0]) {
-		return false
-	}
-	for i := 0; i < len(k); i++ {
-		if !keyPart(k[i]) {
-			return false
-		}
-	}
-	return true
-}
+func validKey(k string) bool { return config.ValidEnvKey(k) }
 
 type parseError struct{ msg string }
 

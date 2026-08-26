@@ -158,7 +158,7 @@ drop it) **and** from the child process environment — even when the var is
 already exported in your shell; that is its point, and `enver x bare -- claude`
 runs with the key gone. `export` emits the matching strip lines (`unset K` in
 bash, `set -e K` in fish, `Remove-Item Env:K` in PowerShell), so
-`eval "$(enver export bare)"` removes the key from the current shell too.
+`eval "$(enver export bare)"` removes the key from the current shell too. Env key and unset names must be valid identifiers (`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies): names ride unquoted inside eval'd export lines, so enver refuses anything looser at config load.
 `$VAR` interpolation does not see unset keys: a fenced key contributes nothing
 when another value references it, instead of leaking the shell's live value.
 

@@ -49,6 +49,9 @@ func removeKey(mapping *yaml.Node, key string) {
 // entry; a key with no comment is written with no comment. Creates the file
 // (and parent dirs) if absent.
 func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) error {
+	if err := checkProfileEnvNames(name, p); err != nil {
+		return err
+	}
 	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err

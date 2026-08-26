@@ -62,6 +62,9 @@ func setScalar(mapping *yaml.Node, key, val string) {
 // removes the key, clearing it (mirrors WriteProfile), so callers like add and
 // duplicate honor an explicit (none) choice.
 func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) error {
+	if err := checkProfileEnvNames(name, p); err != nil {
+		return err
+	}
 	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err

@@ -779,3 +779,19 @@ func TestDecryptFileRejectsForeignEnc(t *testing.T) {
 		t.Fatalf("n = %d, want 0", n)
 	}
 }
+
+func TestLoadRejectsInvalidEnvNames(t *testing.T) {
+	for name, body := range map[string]string{
+		"env key":           "profiles:\n  p:\n    env:\n      K; touch /tmp/pwned: v\n",
+		"unset":             "profiles:\n  p:\n    unset: [\"K; touch /tmp/pwned\"]\n",
+		"leading digit key": "profiles:\n  p:\n    env:\n      1KEY: v\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadFile(path); err == nil {
+			t.Errorf("%s: load must reject invalid names loudly", name)
+		}
+	}
+}

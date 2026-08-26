@@ -182,3 +182,19 @@ profiles:
 		t.Fatalf("unrelated default lost:\n%s", s)
 	}
 }
+
+func TestWriteProfileRejectsInvalidNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"OK": "1"}}, false, false); err != nil {
+		t.Fatalf("valid names must write: %v", err)
+	}
+	if err := WriteProfile(path, "p", Profile{Unset: []string{"K; x"}}, false, false); err == nil {
+		t.Error("WriteProfile must reject an invalid unset entry")
+	}
+	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"BAD-KEY": "1"}}, false, false); err == nil {
+		t.Error("UpsertProfile must reject an invalid env key")
+	}
+	if _, err := LoadFile(path); err != nil {
+		t.Fatalf("the earlier valid write must have left a loadable file: %v", err)
+	}
+}

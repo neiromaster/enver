@@ -102,12 +102,44 @@ func load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return c, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if err := checkEnvNames(c); err != nil {
+		return c, fmt.Errorf("parse %s: %w", path, err)
+	}
 	return c, nil
 }
 
 // LoadFile parses one YAML config file; a missing file yields an empty Config.
 func LoadFile(path string) (Config, error) {
 	return load(path)
+}
+
+// checkEnvNames rejects invalid env key names — hand-authored in YAML — for
+// env keys and unset entries alike. Names reach eval'd export lines and child
+// environments unquoted, so a name with shell metacharacters is code
+// execution, not a typo to carry silently.
+func checkEnvNames(c Config) error {
+	for _, name := range c.ProfileNames() {
+		if err := checkProfileEnvNames(name, c.Profiles[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkProfileEnvNames is the write-side twin of the load-time check: no
+// invalid name is ever written, whatever authored the Profile struct.
+func checkProfileEnvNames(name string, p Profile) error {
+	for _, k := range sortedEnvKeys(p.Env) {
+		if !ValidEnvKey(k) {
+			return fmt.Errorf("profile %q defines invalid env key name %q (want [A-Za-z_][A-Za-z0-9_]*)", name, k)
+		}
+	}
+	for _, u := range p.Unset {
+		if !ValidEnvKey(u) {
+			return fmt.Errorf("profile %q unsets invalid env key name %q (want [A-Za-z_][A-Za-z0-9_]*)", name, u)
+		}
+	}
+	return nil
 }
 
 const LocalFilename = ".enver.yaml"
