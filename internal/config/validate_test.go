@@ -161,9 +161,12 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 	}{
 		{name: "local override of a live global key", gEnv: true, lEnv: true},
 		{name: "local unset strips a global key (the feature)", gEnv: true, lUnset: true},
-		{name: "local definition overrides a global fence (closest wins)", gUnset: true, lEnv: true},
+		{name: "local definition survives a global-layer unset (closest wins)", gUnset: true, lEnv: true},
+		// Consumption at the fold applies a same-layer fence to its own copy, so
+		// the merged view collapses to empty; validatecmd still surfaces the raw
+		// contradiction through its ValidateGlobal pass.
 		{name: "global defines and unsets its own key", gEnv: true, gUnset: true,
-			wantMerged:   []string{"contradictory-unset:TOKEN"},
+			wantMerged:   []string{"empty:"},
 			wantIsolated: []string{"contradictory-unset:TOKEN"}},
 		{name: "local defines and unsets its own key", lEnv: true, lUnset: true,
 			wantMerged:   []string{"contradictory-unset:TOKEN"},

@@ -74,16 +74,98 @@ func TestUnsetYAMLScalarAndSequence(t *testing.T) {
 	}
 }
 
-func TestMergeUnsetsUnion(t *testing.T) {
+// TestMergeCrossLayerDefineBeatsLayerUnset pins the layer rule: the global
+// copy applies its own unset at its merge point, so the cwd copy defining the
+// key afterwards wins instead of dying silently.
+func TestMergeCrossLayerDefineBeatsLayerUnset(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"TOKEN"}}}}
+	local := Config{Profiles: map[string]Profile{"dev": {Env: map[string]string{"TOKEN": "v"}}}}
+	r, err := Merge(global, local).ResolveProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Env["TOKEN"] != "v" {
+		t.Fatalf("TOKEN = %q (%v), want v: the defining layer applies after the unsetting one", r.Env["TOKEN"], r.Env)
+	}
+}
+
+func TestMergeConsumesInheritedUnsetsBeforeOverride(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"dev": {Env: map[string]string{"MODEL": "m", "STALE": "s"}, Unset: Unsets{"STALE"}},
+	}}
+	local := Config{Profiles: map[string]Profile{
+		"dev":  {Env: map[string]string{"TOKEN": "t"}},
+		"leaf": {Extends: Extends{"dev"}},
+	}}
+	cfg := Merge(global, local)
+	r, err := cfg.ResolveProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env["STALE"]; ok {
+		t.Fatalf("STALE survived: %v — the defining layer's own unset must apply to it", r.Env)
+	}
+	if r.Env["MODEL"] != "m" || r.Env["TOKEN"] != "t" {
+		t.Fatalf("env = %v, want MODEL=m TOKEN=t", r.Env)
+	}
+	lp, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lp.Env["TOKEN"] != "t" {
+		t.Fatalf("leaf env = %v: the layered dev contributions must carry down the chain", lp.Env)
+	}
+	if _, ok := lp.Env["STALE"]; ok {
+		t.Fatalf("leaf env = %v: a consumed unset must not resurface downstream", lp.Env)
+	}
+}
+
+// TestMergeUnsetListIsTheOverridingLayers replaces the old union contract:
+// inherited unsets were applied during the fold, so the merged profile's list
+// is the overriding layer's own.
+func TestMergeUnsetListIsTheOverridingLayers(t *testing.T) {
 	base := Config{Profiles: map[string]Profile{
 		"p": {Unset: Unsets{"A"}, Env: map[string]string{"K": "base"}},
 	}}
-	over := Config{Profiles: map[string]Profile{
-		"p": {Unset: Unsets{"B", "C"}, Env: map[string]string{"K": "over"}},
+	overNoUnset := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"K": "over"}}}}
+	if u := Merge(base, overNoUnset).Profiles["p"].Unset; len(u) != 0 {
+		t.Fatalf("merged unset = %v, want none: the inherited list was consumed, not carried", u)
+	}
+	baseNoUnset := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"K": "base"}}}}
+	over := Config{Profiles: map[string]Profile{"p": {Unset: Unsets{"B", "C"}}}}
+	if u := Merge(baseNoUnset, over).Profiles["p"].Unset; !sliceEq(u, []string{"B", "C"}) {
+		t.Fatalf("merged unset = %v, want [B C]", u)
+	}
+}
+
+// TestResolveSiblingParentUnsetStaysInItsOwnBranch pins multi-parent
+// composition: an unset removes what came up its OWN branch (b alone is
+// clean), while a sibling parent supplies fresh values into the child
+// regardless of that unset — closest mention at equal distance is the define.
+func TestResolveSiblingParentUnsetStaysInItsOwnBranch(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"a": {Env: map[string]string{"K": "v"}},
+		"b": {Extends: Extends{"a"}, Unset: Unsets{"K"}},
 	}}
-	u := Merge(base, over).Profiles["p"].Unset
-	if !sliceEq(u, []string{"A", "B", "C"}) {
-		t.Fatalf("merged unset = %v, want [A B C]", u)
+	solo, err := cfg.ResolveProfile("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := solo.Env["K"]; ok {
+		t.Fatalf("b alone = %v, want K stripped along its own branch", solo.Env)
+	}
+	for _, parents := range []Extends{{"a", "b"}, {"b", "a"}} {
+		child := Config{Profiles: map[string]Profile{"c": {Extends: parents}}}
+		for name, p := range cfg.Profiles {
+			child.Profiles[name] = p
+		}
+		r, err := child.ResolveProfile("c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Env["K"] != "v" {
+			t.Fatalf("extends %v: K = %q (%v), want v — a sibling parent defines afresh", parents, r.Env["K"], r.Env)
+		}
 	}
 }
 

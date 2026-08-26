@@ -169,9 +169,14 @@ func findLocal() []string {
 
 // Merge folds override into base: override wins for default and per-key env;
 // extends concatenates as [base…, override…] deduped, so local mixins compose
-// with rather than replace global ones; unset lists union, deduped. Merge
-// folds override into base's maps in place; the returned config shares state
-// with base, which must not be used as the pre-merge view afterwards.
+// with rather than replace global ones. Unsets are layer-scoped, not unioned:
+// folding a shared profile consumes the inherited copy's unsets against the
+// entries gathered above it (env and comments), and the overriding copy may
+// add keys back — closest mention across layers wins. The merged profile
+// therefore carries only the overriding layer's unset list, and UnsetOrigins
+// attributes exactly those entries. Merge folds override into base's maps in
+// place; the returned config shares state with base, which must not be used
+// as the pre-merge view afterwards.
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
@@ -182,8 +187,16 @@ func Merge(base, override Config) Config {
 	}
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
+		// Layer-scoped unsets: this inherited copy applies its own list at
+		// its merge point — stripping its entries before the override adds
+		// anything — so an override refilling a key beats the inherited
+		// unset, and the inherited list never rides forward.
+		for _, u := range bp.Unset {
+			deleteEnvKey(bp.Env, u)
+			deleteEnvKey(bp.Comments, u)
+		}
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
-		bp.Unset = mergeUniq(bp.Unset, p.Unset)
+		bp.Unset = appendUniq(slices.Clone(p.Unset))
 		for _, u := range p.Unset {
 			if out.UnsetOrigins == nil {
 				out.UnsetOrigins = map[string]map[string]string{}
