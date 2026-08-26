@@ -79,7 +79,8 @@ func Validate(cfg Config) []Issue {
 // and the author should hear about it. Keys unset by the profile itself are
 // skipped; contradictory-unset already covers them. A key an ancestor defines
 // and this profile unsets is the feature working as intended and is not
-// reported.
+// reported. A definition fenced by the other layer's unset is reported too —
+// the local layer's, when the global layer's copy of the profile unsets the key.
 func shadowedUnsets(cfg Config, name string) []Issue {
 	p := cfg.Profiles[name]
 	if len(p.Env) == 0 {
@@ -95,6 +96,20 @@ func shadowedUnsets(cfg Config, name string) []Issue {
 	var issues []Issue
 	for _, k := range sortedEnvKeys(p.Env) {
 		if UnsetsHasKey(p.Unset, k) {
+			// Same-layer pairs are contradictory-unset's domain, and a local
+			// unset stripping a global key is the feature working as intended.
+			// The one dead combination left is a local definition fenced by
+			// the global layer's unset: nothing else reports it, so it is
+			// reported here.
+			if cfg.unsetLayer(name, k) == LayerGlobal && cfg.layerOf(name, k) == LayerLocal {
+				issues = append(issues, Issue{
+					Profile:  name,
+					Kind:     "unset-shadowed",
+					Severity: "warning",
+					Target:   k,
+					Detail:   "the global layer",
+				})
+			}
 			continue
 		}
 		if hasEnvKey(r.Env, k) {

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -134,4 +135,98 @@ func hasIssue(issues []Issue, kind string) bool {
 		}
 	}
 	return false
+}
+
+// TestValidateUnsetLayerMatrix pins every layer × direction cell of the
+// unset rules in one table: what the merged view reports, and what the
+// isolated global file reports (enver validate runs both passes).
+func TestValidateUnsetLayerMatrix(t *testing.T) {
+	const k = "TOKEN"
+	prof := func(env, unset bool) Profile {
+		var p Profile
+		if env {
+			p.Env = map[string]string{k: "v"}
+		}
+		if unset {
+			p.Unset = []string{k}
+		}
+		return p
+	}
+	cases := []struct {
+		name         string
+		gEnv, gUnset bool
+		lEnv, lUnset bool
+		wantMerged   []string
+		wantIsolated []string
+	}{
+		{name: "local override of a live global key", gEnv: true, lEnv: true},
+		{name: "local unset strips a global key (the feature)", gEnv: true, lUnset: true},
+		{name: "global fence kills a local definition", gUnset: true, lEnv: true,
+			wantMerged: []string{"unset-shadowed:TOKEN"}},
+		{name: "global defines and unsets its own key", gEnv: true, gUnset: true,
+			wantMerged:   []string{"contradictory-unset:TOKEN"},
+			wantIsolated: []string{"contradictory-unset:TOKEN"}},
+		{name: "local defines and unsets its own key", lEnv: true, lUnset: true,
+			wantMerged:   []string{"contradictory-unset:TOKEN"},
+			wantIsolated: []string{"empty:"}},
+		{name: "local unset launders a global contradiction in the merged view", gEnv: true, gUnset: true, lUnset: true,
+			wantIsolated: []string{"contradictory-unset:TOKEN"}},
+		{name: "local define and unset beside a global fence", gUnset: true, lEnv: true, lUnset: true,
+			wantMerged: []string{"contradictory-unset:TOKEN"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			global := Config{Profiles: map[string]Profile{"dev": prof(tc.gEnv, tc.gUnset)}}
+			local := Config{Profiles: map[string]Profile{"dev": prof(tc.lEnv, tc.lUnset)}}
+			collect := func(cfg Config) []string {
+				var got []string
+				for _, is := range Validate(cfg) {
+					got = append(got, is.Kind+":"+is.Target)
+				}
+				return got
+			}
+			isolated := collect(global) // before Merge: Merge overwrites base.Profiles in place
+			check := func(got, want []string) {
+				t.Helper()
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("issues = %v, want %v", got, want)
+				}
+			}
+			check(collect(Merge(global, local)), tc.wantMerged)
+			check(isolated, tc.wantIsolated)
+		})
+	}
+}
+
+// TestValidateUnsetChainMatrix pins the extends-chain direction of the same
+// rules inside one layer: a parent fence kills a child definition (reported,
+// declarer named), and a child unset stripping a parent key is the feature
+// (silent).
+func TestValidateUnsetChainMatrix(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "v"}, Unset: []string{"TOKEN"}},
+		"child": {
+			Extends: Extends{"base"},
+			Env:     map[string]string{"TOKEN": "mine"},
+		},
+	}}
+	var got []Issue
+	for _, is := range Validate(cfg) {
+		if is.Profile == "child" {
+			got = append(got, is)
+		}
+	}
+	if len(got) != 1 || got[0].Kind != "unset-shadowed" || got[0].Target != "TOKEN" || got[0].Detail != "base" {
+		t.Fatalf("child issues = %+v, want one unset-shadowed TOKEN by base", got)
+	}
+
+	feature := Config{Profiles: map[string]Profile{
+		"base":  {Env: map[string]string{"TOKEN": "v"}},
+		"child": {Extends: Extends{"base"}, Unset: []string{"TOKEN"}},
+	}}
+	for _, is := range Validate(feature) {
+		if is.Profile == "child" {
+			t.Fatalf("child unsetting a parent key is the feature, reported as %+v", is)
+		}
+	}
 }
