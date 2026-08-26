@@ -69,6 +69,11 @@ type Config struct {
 	Default  string                       `yaml:"default"`
 	Profiles map[string]Profile           `yaml:"profiles"`
 	Origins  map[string]map[string]string `yaml:"-"` // profile → env key → layer
+	// UnsetOrigins records, per profile and unset entry, which layer
+	// contributed the entry; like Origins it is filled by Merge and never
+	// serialized. Attribution is by exact spelling: Merge records the override
+	// layer's entries under their own spelling.
+	UnsetOrigins map[string]map[string]string `yaml:"-"`
 }
 
 // GlobalPath resolves the user-level config location:
@@ -176,6 +181,17 @@ func Merge(base, override Config) Config {
 		bp := out.Profiles[name]
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
 		bp.Unset = mergeUniq(bp.Unset, p.Unset)
+		for _, u := range p.Unset {
+			if out.UnsetOrigins == nil {
+				out.UnsetOrigins = map[string]map[string]string{}
+			}
+			m := out.UnsetOrigins[name]
+			if m == nil {
+				m = map[string]string{}
+				out.UnsetOrigins[name] = m
+			}
+			m[u] = LayerLocal
+		}
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
@@ -365,6 +381,15 @@ func appendUniq(dst []string, add ...string) []string {
 // else is global by default.
 func (c Config) layerOf(profile, key string) string {
 	if l := c.Origins[profile][key]; l != "" {
+		return l
+	}
+	return LayerGlobal
+}
+
+// unsetLayer reports which layer contributed unset entry u to profile's merged
+// unset list; everything the merge did not record is global by default.
+func (c Config) unsetLayer(profile, key string) string {
+	if l := c.UnsetOrigins[profile][key]; l != "" {
 		return l
 	}
 	return LayerGlobal

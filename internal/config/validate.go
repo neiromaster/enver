@@ -58,9 +58,16 @@ func Validate(cfg Config) []Issue {
 			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
 		}
 		for _, u := range p.Unset {
-			if hasEnvKey(p.Env, u) {
-				issues = append(issues, Issue{Profile: n, Kind: "contradictory-unset", Severity: "warning", Target: u})
+			if !hasEnvKey(p.Env, u) {
+				continue
 			}
+			// A definition and an unset from different layers is the documented
+			// cross-layer fence (a local unset stripping a shared global key),
+			// not a contradiction; only same-layer pairs misconfigure one file.
+			if cfg.unsetLayer(n, u) != cfg.layerOf(n, u) {
+				continue
+			}
+			issues = append(issues, Issue{Profile: n, Kind: "contradictory-unset", Severity: "warning", Target: u})
 		}
 		issues = append(issues, shadowedUnsets(cfg, n)...)
 	}

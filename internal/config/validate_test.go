@@ -96,3 +96,42 @@ func TestValidateGlobalIsolated(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateCrossLayerFenceIsNotContradictory pins the layer rule: a local
+// unset fencing a global definition is the documented pattern; only a
+// definition and unset from the same layer contradict one file's profile.
+func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{"p": {
+		Env: map[string]string{"A": "from-global", "B": "keep"},
+	}}}
+	local := Config{Profiles: map[string]Profile{"p": {Unset: []string{"A"}}}}
+	for _, is := range Validate(Merge(global, local)) {
+		if is.Profile == "p" {
+			t.Errorf("cross-layer fence reported as %s, want silence:\n%v", is.Kind, is)
+		}
+	}
+
+	// Same-layer pairs still warn: single file first…
+	sameFile := Config{Profiles: map[string]Profile{"p": {
+		Env: map[string]string{"A": "1"}, Unset: []string{"A"},
+	}}}
+	if !hasIssue(Validate(sameFile), "contradictory-unset") {
+		t.Error("same-profile define+unset must stay a contradictory-unset warning")
+	}
+	// …and a local layer that both defines and unsets the key.
+	localBoth := Config{Profiles: map[string]Profile{"p": {
+		Env: map[string]string{"A": "local"}, Unset: []string{"A"},
+	}}}
+	if !hasIssue(Validate(Merge(global, localBoth)), "contradictory-unset") {
+		t.Error("a local define+unset pair must stay a contradictory-unset warning")
+	}
+}
+
+func hasIssue(issues []Issue, kind string) bool {
+	for _, is := range issues {
+		if is.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
