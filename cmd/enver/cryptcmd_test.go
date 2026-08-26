@@ -304,6 +304,60 @@ func TestKeygenReusesParamsFromConfig(t *testing.T) {
 	}
 }
 
+func TestKeygenVerifiesPassphraseAgainstConfig(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+
+	// Cheap params keep the derivation fast; the format is what matters.
+	params := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	salt := []byte("0123456789abcdef")
+	right, err := crypto.DeriveKey("right-pass", salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", right, salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := config.GlobalPath(globalFlags.configPath)
+	if err := os.WriteFile(global, []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPassword := uiPassword
+	oldInteractive := uiInteractive
+	uiInteractive = func() bool { return true }
+	t.Cleanup(func() {
+		uiPassword = oldPassword
+		uiInteractive = oldInteractive
+	})
+
+	// A mistyped passphrase derives the wrong key for the reused salt: keygen
+	// must refuse instead of caching a key the values never open with.
+	uiPassword = func(prompt string) (string, error) { return "wrong-pass", nil }
+	if err := keygenCmd.RunE(keygenCmd, nil); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("keygen with wrong passphrase: err=%v, want a mismatch error", err)
+	}
+	if _, err := os.Stat(globalFlags.keyPath); !os.IsNotExist(err) {
+		t.Fatal("mismatched passphrase must not write a key file")
+	}
+
+	uiPassword = func(prompt string) (string, error) { return "right-pass", nil }
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("keygen with right passphrase: %v", err)
+	}
+	key, _, err := crypto.LoadKey(globalFlags.keyPath)
+	if err != nil {
+		t.Fatalf("load written key: %v", err)
+	}
+	plain, err := crypto.DecryptValue(enc, key)
+	if err != nil || plain != "secret" {
+		t.Fatalf("decrypt with written key = (%q, %v), want (secret, nil)", plain, err)
+	}
+}
+
 func TestKeygenPath(t *testing.T) {
 	saveGlobalFlags(t)
 	globalFlags.keyPath = ""

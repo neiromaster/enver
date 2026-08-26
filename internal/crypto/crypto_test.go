@@ -236,6 +236,33 @@ func TestSaltScan(t *testing.T) {
 	}
 }
 
+func TestCheckReadable(t *testing.T) {
+	key := make([]byte, 32)
+	salt := make([]byte, SaltSize)
+	enc, err := EncryptValue("secret", key, salt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"plain", "", enc} {
+		if err := CheckReadable(v); err != nil {
+			t.Errorf("CheckReadable(%q) = %v, want nil", v, err)
+		}
+	}
+	// Truncating a valid value leaves too little payload to hold a salt.
+	truncated := enc[:30]
+	if err := CheckReadable(truncated); err == nil {
+		t.Errorf("CheckReadable(truncated) = nil, want a parse error")
+	}
+	// A corrupted base64 tail fails decode.
+	corrupted := enc[:len(enc)-1] + "!"
+	if err := CheckReadable(corrupted); err == nil {
+		t.Errorf("CheckReadable(corrupted) = nil, want a decode error")
+	}
+	if err := CheckReadable("enc:v2:YWJj"); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Errorf("CheckReadable(enc:v2) = %v, want unsupported encrypted value", err)
+	}
+}
+
 func TestIsEncrypted(t *testing.T) {
 	if IsEncrypted("sk-ant-xxx") {
 		t.Fatal("plain value reported as encrypted")

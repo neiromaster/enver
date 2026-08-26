@@ -89,6 +89,16 @@ var keygenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// The key reuses the configs' salt, so a passphrase that cannot decrypt
+		// the sample is not the one the existing values were encrypted with. A
+		// --force overwrite of a different key already strands them through the
+		// confirm gate below; every other path must refuse rather than cache a
+		// key no value in the configs opens with.
+		if scan.hasEncrypted && !risk {
+			if _, derr := crypto.DecryptValue(scan.sample, key); derr != nil {
+				return fmt.Errorf("passphrase does not match the encrypted values in the configs; they stay tied to the passphrase that encrypted them — use it, or remove those values first")
+			}
+		}
 		if risk {
 			ok, cerr := uiConfirm(
 				"This passphrase derives a key different from the current one. Overwriting strands existing encrypted values (run `enver decrypt` with the old key first). Overwrite anyway?",
@@ -148,20 +158,23 @@ func keygenRisk(force bool, path string, newKey []byte, hasEncrypted func() (boo
 }
 
 // configCryptScan is the single-pass result of scanning both config layers:
-// whether any encrypted value exists and the first enc:v3 salt and KDF params.
+// whether any encrypted value exists and the first enc:v3 salt, KDF params,
+// and sample value.
 type configCryptScan struct {
 	hasEncrypted bool
 	salt         []byte
 	params       crypto.Argon2Params
+	sample       string
 }
 
 // scanConfigCrypt parses each config layer once, reporting whether any value
-// is encrypted (a new key would strand it) and the first enc:v3 salt and KDF
-// params (reused so a re-run with the same passphrase derives the same key).
-// Values from different eras — disagreeing salt or KDF params — are an error:
-// one passphrase cannot recover both. A corrupt layer is an error rather than
-// a silent skip: keygen must not overwrite a key while it cannot tell what
-// the configs hold.
+// is encrypted (a new key would strand it) and the first enc:v3 salt, KDF
+// params, and sample value (the salt and params are reused so a re-run with
+// the same passphrase derives the same key; the sample verifies the
+// passphrase against the values it must decrypt). Values from different eras
+// — disagreeing salt or KDF params — are an error: one passphrase cannot
+// recover both. A corrupt layer is an error rather than a silent skip: keygen
+// must not overwrite a key while it cannot tell what the configs hold.
 func scanConfigCrypt() (configCryptScan, error) {
 	var scan configCryptScan
 	var salts crypto.SaltScan
@@ -182,7 +195,7 @@ func scanConfigCrypt() (configCryptScan, error) {
 		}
 	}
 	if salts.Found() {
-		scan.salt, scan.params, _ = salts.Result()
+		scan.salt, scan.params, scan.sample = salts.Result()
 	}
 	return scan, nil
 }

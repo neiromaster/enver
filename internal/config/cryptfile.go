@@ -43,10 +43,13 @@ func envMapping(profileNode *yaml.Node) *yaml.Node {
 	return profileNode.Content[idx]
 }
 
-// forEachEnvValue calls fn for every scalar env value of every profile, in
-// file order, stopping at the first error.
-func forEachEnvValue(pm *yaml.Node, fn func(v string) error) error {
+// forEachEnvValue calls fn for every scalar env value of every profile (only
+// profile when non-empty), in file order, stopping at the first error.
+func forEachEnvValue(pm *yaml.Node, profile string, fn func(v string) error) error {
 	for i := 0; i+1 < len(pm.Content); i += 2 {
+		if profile != "" && pm.Content[i].Value != profile {
+			continue
+		}
 		env := envMapping(pm.Content[i+1])
 		if env == nil {
 			continue
@@ -69,12 +72,13 @@ func forEachEnvValue(pm *yaml.Node, fn func(v string) error) error {
 // to a single profile; empty means all. salt is shared by every value
 // encrypted in this run: passphrase recovery derives the key from the first
 // value in the file, so per-value salts would strand the rest. New values
-// carry the KDF params of the file's existing values (the header must describe
-// how the key in play was derived). A file whose existing encrypted values use
-// a different salt is refused before anything is written — encrypting would
-// mix two keys and strand the old values. Values this build cannot read
-// (foreign enc: prefixes, malformed enc:v3) fail loudly in every profile,
-// filtered or not. Returns the count of newly encrypted values.
+// carry the KDF params of the encrypted values already in the profiles being
+// written (the header must describe how the key in play was derived), and
+// those values using a different salt are refused before anything is written
+// — encrypting beside them would mix two keys and strand them. Values
+// stranded under other profiles do not block the write. Values this build
+// cannot read (foreign enc: prefixes, malformed enc:v3) fail loudly in every
+// profile, filtered or not. Returns the count of newly encrypted values.
 func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, error) {
 	root, err := loadNode(path)
 	if err != nil {
@@ -85,8 +89,11 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	if pm == nil {
 		return 0, nil
 	}
+	if err := forEachEnvValue(pm, "", crypto.CheckReadable); err != nil {
+		return 0, err
+	}
 	var scan crypto.SaltScan
-	if err := forEachEnvValue(pm, scan.Add); err != nil {
+	if err := forEachEnvValue(pm, profile, scan.Add); err != nil {
 		return 0, err
 	}
 	fileSalt, fileParams, _ := scan.Result()
@@ -150,7 +157,7 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	if pm == nil {
 		return 0, nil
 	}
-	if err := forEachEnvValue(pm, func(v string) error {
+	if err := forEachEnvValue(pm, "", func(v string) error {
 		if p := crypto.ForeignEncPrefix(v); p != "" {
 			return crypto.ForeignEncError(p)
 		}
@@ -211,7 +218,7 @@ func FirstSaltAndSample(path string) (salt []byte, p crypto.Argon2Params, sample
 		return nil, crypto.Argon2Params{}, "", nil
 	}
 	var scan crypto.SaltScan
-	if err := forEachEnvValue(pm, scan.Add); err != nil {
+	if err := forEachEnvValue(pm, "", scan.Add); err != nil {
 		return nil, crypto.Argon2Params{}, "", err
 	}
 	salt, p, sample = scan.Result()

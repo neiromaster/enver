@@ -265,6 +265,21 @@ func SaltFromValue(v string) ([]byte, Argon2Params, error) {
 	return raw[:saltSize], p, nil
 }
 
+// CheckReadable reports whether v is a value this build can read: not a
+// foreign enc: value, and a well-formed enc:v3 value when encrypted. Config
+// walkers call it file-wide so unreadable values fail loudly even in profiles
+// a filtered run would not touch.
+func CheckReadable(v string) error {
+	if p := ForeignEncPrefix(v); p != "" {
+		return ForeignEncError(p)
+	}
+	if !IsEncrypted(v) {
+		return nil
+	}
+	_, _, err := SaltFromValue(v)
+	return err
+}
+
 // SaltScan accumulates the salt, KDF parameters, and a sample value across
 // enc:v3 values for passphrase recovery. One passphrase-derived key serves the
 // whole config, so a value whose salt or parameters disagree with the first
@@ -279,8 +294,8 @@ type SaltScan struct {
 
 // Add records v when it is enc:v3. Plaintext values are ignored.
 func (s *SaltScan) Add(v string) error {
-	if p := ForeignEncPrefix(v); p != "" {
-		return ForeignEncError(p)
+	if err := CheckReadable(v); err != nil {
+		return err
 	}
 	if !IsEncrypted(v) {
 		return nil
