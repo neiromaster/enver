@@ -147,3 +147,74 @@ func TestRenderSummaryTruncatesValue(t *testing.T) {
 		t.Fatalf("expected truncated value, got %q", got)
 	}
 }
+
+func typeChars(m *envCardModel, s string) *envCardModel {
+	for _, c := range s {
+		m = updCard(m, tea.KeyPressMsg{Text: string(c)})
+	}
+	return m
+}
+
+func fillCard(key string) *envCardModel {
+	m := typeChars(newEnvCardModel(EnvEntry{}), key)
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Text: "V"})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	return m
+}
+
+func TestEnvCardSubmitRejectsInvalidKey(t *testing.T) {
+	for _, key := range []string{"FOO;", "A B", "1BAD", "  "} {
+		m := updCard(fillCard(key), tea.KeyPressMsg{Code: tea.KeyEnter})
+		if m.submitted {
+			t.Fatalf("key %q must not submit", key)
+		}
+		if m.cursor != 0 {
+			t.Fatalf("key %q: cursor = %d, want 0 back on the name field", key, m.cursor)
+		}
+		if !strings.Contains(stripAnsi(m.View().Content), "[A-Za-z_][A-Za-z0-9_]*") {
+			t.Fatalf("key %q: view must state the identifier rule, got:\n%s", key, stripAnsi(m.View().Content))
+		}
+	}
+}
+
+func TestEnvCardSubmitAcceptsAfterFix(t *testing.T) {
+	m := fillCard("FOO;")
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // refused
+	if m.submitted {
+		t.Fatal("setup: invalid key must not submit")
+	}
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyBackspace}) // remove ';'
+	m = updCard(m, tea.KeyPressMsg{Text: "X"})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("fixed key must submit")
+	}
+	if r := m.result(); r.Key != "FOOX" || r.Value != "V" {
+		t.Fatalf("result = %+v, want Key=FOOX Value=V", r)
+	}
+}
+
+func TestEnvCardSubmitTrimsName(t *testing.T) {
+	m := fillCard(" FOO ")
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("padded-but-valid name must submit")
+	}
+	if r := m.result(); r.Key != "FOO" {
+		t.Fatalf("key = %q, want trimmed FOO", r.Key)
+	}
+}
+
+func TestEnvCardCollectingSharesTheRule(t *testing.T) {
+	m := newCollectingEnvCardModel(EnvEntry{}, nil)
+	m = typeChars(m, "A;B")
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.submitted {
+		t.Fatal("collecting variant must refuse an invalid key too")
+	}
+}

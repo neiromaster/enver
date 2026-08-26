@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
+
+	"github.com/neiromaster/enver/internal/config"
 )
 
 type envCardModel struct {
@@ -17,6 +19,7 @@ type envCardModel struct {
 	submitted bool
 	canceled  bool
 	prior     []SummaryEntry
+	keyErr    bool
 }
 
 func newEnvCardModel(e EnvEntry) *envCardModel {
@@ -60,6 +63,21 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			if m.cursor == len(m.fields)-1 {
+				// One rule, enforced where the key is collected: the card
+				// never emits a key the write boundary would reject, so no
+				// caller needs a post-hoc check and a doomed session cannot
+				// accumulate. Blank still finishes via the name field above.
+				name := strings.TrimSpace(m.fields[0].Value())
+				if !config.ValidEnvKey(name) {
+					m.keyErr = true
+					for i := range m.fields {
+						m.fields[i].Blur()
+					}
+					m.cursor = 0
+					m.fields[0].Focus()
+					return m, nil
+				}
+				m.fields[0].SetValue(name)
 				m.submitted = true
 				return m, tea.Quit
 			}
@@ -72,6 +90,9 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.advance(1)
 			return m, nil
 		}
+	}
+	if m.cursor == 0 && !m.submitted && !m.canceled {
+		m.keyErr = false
 	}
 	var cmd tea.Cmd
 	m.fields[m.cursor], cmd = m.fields[m.cursor].Update(msg)
@@ -102,6 +123,11 @@ func (m *envCardModel) View() tea.View {
 	}
 	b.WriteString(strings.Join(blocks, "\n\n"))
 	b.WriteString("\n")
+	if m.keyErr {
+		b.WriteString("\n")
+		b.WriteString(m.theme.help.Render("invalid name: want [A-Za-z_][A-Za-z0-9_]* (blank finishes)"))
+		b.WriteString("\n")
+	}
 	b.WriteString(m.theme.help.Render("tab next · shift+tab prev · enter submit · blank name finishes · esc cancel"))
 	return tea.NewView(b.String())
 }
