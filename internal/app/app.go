@@ -58,7 +58,7 @@ func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 	}
 	if !hasEncrypted(r.Env) {
 		if !opts.NoExpand {
-			r.Env = varsubst.Expand(r.Env, osEnvWithout(r.Unsets))
+			r.Env = varsubst.Expand(r.Env, osEnvMap())
 		}
 		return r, nil
 	}
@@ -78,7 +78,7 @@ func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 		}
 	}
 	if !opts.NoExpand {
-		r.Env = varsubst.Expand(r.Env, osEnvWithout(r.Unsets))
+		r.Env = varsubst.Expand(r.Env, osEnvMap())
 	}
 	return r, nil
 }
@@ -103,7 +103,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), r.Env, r.Unsets), opts.Name, profile); code != 0 {
+	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), r.Env), opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil
@@ -262,16 +262,6 @@ func osEnvMap() map[string]string {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			m[k] = v
 		}
-	}
-	return m
-}
-
-// osEnvWithout snapshots the process environment minus the unsets: a fenced
-// key must not leak back into $VAR interpolation from the shell.
-func osEnvWithout(unsets []string) map[string]string {
-	m := osEnvMap()
-	for _, u := range unsets {
-		config.DeleteEnvKey(m, u)
 	}
 	return m
 }

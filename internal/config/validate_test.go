@@ -161,8 +161,7 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 	}{
 		{name: "local override of a live global key", gEnv: true, lEnv: true},
 		{name: "local unset strips a global key (the feature)", gEnv: true, lUnset: true},
-		{name: "global fence kills a local definition", gUnset: true, lEnv: true,
-			wantMerged: []string{"unset-shadowed:TOKEN"}},
+		{name: "local definition overrides a global fence (closest wins)", gUnset: true, lEnv: true},
 		{name: "global defines and unsets its own key", gEnv: true, gUnset: true,
 			wantMerged:   []string{"contradictory-unset:TOKEN"},
 			wantIsolated: []string{"contradictory-unset:TOKEN"}},
@@ -199,27 +198,11 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 }
 
 // TestValidateUnsetChainMatrix pins the extends-chain direction of the same
-// rules inside one layer: a parent fence kills a child definition (reported,
-// declarer named), and a child unset stripping a parent key is the feature
-// (silent).
+// rules inside one layer: a child unset stripping a parent key is the feature
+// (silent), and a child redefinition overriding an ancestor's unset is the
+// closest-wins feature too (silent). Only a same-profile define+unset pair is
+// a contradiction.
 func TestValidateUnsetChainMatrix(t *testing.T) {
-	cfg := Config{Profiles: map[string]Profile{
-		"base": {Env: map[string]string{"TOKEN": "v"}, Unset: []string{"TOKEN"}},
-		"child": {
-			Extends: Extends{"base"},
-			Env:     map[string]string{"TOKEN": "mine"},
-		},
-	}}
-	var got []Issue
-	for _, is := range Validate(cfg) {
-		if is.Profile == "child" {
-			got = append(got, is)
-		}
-	}
-	if len(got) != 1 || got[0].Kind != "unset-shadowed" || got[0].Target != "TOKEN" || got[0].Detail != "base" {
-		t.Fatalf("child issues = %+v, want one unset-shadowed TOKEN by base", got)
-	}
-
 	feature := Config{Profiles: map[string]Profile{
 		"base":  {Env: map[string]string{"TOKEN": "v"}},
 		"child": {Extends: Extends{"base"}, Unset: []string{"TOKEN"}},
@@ -227,6 +210,16 @@ func TestValidateUnsetChainMatrix(t *testing.T) {
 	for _, is := range Validate(feature) {
 		if is.Profile == "child" {
 			t.Fatalf("child unsetting a parent key is the feature, reported as %+v", is)
+		}
+	}
+
+	closest := Config{Profiles: map[string]Profile{
+		"base":  {Unset: []string{"TOKEN"}},
+		"child": {Extends: Extends{"base"}, Env: map[string]string{"TOKEN": "mine"}},
+	}}
+	for _, is := range Validate(closest) {
+		if is.Profile == "child" {
+			t.Fatalf("child redefinition overriding an ancestor unset is the feature, reported as %+v", is)
 		}
 	}
 }

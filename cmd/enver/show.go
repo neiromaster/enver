@@ -72,7 +72,7 @@ var exportCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("unsupported export format %q (use bash, fish, or powershell)", exportFormat)
 		}
-		return printExport(cmd.OutOrStdout(), r.Env, r.Unsets, exportFormat)
+		return printExport(cmd.OutOrStdout(), r.Env, exportFormat)
 	},
 }
 
@@ -135,14 +135,12 @@ func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]st
 	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: env, Sources: sources})
 }
 
-// printExport writes the resolved env as shell assignments for eval, followed
-// by a strip line per unset key so `eval "$(enver export p)"` matches what
-// `enver x p` gives the child. bash emits `export K='V'` then `unset K`; fish
-// emits `set -gx K 'V'` then `set -e K`; powershell emits `$env:K = 'V'` then
-// `Remove-Item Env:K -ErrorAction SilentlyContinue` (without the flag it errors
-// when the var is not currently set; bash and fish unsets are silent no-ops, so
-// the flag matches their behavior). Values are always unmasked.
-func printExport(w io.Writer, env map[string]string, unsets []string, format string) error {
+// printExport writes the resolved env as shell assignments for eval. Unset
+// keys are simply absent from env, so `eval "$(enver export p)"` leaves any
+// shell-exported value untouched — matching what `enver x p` gives the child.
+// bash emits `export K='V'`; fish emits `set -gx K 'V'`; powershell emits
+// `$env:K = 'V'`. Values are always unmasked.
+func printExport(w io.Writer, env map[string]string, format string) error {
 	for _, k := range sortedEnvKeys(env) {
 		v := env[k]
 		var line string
@@ -153,22 +151,6 @@ func printExport(w io.Writer, env map[string]string, unsets []string, format str
 			line = fmt.Sprintf("$env:%s = '%s'", k, psQuote(v))
 		default:
 			line = fmt.Sprintf("export %s=%s", k, shellQuote(v))
-		}
-		if _, err := fmt.Fprintln(w, line); err != nil {
-			return err
-		}
-	}
-	keys := append([]string(nil), unsets...)
-	sort.Strings(keys)
-	for _, k := range keys {
-		var line string
-		switch format {
-		case "fish":
-			line = fmt.Sprintf("set -e %s", k)
-		case "powershell":
-			line = fmt.Sprintf("Remove-Item Env:%s -ErrorAction SilentlyContinue", k)
-		default:
-			line = fmt.Sprintf("unset %s", k)
 		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err

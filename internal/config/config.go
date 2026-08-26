@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 
@@ -15,7 +16,7 @@ import (
 // Profile is one named environment profile.
 type Profile struct {
 	Extends  Extends           `yaml:"extends"`
-	Unset    Unsets            `yaml:"unset"` // env keys removed from the resolved env and the child process
+	Unset    Unsets            `yaml:"unset"` // env keys enver must not set in the resolved env
 	Env      map[string]string `yaml:"env"`
 	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
 }
@@ -168,9 +169,9 @@ func findLocal() []string {
 
 // Merge folds override into base: override wins for default and per-key env;
 // extends concatenates as [base…, override…] deduped, so local mixins compose
-// with rather than replace global ones. Merge folds override into base's maps in
-// place; the returned config shares state with base, which must not be used as
-// the pre-merge view afterwards.
+// with rather than replace global ones; unset lists union, deduped. Merge
+// folds override into base's maps in place; the returned config shares state
+// with base, which must not be used as the pre-merge view afterwards.
 func Merge(base, override Config) Config {
 	out := base
 	if override.Default != "" {
@@ -228,8 +229,17 @@ func mergeUniq(base, add []string) []string {
 	return appendUniq(slices.Clone(base), add...)
 }
 
+// mergeExtends concatenates base and add, deduplicated byte-exactly: profile
+// names are case-sensitive on every platform, so a Windows case-insensitive
+// dedup would wrongly collapse [Prod] + [prod] into one parent.
 func mergeExtends(base, add Extends) Extends {
-	return Extends(mergeUniq(base, add))
+	out := slices.Clone(base)
+	for _, x := range add {
+		if !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	return Extends(out)
 }
 
 // LoadMerged loads the global config then applies local .enver.yaml layers.
@@ -262,13 +272,11 @@ type Source struct {
 
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
-// per-key source provenance, the effective unset list, and the self-first
-// lineage chain.
+// per-key source provenance, and the self-first lineage chain.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
 	Sources  map[string]Source
-	Unsets   []string
 	Chain    []string
 }
 
@@ -279,10 +287,10 @@ type Resolved struct {
 // one, so a nearer uncommented redefinition keeps the farther comment. The
 // returned chain is a self-first DFS pre-order for display; a cycle,
 // including one spanning multiple parents, is reported as an error. Unset
-// keys are dropped from the env (and comments) and collected into Unsets;
-// unsets accumulate down the chain and are re-applied after each profile's
-// own env, so a key an ancestor unset stays removed even when a closer
-// profile redefines it — the unset wins.
+// keys are dropped from the env (and comments) after the profile's own fold,
+// so the closest mention of a key wins: a profile's own unset strips a
+// parent's definition, and a closer redefinition overrides an ancestor's
+// unset.
 func (c Config) ResolveProfile(name string) (Resolved, error) {
 	f, err := c.resolveEnv(name, map[string]bool{})
 	if err != nil {
@@ -292,7 +300,6 @@ func (c Config) ResolveProfile(name string) (Resolved, error) {
 		Env:      f.env,
 		Comments: f.comments,
 		Sources:  f.sources,
-		Unsets:   f.unsets,
 		Chain:    c.chainOf(name, map[string]bool{}),
 	}, nil
 }
@@ -302,18 +309,17 @@ type envFold struct {
 	env      map[string]string
 	comments map[string]string
 	sources  map[string]Source
-	unsets   []string
 }
 
-// resolveEnv returns the fully merged env, comments, sources, and unsets for
-// name: each parent is resolved transitively and merged left-to-right, then
-// name's own entries are applied last (child wins; comments only when the
-// definer carries one). The accumulated fence — inherited unsets plus name's
-// own — is applied after name's own env, so the unset wins over a
-// redefinition anywhere below the profile that declared it. The visiting set
-// tracks the active path so a cycle (self, mutual, or across multiple
-// parents) is detected; a name is removed from it on the way back up so a
-// diamond is not mistaken for a cycle.
+// resolveEnv returns the fully merged env, comments, and sources for name:
+// each parent is resolved transitively and merged left-to-right, then name's
+// own entries are applied last (child wins; comments only when the definer
+// carries one). Name's own unsets are applied after its own env, so the
+// closest mention of a key wins: a profile's own unset strips a parent's
+// definition, and a closer redefinition overrides an ancestor's unset. The
+// visiting set tracks the active path so a cycle (self, mutual, or across
+// multiple parents) is detected; a name is removed from it on the way back
+// up so a diamond is not mistaken for a cycle.
 func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
 		return envFold{}, fmt.Errorf("extends cycle at %q", name)
@@ -341,7 +347,6 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		for k, v := range pf.sources {
 			setEnvKeyed(out.sources, k, v)
 		}
-		out.unsets = appendUniq(out.unsets, pf.unsets...)
 	}
 	delete(visiting, name)
 	// Own entries apply last (child wins). Sorted so a hand-authored
@@ -357,8 +362,11 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 			setEnvKeyed(out.comments, k, cc)
 		}
 	}
-	out.unsets = appendUniq(out.unsets, p.Unset...)
-	for _, u := range out.unsets {
+	// Own unsets apply last, stripping only this profile's own fence: a key
+	// this profile unsets is removed even if a parent defined it (closest
+	// mention wins), while a parent's unset does not survive a closer
+	// redefinition here.
+	for _, u := range p.Unset {
 		deleteEnvKey(out.env, u)
 		deleteEnvKey(out.comments, u)
 		deleteEnvKey(out.sources, u)
@@ -378,11 +386,28 @@ func appendUniq(dst []string, add ...string) []string {
 	return dst
 }
 
+// originLookup reads m[key] by EnvKeyEqual semantics, so on Windows a
+// case-variant spelling still finds the layer Merge recorded under the
+// override's own spelling.
+func originLookup(m map[string]string, key string) string {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		for k, v := range m {
+			if EnvKeyEqual(k, key) {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
 // layerOf reports which layer ("global" or "local") defined key in profile's
 // own env. Merge records local for keys the local layer overrode; everything
 // else is global by default.
 func (c Config) layerOf(profile, key string) string {
-	if l := c.Origins[profile][key]; l != "" {
+	if l := originLookup(c.Origins[profile], key); l != "" {
 		return l
 	}
 	return LayerGlobal
@@ -395,7 +420,7 @@ func (c Config) layerOf(profile, key string) string {
 // env origin is global). enver validate still surfaces it only because
 // validatecmd.go runs an extra ValidateGlobal pass.
 func (c Config) unsetLayer(profile, key string) string {
-	if l := c.UnsetOrigins[profile][key]; l != "" {
+	if l := originLookup(c.UnsetOrigins[profile], key); l != "" {
 		return l
 	}
 	return LayerGlobal

@@ -11,23 +11,18 @@ import (
 	"golang.org/x/term"
 )
 
-// MergedEnv overlays profileEnv on osEnv, drops the unsets, and returns a
-// sorted "K=V" slice suitable for exec.Cmd.Env. Unsets remove a key even when
-// the shell exports it — that is the point of an unset in the config. Matching
-// goes through config.DeleteEnvKey so a case-mismatched unset still lands on
-// Windows, where env names are case-insensitive (Path vs PATH). The profile
-// overlay is case-aware on Windows: a profile's Path replaces the shell's PATH
-// rather than shadowing it as a second key.
-func MergedEnv(osEnv, profileEnv map[string]string, unsets []string) []string {
+// MergedEnv overlays profileEnv on osEnv and returns a sorted "K=V" slice
+// suitable for exec.Cmd.Env. The profile overlay is case-aware on Windows: a
+// profile's Path replaces the shell's PATH rather than shadowing it as a
+// second key. Unset keys are simply absent from profileEnv — the resolved env
+// never carries them — so a shell-exported value passes through untouched.
+func MergedEnv(osEnv, profileEnv map[string]string) []string {
 	curMap := make(map[string]string, len(osEnv)+len(profileEnv))
 	for k, v := range osEnv {
 		curMap[k] = v
 	}
 	for k, v := range profileEnv {
 		config.SetEnvKey(curMap, k, v)
-	}
-	for _, u := range unsets {
-		config.DeleteEnvKey(curMap, u)
 	}
 	keys := make([]string, 0, len(curMap))
 	for k := range curMap {

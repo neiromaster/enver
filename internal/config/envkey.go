@@ -23,15 +23,17 @@ func DeleteEnvKey(m map[string]string, key string) {
 }
 
 // deleteEnvKey is the shape-generic core of DeleteEnvKey: env, comments, and
-// sources maps all strip fenced keys with the same matching rules.
+// sources maps all strip fenced keys with the same matching rules. On Windows
+// every case-variant is removed — PATH and Path are one variable, so an unset
+// of either spelling must not leave the other alive.
 func deleteEnvKey[V any](m map[string]V, key string) {
 	if runtime.GOOS == "windows" {
 		for k := range m {
 			if EnvKeyEqual(k, key) {
 				delete(m, k)
-				return
 			}
 		}
+		return
 	}
 	delete(m, key)
 }
@@ -76,7 +78,6 @@ func setEnvKeyed[V any](m map[string]V, key string, val V) {
 		for k := range m {
 			if EnvKeyEqual(k, key) {
 				delete(m, k)
-				break
 			}
 		}
 	}

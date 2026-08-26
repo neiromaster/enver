@@ -61,11 +61,9 @@ func doList(w io.Writer) error {
 		if extends == "" {
 			extends = "-"
 		}
-		own := ownVars(p, config.Resolved{Unsets: p.Unset})
+		own := ownVars(p)
 		varsCell := fmt.Sprintf("%d", own)
 		if r, err := cfg.ResolveProfile(n); err == nil {
-			own = ownVars(p, r)
-			varsCell = fmt.Sprintf("%d", own)
 			if len(p.Extends) > 0 {
 				varsCell = fmt.Sprintf("%d (→%d)", own, len(r.Env))
 			}
@@ -88,15 +86,15 @@ func doList(w io.Writer) error {
 	return err
 }
 
-// ownVars counts the env keys the profile itself contributes after the full
-// fence — its own unset list plus everything inherited through the chain and
-// the other layer (r.Unsets) — because a fenced key never reaches the
-// resolved env, and len(p.Env) would overstate the profile. Matching goes
+// ownVars counts the env keys the profile itself contributes after its own
+// unset fence: a key the profile unsets never reaches the resolved env, and
+// len(p.Env) would overstate the profile. An inherited unset does not fence a
+// closer redefinition, so only the profile's own list matters. Matching goes
 // through config.UnsetsHasKey for the same case rules resolution applies.
-func ownVars(p config.Profile, r config.Resolved) int {
+func ownVars(p config.Profile) int {
 	n := 0
 	for k := range p.Env {
-		if !config.UnsetsHasKey(r.Unsets, k) {
+		if !config.UnsetsHasKey(p.Unset, k) {
 			n++
 		}
 	}
@@ -133,7 +131,7 @@ func doListJSON(w io.Writer) error {
 			Name:     n,
 			Default:  n == cfg.Default,
 			Extends:  p.Extends,
-			Vars:     ownVars(p, r),
+			Vars:     ownVars(p),
 			Resolved: len(r.Env),
 		})
 	}

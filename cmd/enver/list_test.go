@@ -267,10 +267,10 @@ func findListLine(out, profile string) string {
 	return ""
 }
 
-// TestDoListVarsExcludeInheritedFence: base defines A, mid unsets it, leaf
-// redefines it — the definition is dead at every consumption point, so the
-// own count must not claim it.
-func TestDoListVarsExcludeInheritedFence(t *testing.T) {
+// TestDoListVarsCountClosestWins: base defines A, mid unsets it, leaf
+// redefines it — the closest mention wins, so leaf's definition survives and
+// the own count claims it.
+func TestDoListVarsCountClosestWins(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	mustUpsert := func(name string, p config.Profile) {
 		t.Helper()
@@ -289,8 +289,8 @@ func TestDoListVarsExcludeInheritedFence(t *testing.T) {
 	}
 	for _, line := range strings.Split(out.String(), "\n") {
 		f := strings.Fields(line)
-		if len(f) >= 4 && f[0] == "leaf" && (f[len(f)-2] != "0" || f[len(f)-1] != "(→0)") {
-			t.Errorf("leaf row = %q, own count must exclude the inherited fence (0 (→0))", line)
+		if len(f) >= 4 && f[0] == "leaf" && (f[len(f)-2] != "1" || f[len(f)-1] != "(→1)") {
+			t.Errorf("leaf row = %q, own count must claim the closest-wins redefinition (1 (→1))", line)
 		}
 	}
 
@@ -303,8 +303,8 @@ func TestDoListVarsExcludeInheritedFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range got.Profiles {
-		if p.Name == "leaf" && (p.Vars != 0 || p.Resolved != 0) {
-			t.Errorf("leaf vars=%d resolved=%d, want 0/0", p.Vars, p.Resolved)
+		if p.Name == "leaf" && (p.Vars != 1 || p.Resolved != 1) {
+			t.Errorf("leaf vars=%d resolved=%d, want 1/1", p.Vars, p.Resolved)
 		}
 	}
 }

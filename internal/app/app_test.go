@@ -135,9 +135,9 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 	}
 }
 
-func TestResolveExpansionSkipsUnsets(t *testing.T) {
-	// A fenced key must not interpolate from the shell: the fence covers the
-	// resolved env and the child env alike, so expansion sees the same hole.
+func TestResolveExpansionSeesShellThroughUnset(t *testing.T) {
+	// An unset key is simply absent from the resolved env, so the shell value
+	// passes through: expansion sees the same shell env the child will get.
 	t.Setenv("ENVER_TEST_TOKEN_SRC", "live-value")
 
 	fenced := config.Config{Profiles: map[string]config.Profile{
@@ -147,19 +147,11 @@ func TestResolveExpansionSkipsUnsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Env["DERIVED"] != "" {
-		t.Fatalf("DERIVED = %q, want empty: an unset key must not interpolate", got.Env["DERIVED"])
-	}
-
-	control := config.Config{Profiles: map[string]config.Profile{
-		"p": {Env: map[string]string{"DERIVED": "${ENVER_TEST_TOKEN_SRC}"}},
-	}}
-	got, err = Resolve(control, "p", Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if got.Env["DERIVED"] != "live-value" {
-		t.Fatalf("DERIVED = %q, want live-value: expansion must still see ordinary shell vars", got.Env["DERIVED"])
+		t.Fatalf("DERIVED = %q, want live-value: the shell value passes through an unset", got.Env["DERIVED"])
+	}
+	if _, ok := got.Env["ENVER_TEST_TOKEN_SRC"]; ok {
+		t.Fatalf("unset key leaked into the resolved env: %v", got.Env)
 	}
 }
 

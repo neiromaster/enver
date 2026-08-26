@@ -29,10 +29,9 @@ func (e *Extends) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// Unsets is the list of env keys a profile removes from the resolved
-// environment and from the child process environment. YAML accepts either a
-// scalar (unset: API_KEY) or a sequence (unset: [A, B]); both normalize to a
-// slice, mirroring extends.
+// Unsets is the list of env keys a profile tells enver not to set in the
+// resolved environment. YAML accepts either a scalar (unset: API_KEY) or a
+// sequence (unset: [A, B]); both normalize to a slice, mirroring extends.
 type Unsets []string
 
 // UnmarshalYAML accepts unset as a scalar or a sequence, normalizing both to a

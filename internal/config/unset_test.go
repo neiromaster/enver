@@ -27,12 +27,9 @@ func TestResolveUnsetRemovesInheritedKey(t *testing.T) {
 	if _, ok := r.Comments["API_KEY"]; ok {
 		t.Fatalf("unset key's comment leaked: %v", r.Comments)
 	}
-	if !sliceEq(r.Unsets, []string{"API_KEY"}) {
-		t.Fatalf("Unsets = %v, want [API_KEY]", r.Unsets)
-	}
 }
 
-func TestResolveUnsetPropagatesToChild(t *testing.T) {
+func TestResolveUnsetCarriesThroughChain(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"root": {Env: map[string]string{"A": "1", "B": "1"}},
 		"mid":  {Extends: Extends{"root"}, Unset: Unsets{"A"}},
@@ -47,9 +44,6 @@ func TestResolveUnsetPropagatesToChild(t *testing.T) {
 	}
 	if r.Env["B"] != "1" || r.Env["C"] != "3" {
 		t.Fatalf("env = %v, want B=1 C=3", r.Env)
-	}
-	if !sliceEq(r.Unsets, []string{"A"}) {
-		t.Fatalf("Unsets = %v, want [A] (child must carry the fence to the runner)", r.Unsets)
 	}
 }
 
@@ -180,7 +174,7 @@ func TestUpsertPreservesUnsetOnDuplicate(t *testing.T) {
 	}
 }
 
-func TestResolveInheritedUnsetFencesChildRedefinition(t *testing.T) {
+func TestResolveChildRedefinitionOverridesInheritedUnset(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"base": {Env: map[string]string{"A": "base"}},
 		"mid":  {Extends: Extends{"base"}, Unset: Unsets{"A"}},
@@ -190,20 +184,17 @@ func TestResolveInheritedUnsetFencesChildRedefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := r.Env["A"]; ok {
-		t.Fatalf("redefined key survived the inherited fence: %v", r.Env)
+	if r.Env["A"] != "child" {
+		t.Fatalf("closer redefinition did not override the inherited unset: %v", r.Env)
 	}
 	if r.Env["B"] != "2" {
-		t.Fatalf("env = %v, want B=2 only", r.Env)
+		t.Fatalf("env = %v, want A=child B=2", r.Env)
 	}
-	if _, ok := r.Comments["A"]; ok {
-		t.Fatalf("redefined key's comment survived the fence: %v", r.Comments)
+	if r.Comments["A"] != "hint" {
+		t.Fatalf("redefined key's comment lost: %v", r.Comments)
 	}
-	if _, ok := r.Sources["A"]; ok {
-		t.Fatalf("redefined key's source survived the fence: %v", r.Sources)
-	}
-	if !sliceEq(r.Unsets, []string{"A"}) {
-		t.Fatalf("Unsets = %v, want [A]", r.Unsets)
+	if s := r.Sources["A"]; s.Profile != "leaf" {
+		t.Fatalf("redefined key's source = %+v, want leaf", s)
 	}
 }
 
@@ -227,28 +218,6 @@ func TestValidateUnsetOnlyProfileIsNotEmpty(t *testing.T) {
 		if is.Kind == "empty" {
 			t.Fatalf("unset-only profile flagged empty: %v", is)
 		}
-	}
-}
-
-func TestValidateUnsetShadowed(t *testing.T) {
-	cfg := Config{Profiles: map[string]Profile{
-		"base": {Env: map[string]string{"A": "1", "MODEL": "m"}},
-		"mid":  {Extends: Extends{"base"}, Unset: Unsets{"A"}},
-		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"A": "child"}},
-		"bare": {Extends: Extends{"base"}, Unset: Unsets{"MODEL"}},
-	}}
-	var shadowed []Issue
-	for _, is := range Validate(cfg) {
-		if is.Kind != "unset-shadowed" {
-			continue
-		}
-		shadowed = append(shadowed, is)
-		if is.Profile != "leaf" || is.Target != "A" || is.Detail != "mid" || is.Severity != "warning" {
-			t.Errorf("shadowed issue = %+v, want leaf/A from mid", is)
-		}
-	}
-	if len(shadowed) != 1 {
-		t.Fatalf("shadowed issues = %d, want 1 (stripping an inherited key is not shadowing): %v", len(shadowed), shadowed)
 	}
 }
 

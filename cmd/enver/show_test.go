@@ -115,7 +115,7 @@ func TestPrintExportBash(t *testing.T) {
 		"QUOTE":   "it's",
 	}
 	var exp bytes.Buffer
-	if err := printExport(&exp, env, nil, "bash"); err != nil {
+	if err := printExport(&exp, env, "bash"); err != nil {
 		t.Fatalf("printExport: %v", err)
 	}
 	out := exp.String()
@@ -136,7 +136,7 @@ func TestPrintExportPowerShell(t *testing.T) {
 		"QUOTE":   "it's",
 	}
 	var exp bytes.Buffer
-	if err := printExport(&exp, env, nil, "powershell"); err != nil {
+	if err := printExport(&exp, env, "powershell"); err != nil {
 		t.Fatalf("printExport: %v", err)
 	}
 	out := exp.String()
@@ -155,7 +155,7 @@ func TestPrintExportFish(t *testing.T) {
 		"WINPATH": `C:\Users\gavro`,
 	}
 	var exp bytes.Buffer
-	if err := printExport(&exp, env, nil, "fish"); err != nil {
+	if err := printExport(&exp, env, "fish"); err != nil {
 		t.Fatalf("printExport: %v", err)
 	}
 	out := exp.String()
@@ -170,31 +170,20 @@ func TestPrintExportFish(t *testing.T) {
 	}
 }
 
-// TestPrintExportUnsetLines pins the strip lines: eval of an export must remove
-// the keys the runner fences, not just assign the survivors, and the unsets
-// land sorted after the assignments.
-func TestPrintExportUnsetLines(t *testing.T) {
+// TestPrintExportOmitsUnsetKeys pins the pass-through contract: unset keys are
+// simply absent from env, so eval of an export leaves any shell-exported value
+// untouched — no strip lines are emitted.
+func TestPrintExportOmitsUnsetKeys(t *testing.T) {
 	env := map[string]string{"API_KEY": "sk-ant-secret"}
-	unsets := []string{"ZKEY", "ANTHROPIC_API_KEY"}
-
-	cases := []struct {
-		format string
-		want   string
-	}{
-		{"bash", "unset ANTHROPIC_API_KEY\nunset ZKEY\n"},
-		{"fish", "set -e ANTHROPIC_API_KEY\nset -e ZKEY\n"},
-		{"powershell", "Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue\nRemove-Item Env:ZKEY -ErrorAction SilentlyContinue\n"},
+	var out bytes.Buffer
+	if err := printExport(&out, env, "bash"); err != nil {
+		t.Fatalf("printExport: %v", err)
 	}
-	for _, c := range cases {
-		var out bytes.Buffer
-		if err := printExport(&out, env, unsets, c.format); err != nil {
-			t.Fatalf("printExport(%s): %v", c.format, err)
-		}
-		if !strings.HasSuffix(out.String(), c.want) {
-			t.Errorf("%s strip lines mismatch, want suffix %q:\n%s", c.format, c.want, out.String())
-		}
-		if !strings.Contains(out.String(), "sk-ant-secret") {
-			t.Errorf("%s lost the assignment lines:\n%s", c.format, out.String())
-		}
+	s := out.String()
+	if strings.Contains(s, "unset ") {
+		t.Errorf("bash export must not emit strip lines:\n%s", s)
+	}
+	if !strings.Contains(s, "export API_KEY='sk-ant-secret'") {
+		t.Errorf("bash export lost the assignment:\n%s", s)
 	}
 }

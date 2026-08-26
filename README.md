@@ -143,33 +143,37 @@ several by editing the YAML (`extends: [a, b]`) or via
 ### Removing variables (`unset`)
 
 Inheritance is additive — a child can override an inherited key but not remove
-it. A profile can also list keys to strip from the resolved environment:
+it. A profile can also list keys enver must not set in the resolved
+environment:
 
 ```yaml
 profiles:
   bare:
     extends: anth
-    unset: [ANTHROPIC_API_KEY]   # run without this key even if the shell exports it
+    unset: [ANTHROPIC_API_KEY]   # never set this key from the config
 ```
 
-`unset` accepts a single key (`unset: ANTHROPIC_API_KEY`) or a list. It removes
-the key from the profile's resolved env (so `show`, `export`, and `dotenv`
-drop it) **and** from the child process environment — even when the var is
-already exported in your shell; that is its point, and `enver x bare -- claude`
-runs with the key gone. `export` emits the matching strip lines (`unset K` in
-bash, `set -e K` in fish, `Remove-Item Env:K` in PowerShell), so
-`eval "$(enver export bare)"` removes the key from the current shell too. Env key and unset names must be valid identifiers (`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies): names ride unquoted inside eval'd export lines, so enver refuses anything looser at config load, at every write boundary, and at TUI input time.
-`$VAR` interpolation does not see unset keys: a fenced key contributes nothing
-when another value references it, instead of leaking the shell's live value.
+`unset` accepts a single key (`unset: ANTHROPIC_API_KEY`) or a list. It keeps
+the key out of the profile's resolved env (so `show`, `export`, and `dotenv`
+drop it) and out of what `enver x` overlays on your shell. It does **not**
+remove a key your shell already exports: `enver x bare -- claude` leaves a
+live `ANTHROPIC_API_KEY` untouched, and `eval "$(enver export bare)"` assigns
+nothing for it. To actually delete a variable, remove it from your shell before
+running enver. Env key and unset names must be valid identifiers
+(`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies): names ride
+unquoted inside eval'd export lines, so enver refuses anything looser at config
+load, at every write boundary, and at TUI input time.
+`$VAR` interpolation sees the shell's live value through an unset: a key enver
+does not set is simply absent from the resolved env, so a reference to it
+expands to whatever the shell exports — matching what the child process gets.
 
-Unsets accumulate down the chain (a child inherits its parents' unsets) and
-union across layers (global and local both apply). The fence wins over
-redefinition: a key unset by any profile in the chain stays removed even when a
-closer profile sets it again. Author `unset` in YAML like multi-parent
-`extends` — a single name or a list, never a mapping; `enver validate` flags an
-`unset` naming a key the same profile also sets in the same layer's env (`contradictory-unset` — a local unset fencing a global definition is the intended cross-layer pattern)
-and a key that a chain member unsets but this profile re-defines or that the other layer's copy of the same profile unsets
-(`unset-shadowed`), since that definition is dead. On Windows, where env names
+Unsets union across layers (global and local both apply) and the closest
+mention of a key wins: a profile's own unset strips a parent's definition, and
+a closer redefinition overrides an ancestor's unset. Author `unset` in YAML
+like multi-parent `extends` — a single name or a list, never a mapping;
+`enver validate` flags an `unset` naming a key the same profile also sets in
+the same layer's env (`contradictory-unset` — a local unset fencing a global
+definition is the intended cross-layer pattern). On Windows, where env names
 are case-insensitive, unset matching is case-insensitive too.
 
 ## Creating profiles interactively
@@ -281,7 +285,7 @@ or clear unset entries
 including across `--replace`); an empty import without `--extends` is refused.
 The summary prints a diff of what changed: `+` added, `~` overridden,
 `-` removed (values shown in full — the data came from your own .env file).
- Keys the effective resolution fences (an unset in the chain or the other layer) are marked `!` — written, but never reaching `show`, `export`, or `enver x`.
+ Keys the profile's own `unset` list fences are marked `!` — written, but never reaching `show`, `export`, or `enver x`.
 
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
 > file. Mind where it lands; keep values at rest encrypted with `enver encrypt`.
