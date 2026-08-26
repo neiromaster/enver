@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -264,4 +265,46 @@ func findListLine(out, profile string) string {
 		}
 	}
 	return ""
+}
+
+// TestDoListVarsExcludeInheritedFence: base defines A, mid unsets it, leaf
+// redefines it — the definition is dead at every consumption point, so the
+// own count must not claim it.
+func TestDoListVarsExcludeInheritedFence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	mustUpsert := func(name string, p config.Profile) {
+		t.Helper()
+		if err := config.UpsertProfile(path, name, p, false, false); err != nil {
+			t.Fatalf("upsert %s: %v", name, err)
+		}
+	}
+	mustUpsert("base", config.Profile{Env: map[string]string{"A": "0"}})
+	mustUpsert("mid", config.Profile{Extends: config.Extends{"base"}, Unset: []string{"A"}})
+	mustUpsert("leaf", config.Profile{Extends: config.Extends{"mid"}, Env: map[string]string{"A": "1"}})
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := doList(&out); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 4 && f[0] == "leaf" && (f[len(f)-2] != "0" || f[len(f)-1] != "(→0)") {
+			t.Errorf("leaf row = %q, own count must exclude the inherited fence (0 (→0))", line)
+		}
+	}
+
+	var jout bytes.Buffer
+	if err := doListJSON(&jout); err != nil {
+		t.Fatal(err)
+	}
+	var got listJSON
+	if err := json.Unmarshal(jout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got.Profiles {
+		if p.Name == "leaf" && (p.Vars != 0 || p.Resolved != 0) {
+			t.Errorf("leaf vars=%d resolved=%d, want 0/0", p.Vars, p.Resolved)
+		}
+	}
 }

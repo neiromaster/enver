@@ -94,7 +94,7 @@ func shadowedUnsets(cfg Config, name string) []Issue {
 	}
 	var issues []Issue
 	for _, k := range sortedEnvKeys(p.Env) {
-		if unsetsHasKey(p.Unset, k) {
+		if UnsetsHasKey(p.Unset, k) {
 			continue
 		}
 		if hasEnvKey(r.Env, k) {
@@ -118,7 +118,7 @@ func unsetDeclarer(chain []string, cfg Config, key string) string {
 		if m == chain[0] {
 			continue
 		}
-		if unsetsHasKey(cfg.Profiles[m].Unset, key) {
+		if UnsetsHasKey(cfg.Profiles[m].Unset, key) {
 			return m
 		}
 	}

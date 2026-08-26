@@ -52,8 +52,8 @@ func hasEnvKey(m map[string]string, key string) bool {
 	return false
 }
 
-// unsetsHasKey reports whether key is fenced by any entry of unsets.
-func unsetsHasKey(unsets []string, key string) bool {
+// UnsetsHasKey reports whether key is fenced by any entry of unsets.
+func UnsetsHasKey(unsets []string, key string) bool {
 	for _, u := range unsets {
 		if EnvKeyEqual(u, key) {
 			return true

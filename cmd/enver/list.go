@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -62,10 +61,12 @@ func doList(w io.Writer) error {
 		if extends == "" {
 			extends = "-"
 		}
-		own := ownVars(p)
+		own := ownVars(p, config.Resolved{Unsets: p.Unset})
 		varsCell := fmt.Sprintf("%d", own)
-		if len(p.Extends) > 0 {
-			if r, err := cfg.ResolveProfile(n); err == nil {
+		if r, err := cfg.ResolveProfile(n); err == nil {
+			own = ownVars(p, r)
+			varsCell = fmt.Sprintf("%d", own)
+			if len(p.Extends) > 0 {
 				varsCell = fmt.Sprintf("%d (→%d)", own, len(r.Env))
 			}
 		}
@@ -87,14 +88,15 @@ func doList(w io.Writer) error {
 	return err
 }
 
-// ownVars counts the env keys the profile itself contributes after its own
-// unset list: a fenced key never reaches the resolved env, so len(p.Env) would
-// overstate the profile. Matching goes through config.EnvKeyEqual for the same
-// case rules resolution applies.
-func ownVars(p config.Profile) int {
+// ownVars counts the env keys the profile itself contributes after the full
+// fence — its own unset list plus everything inherited through the chain and
+// the other layer (r.Unsets) — because a fenced key never reaches the
+// resolved env, and len(p.Env) would overstate the profile. Matching goes
+// through config.UnsetsHasKey for the same case rules resolution applies.
+func ownVars(p config.Profile, r config.Resolved) int {
 	n := 0
 	for k := range p.Env {
-		if !slices.ContainsFunc(p.Unset, func(u string) bool { return config.EnvKeyEqual(u, k) }) {
+		if !config.UnsetsHasKey(r.Unsets, k) {
 			n++
 		}
 	}
@@ -131,7 +133,7 @@ func doListJSON(w io.Writer) error {
 			Name:     n,
 			Default:  n == cfg.Default,
 			Extends:  p.Extends,
-			Vars:     ownVars(p),
+			Vars:     ownVars(p, r),
 			Resolved: len(r.Env),
 		})
 	}
