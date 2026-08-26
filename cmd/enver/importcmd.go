@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
 	"github.com/neiromaster/enver/internal/ui"
@@ -66,7 +67,7 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
-		summary, err := runImport(r, writeTarget(), name, importReplace, importForce, importExtends, ui.Confirm)
+		summary, err := runImport(r, writeTarget(), name, importReplace, importForce, importExtends, ui.Confirm, effectiveResolve)
 		if err != nil {
 			return err
 		}
@@ -85,14 +86,26 @@ func init() {
 	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends (comma-separated for multiple)")
 }
 
+// effectiveResolve resolves a profile from the merged two-layer view the
+// read commands use, after import has written its target file — fence
+// reporting must judge the profile as show, export, and x will see it.
+func effectiveResolve(profile string) (config.Resolved, error) {
+	cfg, err := app.Load(appOpts())
+	if err != nil {
+		return config.Resolved{}, err
+	}
+	return cfg.ResolveProfile(profile)
+}
+
 // runImport parses .env data from r into profile name at cfgPath. Imported keys
 // override existing same-named keys (merge); when replace is true the profile's
 // own env and unset list are wiped first, so an imported key the old profile
 // fenced survives the import. The extends value is preserved unless extendsFlag
 // is non-empty, in which case it is set (and the parent must already exist).
-// force and confirm gate destructive replaces (Task 6). Returns a one-line
-// summary.
-func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFlag string, confirm confirmFunc) (string, error) {
+// force and confirm gate destructive replaces: key removals and the unset-list
+// wipe alike. resolve computes the post-write effective resolution for fence
+// reporting; nil disables it (tests). Returns a one-line summary.
+func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFlag string, confirm confirmFunc, resolve func(string) (config.Resolved, error)) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
@@ -146,10 +159,11 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 
 	if exists && replace {
 		d.removed = removedKeys(oldEnv, imported)
-		if !force && len(d.removed) > 0 {
-			ok, cerr := confirm(replaceConfirmMsg(name, d.removed), false)
+		oldUnset := existingProf.Unset
+		if !force && (len(d.removed) > 0 || len(oldUnset) > 0) {
+			ok, cerr := confirm(replaceConfirmMsg(name, d.removed, oldUnset), false)
 			if cerr != nil {
-				return "", fmt.Errorf("--replace would remove %d key(s) from %q; rerun with --force", len(d.removed), name)
+				return "", fmt.Errorf("--replace would remove %d key(s) and clear %d unset entries from %q; rerun with --force", len(d.removed), len(oldUnset), name)
 			}
 			if !ok {
 				return "", nil
@@ -160,7 +174,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments}, false, false); err != nil {
 			return "", err
 		}
-		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends), nil
+		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends, fencedImportedKeys(resolve, name, imported)), nil
 	}
 	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported, Comments: comments}, false, false); err != nil {
 		return "", err
@@ -169,7 +183,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 	if exists {
 		mode = "merge"
 	}
-	return formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends), nil
+	return formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends, fencedImportedKeys(resolve, name, imported)), nil
 }
 
 type diffEntry struct{ key, val string }
@@ -215,24 +229,66 @@ func removedKeys(oldEnv, imported map[string]string) []diffEntry {
 	return out
 }
 
-// replaceConfirmMsg builds the --replace confirmation prompt: the number of keys
-// to remove and their names (capped to the first five).
-func replaceConfirmMsg(name string, removed []diffEntry) string {
-	keys := make([]string, len(removed))
-	for i, e := range removed {
-		keys[i] = e.key
+// fencedImportedKeys reports which of the imported keys the effective
+// resolution strips: written to the file, but fenced by an unset somewhere in
+// the chain or the other layer — dead on arrival at every consumption point.
+// A nil resolve (tests) or an unresolvable profile (validate reports it)
+// disables the reporting.
+func fencedImportedKeys(resolve func(string) (config.Resolved, error), name string, imported map[string]string) map[string]bool {
+	if resolve == nil {
+		return nil
 	}
-	shown := keys
-	tail := ""
-	if len(keys) > 5 {
-		shown = keys[:5]
-		tail = fmt.Sprintf(", ... and %d more", len(keys)-5)
+	r, err := resolve(name)
+	if err != nil {
+		return nil
 	}
-	noun := "keys"
-	if len(keys) == 1 {
-		noun = "key"
+	var out map[string]bool
+	for k := range imported {
+		if config.UnsetsHasKey(r.Unsets, k) {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[k] = true
+		}
 	}
-	return fmt.Sprintf("Replace will remove %d %s from %q: %s%s. Continue?", len(keys), noun, name, strings.Join(shown, ", "), tail)
+	return out
+}
+
+// replaceConfirmMsg builds the --replace confirmation prompt: the keys to
+// remove (capped to the first five) and the unset entries the wipe clears —
+// fenced keys come back, so the fence is part of what is destroyed.
+func replaceConfirmMsg(name string, removed []diffEntry, unset []string) string {
+	var b strings.Builder
+	if len(removed) > 0 {
+		keys := make([]string, len(removed))
+		for i, e := range removed {
+			keys[i] = e.key
+		}
+		shown := keys
+		tail := ""
+		if len(keys) > 5 {
+			shown = keys[:5]
+			tail = fmt.Sprintf(", ... and %d more", len(keys)-5)
+		}
+		noun := "keys"
+		if len(keys) == 1 {
+			noun = "key"
+		}
+		fmt.Fprintf(&b, "remove %d %s from %q: %s%s", len(keys), noun, name, strings.Join(shown, ", "), tail)
+	}
+	if len(unset) > 0 {
+		if b.Len() > 0 {
+			b.WriteString(" and ")
+		}
+		shown := unset
+		tail := ""
+		if len(unset) > 5 {
+			shown = unset[:5]
+			tail = fmt.Sprintf(", ... and %d more", len(unset)-5)
+		}
+		fmt.Fprintf(&b, "clear the unset list of %q: %s%s (fenced keys come back)", name, strings.Join(shown, ", "), tail)
+	}
+	return "Replace will " + b.String() + ". Continue?"
 }
 
 func extLabel(e config.Extends) string {
@@ -246,7 +302,7 @@ func extLabel(e config.Extends) string {
 // lines (added +, overridden ~, removed -) echoing the values verbatim, and an
 // extends line when the value changed. The data came from the user's own .env,
 // so masking would hide exactly what the diff is meant to confirm.
-func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends config.Extends) string {
+func formatImportSummary(name string, n int, mode string, d importDiff, extendsToWrite, oldExtends config.Extends, fenced map[string]bool) string {
 	var b strings.Builder
 	vars := "1 var"
 	if n != 1 {
@@ -254,9 +310,17 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	}
 	fmt.Fprintf(&b, "\n✓ imported %s into %q — %s\n", vars, name, mode)
 	for _, e := range d.added {
+		if fenced[e.key] {
+			fmt.Fprintf(&b, "  ! %s = %s — fenced by unset; never reaches the resolved env\n", e.key, e.val)
+			continue
+		}
 		fmt.Fprintf(&b, "  + %s = %s\n", e.key, e.val)
 	}
 	for _, e := range d.overridden {
+		if fenced[e.key] {
+			fmt.Fprintf(&b, "  ! %s = %s — fenced by unset; never reaches the resolved env\n", e.key, e.val)
+			continue
+		}
 		fmt.Fprintf(&b, "  ~ %s = %s\n", e.key, e.val)
 	}
 	for _, e := range d.removed {

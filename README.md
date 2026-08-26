@@ -274,12 +274,14 @@ Imported values are stored **raw** — `$VAR` references stay as templates, not
 expanded — so layered profiles survive the round-trip. `import` **merges** by
 default (imported keys override existing same-named keys); `--replace` wipes the
 profile's own env and `unset` list first and confirms when it would remove keys
+or clear unset entries
 (decline to abort; `--force` skips the prompt; a non-interactive pipe without
 `--force` errors).
 `--extends <profile>` sets or overrides `extends` (otherwise it is preserved,
 including across `--replace`); an empty import without `--extends` is refused.
 The summary prints a masked diff of what changed: `+` added, `~` overridden,
 `-` removed (secret-looking values masked as in `enver show`).
+ Keys the effective resolution fences (an unset in the chain or the other layer) are marked `!` — written, but never reaching `show`, `export`, or `enver x`.
 
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
 > file. Mind where it lands; keep values at rest encrypted with `enver encrypt`.
