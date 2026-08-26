@@ -279,8 +279,8 @@ or clear unset entries
 `--force` errors).
 `--extends <profile>` sets or overrides `extends` (otherwise it is preserved,
 including across `--replace`); an empty import without `--extends` is refused.
-The summary prints a masked diff of what changed: `+` added, `~` overridden,
-`-` removed (secret-looking values masked as in `enver show`).
+The summary prints a diff of what changed: `+` added, `~` overridden,
+`-` removed (values shown in full — the data came from your own .env file).
  Keys the effective resolution fences (an unset in the chain or the other layer) are marked `!` — written, but never reaching `show`, `export`, or `enver x`.
 
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
