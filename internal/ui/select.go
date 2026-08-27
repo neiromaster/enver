@@ -346,23 +346,31 @@ func (m *selectModel) View() tea.View {
 
 // rowString builds the (unstyled) text of one option row: cursor, an optional
 // multi-select mark, and a fixed-width icon cell so labels align across rows
-// regardless of glyph width.
+// regardless of glyph width. A Dim option fades every cell — except on the
+// cursor row, where the active highlight must stay crisp.
 func (m *selectModel) rowString(i, curOpt int) string {
 	cur := " "
 	if i == curOpt {
 		cur = m.theme.cursor
 	}
-	cell := padIcon(m.theme.icon(m.options[i].Icon))
+	style := m.theme.normal
+	if m.options[i].Dim && i != curOpt {
+		style = m.theme.dim
+	}
+	cell := style.Render(padIcon(m.theme.icon(m.options[i].Icon)))
 	label := m.options[i].Label
-	if i == curOpt {
+	switch {
+	case i == curOpt:
 		label = m.theme.rowActive.Render(label)
+	case m.options[i].Dim:
+		label = m.theme.dim.Render(label)
 	}
 	if m.multi && !m.options[i].Action {
 		mark := m.theme.checkOff
 		if m.selected[i] {
 			mark = m.theme.checkOn
 		}
-		return cur + " " + mark + " " + cell + " " + label
+		return cur + " " + style.Render(mark) + " " + cell + " " + label
 	}
 	return cur + " " + cell + " " + label
 }

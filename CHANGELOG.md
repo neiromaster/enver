@@ -25,11 +25,13 @@
   by ordering instead and draws no warning.
 - `enver edit` manages unsets interactively: a **Manage unsets…** action opens
   a picker of candidate keys with the declared fences pre-checked (`space`,
-  `-`, or `x` toggles). Fence state renders live in the menu (`⊘ KEY · unset`
-  on own rows; fenced inherited keys leave the resolved view), and every route
-  into a same-layer define+unset pair confirms first like the `validate`
-  warning suggests: picking such a key asks — declining drops just the
-  disputed fences, not the rest of the pass — adding or renaming onto an
+  `-`, or `x` toggles). Fence state renders live in the menu as a faded row:
+  fenced own vars and inherited keys alike stay listed, visibly dimmed
+  instead of carrying a marker, so suppression is visible where it happens
+  while resolution (`show`, `x`, export) still omits them. Every route into a
+  same-layer define+unset pair confirms first like the `validate` warning
+  suggests: picking such a key asks — declining drops just the disputed
+  fences, not the rest of the pass — adding or renaming onto an
   already-fenced key asks (declining lifts the fence), and confirming a full
   wipe asks before it lands. Leaving the picker mid-edit offers to resume the
   pending toggles rather than discarding them silently; the delete picker

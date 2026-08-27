@@ -64,10 +64,11 @@ the menu:
 - **Manage unsets** — choose which keys this profile must never set. Declared
   fences open pre-checked at the top (`⊘ … (declared here)`); remaining own
   and inherited keys are candidates below. Inside the picker,
-  `space`/`-`/`x` toggle. Declaring a fence takes effect in the menu right
-  away: the profile's own row grows a `· unset` mark (`⊘`), and a fenced
-  inherited key disappears from the inherited view since it no longer
-  resolves. Fencing a key the profile also defines asks for confirmation —
+  `space`/`-`/`x` toggle. Declaring a fence shows in the menu immediately:
+  a fenced key keeps its row but fades to dim — own rows and inherited ones
+  alike stay listed, just visibly muted instead of active, while the value it
+  no longer resolves to stays hidden from everywhere else (`show`, `x`,
+  export). Fencing a key the profile also defines asks for confirmation —
   declining drops just that fence, not the rest of the pass — and so does
   adding or renaming a variable onto an already-fenced key, where declining
   lifts the fence instead. Confirming with nothing checked removes every

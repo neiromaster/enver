@@ -372,3 +372,19 @@ func TestSelectActiveLabelCyan(t *testing.T) {
 		t.Fatalf("active label not cyan-highlighted; expected cyan on \"Add\" in view:\n%s", view)
 	}
 }
+
+func TestDimRowRendersFaint(t *testing.T) {
+	m := newSelectModel("t", []Option{
+		{Value: "a", Label: "Alpha"},
+		{Value: "b", Label: "Beta", Dim: true},
+	}, false)
+	view := m.View().Content
+	if !strings.Contains(view, "\x1b[2mBeta") {
+		t.Fatalf("dim row not rendered faint:\n%s", view)
+	}
+	// The cursor row ignores Dim so the active highlight stays crisp.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if strings.Contains(m.View().Content, "\x1b[2mBeta") {
+		t.Fatalf("cursor row should keep its active highlight, not dim:\n%s", m.View().Content)
+	}
+}

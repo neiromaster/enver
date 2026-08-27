@@ -479,17 +479,40 @@ func TestMenuOptionsMarksFencedOwnVar(t *testing.T) {
 			Env:   map[string]string{"SHADOW": "mine", "PLAIN": "v"},
 			Unset: config.Unsets{"SHADOW"}},
 		nil, false)
-	opts := s.menuOptions(inheritedForState(cfg, s), overrideKeySet(cfg, s))
+	opts := s.menuOptions(listedInheritedForState(cfg, s), overrideKeySet(cfg, s))
 	fenced := findOption(t, opts, "SHADOW")
-	if fenced.Icon != ui.IconUnset {
-		t.Fatalf("fenced var icon = %q, want %q (fence outranks override)", fenced.Icon, ui.IconUnset)
+	if !fenced.Dim {
+		t.Fatal("fenced var should render as a dimmed row (fence outranks the override mark)")
 	}
-	if !strings.Contains(fenced.Label, "· unset") {
-		t.Fatalf("fenced var label missing · unset marker: %q", fenced.Label)
+	if fenced.Icon != "" || strings.Contains(fenced.Label, "· unset") {
+		t.Fatalf("fence is conveyed by dimming only, got icon %q / label %q", fenced.Icon, fenced.Label)
 	}
 	plain := findOption(t, opts, "PLAIN")
-	if plain.Icon != "" || strings.Contains(plain.Label, "· unset") {
-		t.Fatalf("unfenced own var should render plain, got %q / %q", plain.Icon, plain.Label)
+	if plain.Dim || plain.Icon != "" {
+		t.Fatalf("unfenced own var should render plain, got %+v", plain)
+	}
+}
+
+func TestMenuOptionsListsFencedInheritedDimmed(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"FROM_BASE": "b", "LIVE": "l"}},
+	}}
+	s := newEditState("a",
+		config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
+			Unset: config.Unsets{"FROM_BASE"}},
+		nil, false)
+	listed := listedInheritedForState(cfg, s)
+	if len(listed) != 2 {
+		t.Fatalf("fenced inherited key must stay listed for display, got %+v", listed)
+	}
+	opts := s.menuOptions(listed, nil)
+	fenced := findOption(t, opts, "inherited:FROM_BASE")
+	if !fenced.Dim || fenced.Icon != ui.IconInherited {
+		t.Fatalf("listed fenced inherited = %+v, want Dim with the inherited icon", fenced)
+	}
+	live := findOption(t, opts, "inherited:LIVE")
+	if live.Dim {
+		t.Fatal("an unfenced inherited key must not be dimmed")
 	}
 }
 

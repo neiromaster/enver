@@ -18,7 +18,11 @@ type Option struct {
 	// MultiSelect it renders without a checkbox, is never toggled (nor affected by
 	// select-all), and pressing Enter on it returns its Value alone, so a command
 	// such as Back can cancel without touching the checked set.
-	Action    bool
+	Action bool
+	// Dim renders the whole row faded (faint) while keeping it selectable: the
+	// state that dimming stands for must stay visible, just not shout. The
+	// cursor row ignores Dim so navigation stays crisp.
+	Dim       bool
 	Separator bool
 }
 

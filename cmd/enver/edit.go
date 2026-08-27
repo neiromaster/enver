@@ -202,19 +202,16 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
-		// Fence state outranks the override mark: a declared unset hides the
-		// variable from the resolved env no matter what it shadows.
+		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
+		// Fence state outranks the override mark and reads as a faded row: the
+		// variable stays listed so its suppression is visible where it happens.
 		switch {
 		case config.UnsetsHasKey(s.unset, e.Key):
-			opts = append(opts, ui.Option{Value: e.Key, Icon: ui.IconUnset,
-				Label: fmt.Sprintf("%s = %s · unset", e.Key, e.Value)})
-		default:
-			opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
-			if overrideKeys[e.Key] {
-				opt.Icon = ui.IconOverride
-			}
-			opts = append(opts, opt)
+			opt.Dim = true
+		case overrideKeys[e.Key]:
+			opt.Icon = ui.IconOverride
 		}
+		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
 		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)})
@@ -485,7 +482,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 
 	s := newEditState(name, prof, comments, isDefault)
 	for {
-		inherited := inheritedForState(cfg, s)
+		inherited := listedInheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
 		if err != nil {
 			// Only a cancel with pending edits is worth confirming; any other
@@ -697,7 +694,27 @@ func probeConfig(cfg config.Config, s editState) config.Config {
 // re-entering the editor. A pending extends that would form a cycle yields no
 // inherited entries; commitValidate reports the cycle at commit time.
 func inheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
+	return inheritedViaProbe(cfg, s, true)
+}
+
+// listedInheritedForState is the menu-listing variant: standing fences do not
+// remove entries here, so a suppressed key stays visible and selectable next to
+// its live siblings, with dimming carrying what used to be an omission. The
+// resolved view proper remains inheritedForState's business.
+func listedInheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
+	return inheritedViaProbe(cfg, s, false)
+}
+
+// inheritedViaProbe resolves the working-copy profile and returns its
+// parent-contributed keys minus own ones; honorFences decides whether declared
+// unsets strip them from that set first.
+func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.EnvEntry {
 	probe := probeConfig(cfg, s)
+	if !honorFences {
+		tp := probe.Profiles[s.name]
+		tp.Unset = nil // display lists suppressed keys too
+		probe.Profiles[s.name] = tp
+	}
 	r, err := probe.ResolveProfile(s.name)
 	if err != nil {
 		return nil

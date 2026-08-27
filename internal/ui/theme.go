@@ -24,6 +24,7 @@ type theme struct {
 	rowActive   lipgloss.Style
 	selected    lipgloss.Style
 	normal      lipgloss.Style
+	dim         lipgloss.Style
 	separator   lipgloss.Style
 	help        lipgloss.Style
 	filter      lipgloss.Style
@@ -49,6 +50,7 @@ func defaultTheme() *theme {
 		rowActive:   cyan.Bold(true),
 		selected:    cyan.Bold(true),
 		normal:      lipgloss.NewStyle(),
+		dim:         faint,
 		separator:   faint,
 		help:        faint,
 		filter:      yellow,
