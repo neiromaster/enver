@@ -516,6 +516,36 @@ func TestMenuOptionsListsFencedInheritedDimmed(t *testing.T) {
 	}
 }
 
+func TestListedInheritedSurvivesCarriedFence(t *testing.T) {
+	// A load-built config parks every fence in Carried at merge time and leaves
+	// Unset holding the overriding layer's fresh list — so a display probe that
+	// clears only Unset still strips through Carried and the row never appears.
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"a": {Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
+			Carried: config.Unsets{"FROM_BASE"}},
+		"base": {Env: map[string]string{"FROM_BASE": "b", "LIVE": "l"}},
+	}}
+	s := newEditState("a", cfg.Profiles["a"], nil, false)
+	if listed := listedInheritedForState(cfg, s); len(listed) != 2 {
+		t.Fatalf("carried-fenced inherited keys dropped from display listing: %+v", listed)
+	}
+	if got := inheritedForState(cfg, s); len(got) != 1 || got[0].Key != "LIVE" {
+		t.Fatalf("resolved view must keep honoring the carried fence, got %+v", got)
+	}
+}
+
+func TestOverrideKeySetSurvivesCarriedFence(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"a": {Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine"},
+			Carried: config.Unsets{"SHADOW"}},
+		"base": {Env: map[string]string{"SHADOW": "from-base"}},
+	}}
+	s := newEditState("a", cfg.Profiles["a"], nil, false)
+	if !overrideKeySet(cfg, s)["SHADOW"] {
+		t.Fatal("a carried-fenced override should still count as parent-contributed")
+	}
+}
+
 func TestInheritedForStateExcludesDeclaredUnset(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"FROM_BASE": "b"}},

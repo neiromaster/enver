@@ -153,22 +153,30 @@ func nameSetsEqual(a, b []string) bool {
 	return slices.Equal(x, y)
 }
 
+// stripWorkingFences clears the copy's declared unsets and the era-carried
+// ones Merge parked beside them — a load-built config holds its fences across
+// both fields, so a probe that ignores only Unset still strips through Carried.
+func stripWorkingFences(p config.Profile) config.Profile {
+	p.Unset = nil
+	p.Carried = nil
+	return p
+}
+
 // overrideKeySet returns the own keys that shadow a key contributed by the
 // extends chain (parents only), so menuOptions and deleteVarOptions can mark
 // actual overrides. The parent resolution blanks the profile's own env and its
-// working fences — who contributes a key says nothing about whether it is
-// currently suppressed — so a shadowed key still appears here, unlike
-// inheritedForState, which excludes own keys and honors unsets. A profile with
-// no extends, or a pending extends that would cycle, yields nil.
+// working fences (declared and carried) — who contributes a key says nothing
+// about whether it is currently suppressed — so a shadowed key still appears
+// here, unlike inheritedForState, which excludes own keys and honors unsets.
+// A profile with no extends, or a pending extends that would cycle, yields nil.
 func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 	if len(s.extends) == 0 {
 		return nil
 	}
 	probe := probeConfig(cfg, s)
 	tp := probe.Profiles[s.name]
-	tp.Env = nil   // resolve parents only
-	tp.Unset = nil // parent-contribution probe ignores fences
-	probe.Profiles[s.name] = tp
+	tp.Env = nil // resolve parents only
+	probe.Profiles[s.name] = stripWorkingFences(tp)
 	pr, err := probe.ResolveProfile(s.name)
 	if err != nil {
 		return nil
@@ -711,9 +719,7 @@ func listedInheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
 func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.EnvEntry {
 	probe := probeConfig(cfg, s)
 	if !honorFences {
-		tp := probe.Profiles[s.name]
-		tp.Unset = nil // display lists suppressed keys too
-		probe.Profiles[s.name] = tp
+		probe.Profiles[s.name] = stripWorkingFences(probe.Profiles[s.name])
 	}
 	r, err := probe.ResolveProfile(s.name)
 	if err != nil {
