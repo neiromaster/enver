@@ -107,8 +107,10 @@ profiles:
 ```
 
 Merge rules: `default` is overridden when set; profiles union; per-profile env
-keys are overridden per-key; `extends` lists merge as `[global…, local…]`, so a
-local parent takes priority over a global parent on a shared key.
+keys are overridden per-key; when both layers carry a profile's `unset` list it
+stays the overriding layer's verbatim rather than merging; `extends` lists merge
+as `[global…, local…]`, so a local parent takes priority over a global parent on
+a shared key.
 
 ### Inheriting from multiple profiles
 
@@ -167,16 +169,24 @@ load, at every write boundary, and at TUI input time.
 does not set is simply absent from the resolved env, so a reference to it
 expands to whatever the shell exports — matching what the child process gets.
 
-Unsets apply where they are written, never inherited forward: each copy of a
-profile applies its own unset at its turn — the global file's copy first, the
-cwd file's second — so a key the later copy defines survives an earlier copy's
-unset. Down an extends chain the same rule works branch-by-branch: a profile's
-own unset strips what its ancestors supplied, while a sibling parent listed
-alongside contributes fresh values regardless of unsets inside the other
-parent's branch. Author `unset` in YAML like multi-parent `extends` — a single
-name or a list, never a mapping; `enver validate` flags an `unset` naming a
-key the same profile also sets in the same layer's env (`contradictory-unset`;
-a cross-layer pair — say a local unset suppressing a global definition —
+Unsets are layered like everything else, but lists are never unioned across
+copies of a profile: each copy applies its own unset at its turn — the global
+file's fold first, the cwd file's second — so a key the later copy defines
+beats an earlier copy's unset. Fences also keep working along extends chains:
+one strips its target no matter which ancestor supplies the value, so an
+unrelated local override of that profile cannot resurrect it. The reverse is
+just as strict — a mention from a later layer always outruns an earlier fence;
+redefine the key in the cwd copy, or in an ancestor refilled by that layer,
+and the older fence goes silent from there on. Within one file the same rules
+hold branch-by-branch: a profile's own unset strips what its ancestors
+supplied, while a sibling parent listed alongside contributes fresh values
+regardless of unsets inside the other parent's branch.
+
+Author `unset` in YAML like multi-parent `extends` — a single name or a list,
+never a mapping (the interactive `add`/`edit` menus do not manage the list
+yet; edit YAML to change it). `enver validate` flags an `unset` naming a key
+the same profile also sets in the same layer's env (`contradictory-unset`; a
+cross-layer pair — say a local unset suppressing a global definition —
 resolves by ordering instead and draws no warning). On Windows, where env
 names are case-insensitive, unset matching is case-insensitive too.
 
@@ -260,10 +270,11 @@ an `extends`, so **Done** is rejected on an empty profile.
   the local file's `default` when set, otherwise the global file's — a project
   can pin its own default while keeping the user-level one as fallback.
 - **`enver validate`** — audit config health: dangling `extends` and `extends`
-  cycles (errors), and profiles with no env and no extends (warnings). It also
-  checks the global file in isolation and flags a global profile that extends a
-  local-only name (fine in this directory, broken elsewhere). Exits non-zero if
-  any error is found.
+  cycles (errors); profiles with nothing to contribute — no env, no extends, no
+  unset (warning); and a profile that both defines and unsets the same key in
+  one layer (`contradictory-unset`, warning). It also checks the global file in
+  isolation and flags a global profile that extends a local-only name (fine in
+  this directory, broken elsewhere). Exits non-zero if any error is found.
 
 ## Exporting and importing `.env`
 
@@ -281,15 +292,15 @@ enver import prod.env prod --replace   # reset prod to exactly prod.env (confirm
 Imported values are stored **raw** — `$VAR` references stay as templates, not
 expanded — so layered profiles survive the round-trip. `import` **merges** by
 default (imported keys override existing same-named keys); `--replace` wipes the
-profile's own env and `unset` list first and confirms when it would remove keys
-or clear unset entries
-(decline to abort; `--force` skips the prompt; a non-interactive pipe without
-`--force` errors).
+profile's own env and `unset` list first, confirming before it removes keys or
+clears unset entries (decline to abort; `--force` skips the prompt;
+non-interactive pipes without `--force` error out).
 `--extends <profile>` sets or overrides `extends` (otherwise it is preserved,
 including across `--replace`); an empty import without `--extends` is refused.
 The summary prints a diff of what changed: `+` added, `~` overridden,
 `-` removed (values shown in full — the data came from your own .env file).
- Keys the profile's own `unset` list fences are marked `!` — written, but never reaching `show`, `export`, or `enver x`.
+Keys the profile's own `unset` list fences are marked `!` — written, though
+they never reach `show`, `export`, or `enver x`.
 
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
 > file. Mind where it lands; keep values at rest encrypted with `enver encrypt`.
