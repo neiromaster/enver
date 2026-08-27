@@ -373,6 +373,121 @@ func TestSelectActiveLabelCyan(t *testing.T) {
 	}
 }
 
+func TestMultiSelectOrderedSeedsRankOrder(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"c", "a"})
+	got := m.orderedValues()
+	if len(got) != 2 || got[0] != "c" || got[1] != "a" {
+		t.Fatalf("seed order = %v, want [c a] (seed sequence, not option order)", got)
+	}
+}
+
+func TestMultiSelectOrderedSeedSkipsUnknownActionDuplicates(t *testing.T) {
+	opts := []Option{
+		{Value: "a", Label: "A"},
+		{Value: "b", Label: "B"},
+		{Value: "tail", Label: "Back", Action: true},
+	}
+	m := newOrderedMultiModel("t", opts, []string{"zzz", "tail", "b", "b", "a"})
+	got := m.orderedValues()
+	if len(got) != 2 || got[0] != "b" || got[1] != "a" {
+		t.Fatalf("seed order = %v, want [b a] (unknown/action/duplicates skipped)", got)
+	}
+}
+
+func TestMultiSelectOrderedToggleAppendsRank(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"c"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Beta
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	got := m.orderedValues()
+	if len(got) != 2 || got[0] != "c" || got[1] != "b" {
+		t.Fatalf("order after toggle = %v, want [c b] (new picks append at the end)", got)
+	}
+}
+
+func TestMultiSelectOrderedUntoggleShiftsRanks(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a", "b", "c"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Beta (rank 2)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	got := m.orderedValues()
+	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
+		t.Fatalf("order after untoggle = %v, want [a c] (later ranks shift up)", got)
+	}
+}
+
+func TestMultiSelectOrderedReorderKeysMoveRanks(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a", "b", "c"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Beta (rank 2)
+	m = press(m, tea.KeyPressMsg{Text: "<"})
+	got := m.orderedValues()
+	if len(got) != 3 || got[0] != "b" || got[1] != "a" || got[2] != "c" {
+		t.Fatalf("after < = %v, want [b a c]", got)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	got = m.orderedValues()
+	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("after → = %v, want [a b c] (moved back in place)", got)
+	}
+}
+
+func TestMultiSelectOrderedReorderBoundariesAndUnselected(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a", "b"})
+	m = press(m, tea.KeyPressMsg{Text: "<"}) // Alpha holds rank 1: no-op
+	if got := m.orderedValues(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("< on the first rank changed order: %v", got)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Gamma (no rank)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if got := m.orderedValues(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("reorder on an unselected row changed order: %v", got)
+	}
+}
+
+func TestMultiSelectOrderedStarRanksInOptionOrder(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"b"})
+	m = press(m, tea.KeyPressMsg{Text: "*"})
+	got := m.orderedValues()
+	if len(got) != 3 || got[0] != "b" || got[1] != "a" || got[2] != "c" {
+		t.Fatalf("after * = %v, want [b a c] (missing picks append in option order)", got)
+	}
+	m = press(m, tea.KeyPressMsg{Text: "*"})
+	if got := m.orderedValues(); len(got) != 0 {
+		t.Fatalf("second * = %v, want empty (all-off clears ranks)", got)
+	}
+}
+
+func TestMultiSelectOrderedRenderMarks(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a"})
+	view := m.View().Content
+	if !strings.Contains(view, "\x1b[32m 1") {
+		t.Fatalf("rank not rendered as a right-aligned green digit:\n%q", view)
+	}
+	if !strings.Contains(view, "\x1b[2m ·") {
+		t.Fatalf("unselected rows not rendered as a faint dot:\n%q", view)
+	}
+	if strings.Contains(view, "●") {
+		t.Fatal("ordered mode must not render the unordered ● mark")
+	}
+	if !strings.Contains(m.helpText(), "reorder") {
+		t.Fatalf("help text missing reorder keys: %q", m.helpText())
+	}
+}
+
+func TestMultiSelectOrderedRenderDoubleDigits(t *testing.T) {
+	opts := make([]Option, 10)
+	for i := range opts {
+		opts[i] = Option{Value: fmt.Sprintf("v%d", i), Label: fmt.Sprintf("item-%d", i)}
+	}
+	seed := make([]string, 10)
+	for i := range seed {
+		seed[i] = fmt.Sprintf("v%d", i)
+	}
+	m := newOrderedMultiModel("t", opts, seed)
+	if !strings.Contains(m.View().Content, "\x1b[32m10") {
+		t.Fatalf("rank 10 not right-aligned in the two-cell column:\n%q", m.View().Content)
+	}
+}
+
 func TestDimRowRendersFaint(t *testing.T) {
 	m := newSelectModel("t", []Option{
 		{Value: "a", Label: "Alpha"},

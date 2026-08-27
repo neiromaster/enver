@@ -533,17 +533,15 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				settleDefineFence(&s, entry.Key)
 				s.upsert(entry)
 			case actionExtends:
-				picked, err := ui.Select("Extends", append(extendsOptions(pickerCfg, name), pickerTail()...))
-				if err != nil {
+				picked, confirmed, err := ui.MultiSelectOrdered("Edit extends for "+name,
+					append(profileOptions(pickerCfg, name), pickerTail()...), s.extends)
+				if err != nil || !confirmed {
 					continue
 				}
-				if picked == actionCancel {
-					continue
-				}
-				if picked == "" {
+				if len(picked) == 0 {
 					s.extends = nil
 				} else {
-					s.extends = config.Extends{picked}
+					s.extends = config.Extends(picked)
 				}
 			case actionDefault:
 				s.isDefault = !s.isDefault
@@ -730,12 +728,4 @@ func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.En
 		return nil
 	}
 	return inheritedEntries(r.Env, s.envMap())
-}
-
-// extendsOptions builds the picker for changing extends: (none) plus every other
-// profile (the profile itself excluded — self-extends is a cycle).
-func extendsOptions(cfg config.Config, self string) []ui.Option {
-	opts := []ui.Option{{Value: "", Label: "(none)"}}
-	opts = append(opts, profileOptions(cfg, self)...)
-	return opts
 }

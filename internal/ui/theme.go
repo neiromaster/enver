@@ -32,6 +32,7 @@ type theme struct {
 	fieldIdle   lipgloss.Style
 	checkOn     string
 	checkOff    string
+	rank        lipgloss.Style
 	iconStyles  map[string]lipgloss.Style
 }
 
@@ -58,6 +59,7 @@ func defaultTheme() *theme {
 		fieldIdle:   lipgloss.NewStyle().Faint(true).PaddingLeft(2),
 		checkOn:     green.Render("●"),
 		checkOff:    faint.Render("○"),
+		rank:        green,
 		iconStyles: map[string]lipgloss.Style{
 			IconAdd:        green,
 			IconDone:       green,

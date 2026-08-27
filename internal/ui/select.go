@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,9 +17,11 @@ type selectModel struct {
 	title     string
 	options   []Option
 	multi     bool
+	ordered   bool
 	theme     *theme
 	cursor    int
 	selected  map[int]bool
+	order     []int
 	filter    filterState
 	height    int
 	submitted bool
@@ -40,6 +43,70 @@ func newSelectModel(title string, options []Option, multi bool) *selectModel {
 // newCheckedMultiModel is the MultiSelectChecked engine: the same multi model
 // with options whose Value appears in checked pre-marked. Unknown values and
 // action rows never seed a mark.
+// newOrderedMultiModel is the MultiSelectOrdered engine: the multi model with
+// ranks seeded from order. Values are ranked in the sequence given; unknown
+// values, action rows, and duplicates never seed a rank.
+func newOrderedMultiModel(title string, options []Option, order []string) *selectModel {
+	m := newSelectModel(title, options, true)
+	m.ordered = true
+	for _, v := range order {
+		for i, o := range options {
+			if o.Action || o.Value != v {
+				continue
+			}
+			if _, seen := m.rankOf(i); !seen {
+				m.order = append(m.order, i)
+				m.selected[i] = true
+			}
+			break
+		}
+	}
+	return m
+}
+
+// rankOf reports the position of option i in the selection order.
+func (m *selectModel) rankOf(i int) (int, bool) {
+	for r, idx := range m.order {
+		if idx == i {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// shiftRank moves the cursor option one position earlier (<, ←) or later
+// (>, →) in the selection order. Rows without a rank and the boundary ranks
+// are no-ops, as are the keys outside ordered mode.
+func (m *selectModel) shiftRank(delta int) {
+	if !m.ordered {
+		return
+	}
+	nav := m.nav()
+	if len(nav) == 0 {
+		return
+	}
+	r, on := m.rankOf(nav[m.cursor])
+	if !on {
+		return
+	}
+	t := r + delta
+	if t < 0 || t >= len(m.order) {
+		return
+	}
+	m.order[r], m.order[t] = m.order[t], m.order[r]
+}
+
+// orderedValues returns the selected Values in rank order.
+func (m *selectModel) orderedValues() []string {
+	out := make([]string, 0, len(m.order))
+	for _, i := range m.order {
+		if !m.options[i].Action {
+			out = append(out, m.options[i].Value)
+		}
+	}
+	return out
+}
+
 func newCheckedMultiModel(title string, options []Option, checked []string) *selectModel {
 	m := newSelectModel(title, options, true)
 	if len(checked) == 0 {
@@ -70,6 +137,21 @@ func MultiSelectChecked(title string, options []Option, checked []string) ([]str
 	}
 	m := out.(*selectModel)
 	return m.checkedValues(), !m.aborted(), nil
+}
+
+// MultiSelectOrdered is a multi-select that preserves selection order: ranks
+// seed from order (matched by Value, in the sequence given), picking appends
+// to the end, </>/←→ move rows within the order. Confirming reports the
+// selected Values in rank order; leaving without confirming — esc/ctrl+c or
+// enter on an Action row such as Back — reports the current order and false,
+// so callers can tell a bare exit from a session with pending changes.
+func MultiSelectOrdered(title string, options []Option, order []string) ([]string, bool, error) {
+	out, err := run(newOrderedMultiModel(title, options, order))
+	if err != nil {
+		return nil, false, err
+	}
+	m := out.(*selectModel)
+	return m.orderedValues(), !m.aborted(), nil
 }
 
 // checkedValues returns the checked non-Action Values in option order — both
@@ -169,6 +251,10 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = max(0, len(m.nav())-1)
 		case k.Code == tea.KeyPgDown, k.Code == tea.KeyPgUp:
 			m.page(k.Code)
+		case k.Code == tea.KeyLeft, k.Text == "<":
+			m.shiftRank(-1)
+		case k.Code == tea.KeyRight, k.Text == ">":
+			m.shiftRank(+1)
 		}
 		if k.Mod == tea.ModCtrl && (k.Code == 'u' || k.Code == 'd') {
 			step := max(m.viewport()/2, 1)
@@ -257,13 +343,21 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 		if m.options[idx].Action {
 			return
 		}
-		m.selected[idx] = !m.selected[idx]
+		if m.ordered {
+			m.toggleRanked(idx)
+		} else {
+			m.selected[idx] = !m.selected[idx]
+		}
 	case k.Text == "*":
 		var choices []int
 		for _, i := range nav {
 			if !m.options[i].Action {
 				choices = append(choices, i)
 			}
+		}
+		if m.ordered {
+			m.toggleAllRanked(choices)
+			return
 		}
 		allOn := true
 		for _, i := range choices {
@@ -274,6 +368,45 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 		}
 		for _, i := range choices {
 			m.selected[i] = !allOn
+		}
+	}
+}
+
+// toggleRanked flips option idx in ordered mode, keeping the rank slice and the
+// selected set in lockstep: picking appends to the end of the order, dropping
+// removes the rank and shifts later ones up.
+func (m *selectModel) toggleRanked(idx int) {
+	if r, on := m.rankOf(idx); on {
+		m.order = append(m.order[:r], m.order[r+1:]...)
+		delete(m.selected, idx)
+		return
+	}
+	m.order = append(m.order, idx)
+	m.selected[idx] = true
+}
+
+// toggleAllRanked applies * in ordered mode: when every choice is ranked it
+// clears the whole order, otherwise it ranks the missing choices in option
+// order.
+func (m *selectModel) toggleAllRanked(choices []int) {
+	allOn := len(choices) > 0
+	for _, i := range choices {
+		if _, on := m.rankOf(i); !on {
+			allOn = false
+			break
+		}
+	}
+	if allOn {
+		for _, i := range choices {
+			delete(m.selected, i)
+		}
+		m.order = nil
+		return
+	}
+	for _, i := range choices {
+		if _, on := m.rankOf(i); !on {
+			m.order = append(m.order, i)
+			m.selected[i] = true
 		}
 	}
 }
@@ -346,8 +479,10 @@ func (m *selectModel) View() tea.View {
 
 // rowString builds the (unstyled) text of one option row: cursor, an optional
 // multi-select mark, and a fixed-width icon cell so labels align across rows
-// regardless of glyph width. A Dim option fades every cell — except on the
-// cursor row, where the active highlight must stay crisp.
+// regardless of glyph width. In ordered mode the mark is the rank: a
+// right-aligned two-cell digit for ranked rows, a faint dot for the rest.
+// A Dim option fades every cell — except on the cursor row, where the active
+// highlight must stay crisp.
 func (m *selectModel) rowString(i, curOpt int) string {
 	cur := " "
 	if i == curOpt {
@@ -367,7 +502,13 @@ func (m *selectModel) rowString(i, curOpt int) string {
 	}
 	if m.multi && !m.options[i].Action {
 		mark := m.theme.checkOff
-		if m.selected[i] {
+		if m.ordered {
+			if r, on := m.rankOf(i); on {
+				mark = m.theme.rank.Render(fmt.Sprintf("%2d", r+1))
+			} else {
+				mark = m.theme.dim.Render(" ·")
+			}
+		} else if m.selected[i] {
 			mark = m.theme.checkOn
 		}
 		return cur + " " + style.Render(mark) + " " + cell + " " + label
@@ -387,7 +528,10 @@ func (m *selectModel) visibleIndices() []int {
 }
 
 func (m *selectModel) helpText() string {
-	if m.multi {
+	switch {
+	case m.ordered:
+		return "↑↓ move · space toggle · </>/←→ reorder · * all · / filter · enter confirm · esc cancel"
+	case m.multi:
 		return "↑↓ move · space/- toggle · * all · / filter · enter confirm · esc cancel"
 	}
 	return "↑↓ move · / filter · enter select · esc cancel"

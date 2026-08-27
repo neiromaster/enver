@@ -72,8 +72,10 @@ over an earlier parent's explicit override. This is consistent with the
 left-to-right rule and does not affect orthogonal mixins; `enver validate` does
 not warn on overlaps.
 
-**Authoring multiple parents:** `add` and `edit` select a single parent. Set
-several by editing the YAML (`extends: [a, b]`) or via
+**Authoring multiple parents:** `enver edit` composes the full list — parents
+are picked in order and reordered in place (`<`/`>`, `←`/`→`); confirming with
+none picked clears `extends`. `add` still selects a single parent; several can
+also be set by editing the YAML (`extends: [a, b]`) or via
 `enver import <file> <name> --extends a,b`.
 
 ## Suppressing variables (`unset`)

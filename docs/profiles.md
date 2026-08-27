@@ -55,8 +55,10 @@ the menu:
 
 - **Add or edit a variable** — select an existing var to change its value or
   comment, or add a new one (name, value, optional comment, as in `add`).
-- **Change extends** — repoint the profile at another profile or clear it; a
-  choice that would form an `extends` cycle is rejected when you commit.
+- **Change extends** — pick one or more parents; the selection order is the
+  inheritance order and can be rearranged in place (`<`/`>`, `←`/`→`).
+  Confirming with nothing picked clears `extends`, and a choice that would
+  form an `extends` cycle is rejected when you commit.
 - **Toggle default** — set or clear this profile as the default.
 - **Delete variable** — remove one or more of the profile's own variables.
   Keys whose fence would outlive them carry a `· unset` mark on their row, and
