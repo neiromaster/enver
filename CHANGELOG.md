@@ -23,6 +23,13 @@
 - `enver validate` flags a profile that both defines and unsets the same key
   in one layer (`contradictory-unset`, warning); a cross-layer pair resolves
   by ordering instead and draws no warning.
+- `enver edit` manages unsets interactively: a **Manage unsets…** action opens
+  a picker of candidate keys with the declared fences pre-checked (`space`,
+  `-`, or `x` toggles). Fence state renders live in the menu (`⊘ KEY · unset`
+  on own rows; fenced inherited keys leave the resolved view), adding a fence
+  onto a key the profile also defines confirms first like the `validate`
+  warning suggests, and the Done row's unsaved-changes flag now tracks unset
+  edits. `edit` previously round-tripped the unset list untouched.
 - Env key names are validated everywhere they enter a config — YAML load,
   every write boundary, dotenv parsing, TUI input — rejecting anything outside
   `[A-Za-z_][A-Za-z0-9_]*`: names ride unquoted inside eval'd export lines.
