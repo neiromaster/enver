@@ -10,8 +10,9 @@ config, preserving any existing structure and comments:
 
 - **Profile name** — letters, digits, `-`, `_`; must start with a letter or
   digit. Pass it as an argument (`enver add glm`) to skip this prompt.
-- **Extends** — picked from a list of existing profiles (with a `(none)`
-  option). Skipped when no profiles exist yet.
+- **Extends** — one or more parents picked from a list of existing profiles,
+  in inheritance order; reorder in place with `<`/`>` or `←`/`→`, confirm
+  nothing picked for no `extends`. Skipped when no profiles exist yet.
 - **Variables** — for each, enter a name, a value, and an optional comment;
   leave the name blank to finish. A profile needs at least one variable or an
   extends.

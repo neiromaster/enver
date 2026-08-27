@@ -38,7 +38,32 @@ func promptProfileName() (string, bool) {
 	}
 }
 
-func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[string]string) {
+// parentEnvFor resolves the picked extends chain as the inherited backdrop for
+// the collecting summary: parents merge left-to-right, while the target
+// profile's own env and working fences are stripped, so its own keys never
+// read as inherited and a declared unset cannot hide a parent key from the
+// summary. A pending cycle resolves to nothing; commit-time validation
+// reports it.
+func parentEnvFor(cfg config.Config, self string, extends config.Extends) map[string]string {
+	if len(extends) == 0 {
+		return map[string]string{}
+	}
+	probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
+	for k, v := range cfg.Profiles {
+		probe.Profiles[k] = v
+	}
+	tp := probe.Profiles[self]
+	tp.Extends = extends
+	tp.Env = nil
+	probe.Profiles[self] = stripWorkingFences(tp)
+	r, err := probe.ResolveProfile(self)
+	if err != nil {
+		return map[string]string{}
+	}
+	return r.Env
+}
+
+func buildProfile(extends config.Extends, entries []ui.EnvEntry) (config.Profile, map[string]string) {
 	env := make(map[string]string, len(entries))
 	comments := map[string]string{}
 	for _, e := range entries {
@@ -47,7 +72,7 @@ func buildProfile(extends string, entries []ui.EnvEntry) (config.Profile, map[st
 			comments[e.Key] = e.Comment
 		}
 	}
-	return config.Profile{Extends: config.Extends{extends}, Env: env}, comments
+	return config.Profile{Extends: extends, Env: env}, comments
 }
 
 // buildSummary builds the display summary for the collecting env-card: own entries
@@ -122,29 +147,17 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	extends := ""
+	var extends config.Extends
 	if len(names) > 0 {
-		opts := []ui.Option{{Value: "", Label: "(none)"}}
-		for _, n := range names {
-			opts = append(opts, ui.Option{Value: n, Label: n})
-		}
-		defaultExtends := ""
-		if e := targetCfg.Profiles[name].Extends; len(e) > 0 {
-			defaultExtends = e[0]
-		}
-		picked, err := ui.SelectDefault("Extends", opts, defaultExtends)
-		if err != nil {
+		seed := targetCfg.Profiles[name].Extends
+		picked, confirmed, err := ui.MultiSelectOrdered("Extends", profileOptions(pickerCfg, name), seed)
+		if err != nil || !confirmed {
 			return nil
 		}
 		extends = picked
 	}
 
-	parentEnv := map[string]string{}
-	if extends != "" {
-		if r, err := pickerCfg.ResolveProfile(extends); err == nil {
-			parentEnv = r.Env
-		}
-	}
+	parentEnv := parentEnvFor(pickerCfg, name, extends)
 
 	var entries []ui.EnvEntry
 	for {
@@ -158,7 +171,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		}
 		entries = upsertEntry(entries, entry)
 	}
-	if len(entries) == 0 && extends == "" {
+	if len(entries) == 0 && len(extends) == 0 {
 		return fmt.Errorf("a profile needs at least one env var or an extends")
 	}
 

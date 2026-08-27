@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 )
 
@@ -26,7 +27,7 @@ func TestBuildProfile(t *testing.T) {
 		{Key: "API_KEY", Value: "sk-x", Comment: "from vault"},
 		{Key: "MODEL", Value: "claude-sonnet-5"},
 	}
-	prof, comments := buildProfile("anth", entries)
+	prof, comments := buildProfile(config.Extends{"anth"}, entries)
 	if !prof.Extends.Has("anth") {
 		t.Fatalf("extends = %q, want anth", prof.Extends)
 	}
@@ -38,6 +39,55 @@ func TestBuildProfile(t *testing.T) {
 	}
 	if _, ok := comments["MODEL"]; ok {
 		t.Fatal("empty comment should not be recorded")
+	}
+}
+
+func TestBuildProfileExtendsPassesThrough(t *testing.T) {
+	entries := []ui.EnvEntry{{Key: "A", Value: "1"}}
+	multi, _ := buildProfile(config.Extends{"base", "ci"}, entries)
+	if len(multi.Extends) != 2 || multi.Extends[0] != "base" || multi.Extends[1] != "ci" {
+		t.Fatalf("extends = %q, want [base ci] (picked order preserved)", multi.Extends)
+	}
+	none, _ := buildProfile(nil, entries)
+	if len(none.Extends) != 0 {
+		t.Fatalf("empty extends = %q, want none written", none.Extends)
+	}
+}
+
+func TestParentEnvForResolvesChain(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"A": "1"}},
+		"ci":   {Env: map[string]string{"A": "2", "B": "3"}},
+		"dev":  {Env: map[string]string{"A": "own", "C": "own"}, Unset: config.Unsets{"A"}},
+	}}
+	got := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	if got["A"] != "2" || got["B"] != "3" {
+		t.Fatalf("parentEnv = %v, want A=2 (later parent wins), B=3", got)
+	}
+	if _, ok := got["C"]; ok {
+		t.Fatalf("parentEnv = %v, own key C must not leak into inherited", got)
+	}
+	if _, stripped := got["A"]; !stripped {
+		t.Fatal("self's declared unset must not strip the parent backdrop")
+	}
+}
+
+func TestParentEnvForEmptyExtendsIsEmpty(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"dev": {Env: map[string]string{"A": "own"}},
+	}}
+	if got := parentEnvFor(cfg, "dev", nil); len(got) != 0 {
+		t.Fatalf("parentEnv = %v, want empty", got)
+	}
+}
+
+func TestParentEnvForCycleIsEmpty(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Extends: config.Extends{"dev"}, Env: map[string]string{"A": "1"}},
+		"dev":  {},
+	}}
+	if got := parentEnvFor(cfg, "dev", config.Extends{"base"}); len(got) != 0 {
+		t.Fatalf("parentEnv = %v, want empty (pending cycle)", got)
 	}
 }
 

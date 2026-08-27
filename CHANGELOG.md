@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- **New:** `enver edit` composes multi-parent `extends` interactively. The
-  picker preserves selection order — parents are ranked as picked (`1`, `2`,
-  …), `<`/`>` or `←`/`→` move the cursor row within the order, and confirming
-  reports the chain in inheritance order. Previously `edit` could only repoint
-  the profile at a single parent; multi-parent chains required YAML or
-  `enver import`. Confirming with nothing selected clears `extends`.
+- **New:** `add` and `enver edit` compose multi-parent `extends`
+  interactively. The picker preserves selection order — parents are ranked as
+  picked (`1`, `2`, …), `<`/`>` or `←`/`→` move the cursor row within the
+  order, and confirming reports the chain in inheritance order. Previously
+  both commands handled a single parent; multi-parent chains required YAML or
+  `enver import`. In `edit`, confirming with nothing selected clears
+  `extends`; the unused `ui.SelectDefault` helper was removed.
 - **Breaking:** encrypted values now use `enc:v3:argon2id:<t>:<m>:<p>:...` with
   KDF parameters embedded in each value. Only `enc:v3:` is readable; values
   with other `enc:` prefixes fail loudly, as do configs mixing values from
