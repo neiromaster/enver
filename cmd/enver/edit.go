@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -17,6 +18,7 @@ const (
 	actionDefault       = "action:default"
 	actionDeleteVar     = "action:delete-var"
 	actionDeleteProfile = "action:delete-profile"
+	actionManageUnsets  = "action:manage-unsets"
 	actionDone          = "action:done"
 	actionCancel        = "action:cancel"
 )
@@ -33,10 +35,12 @@ type editState struct {
 	deleteProfile bool
 
 	// orig* snapshot the loaded profile for unsaved-change detection on the Done
-	// row. origEntries is a copy, so in-place edits to entries never reach it.
+	// row. origEntries and origUnset are copies, so in-place edits to them never
+	// reach the snapshots.
 	origExtends   config.Extends
 	origIsDefault bool
 	origEntries   []ui.EnvEntry
+	origUnset     config.Unsets
 }
 
 func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
@@ -58,6 +62,7 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 		origExtends:   prof.Extends,
 		origIsDefault: isDefault,
 		origEntries:   append([]ui.EnvEntry(nil), entries...),
+		origUnset:     slices.Clone(prof.Unset),
 	}
 }
 
@@ -122,6 +127,9 @@ func (s editState) canCommit() error {
 // pending profile deletion.
 func (s editState) dirty() bool {
 	if !extendsEqual(s.extends, s.origExtends) || s.isDefault != s.origIsDefault || s.deleteProfile {
+		return true
+	}
+	if !slices.Equal(s.unset, s.origUnset) {
 		return true
 	}
 	if len(s.entries) != len(s.origEntries) {
@@ -194,11 +202,19 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
-		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
-		if overrideKeys[e.Key] {
-			opt.Icon = ui.IconOverride
+		// Fence state outranks the override mark: a declared unset hides the
+		// variable from the resolved env no matter what it shadows.
+		switch {
+		case slices.Contains(s.unset, e.Key):
+			opts = append(opts, ui.Option{Value: e.Key, Icon: ui.IconUnset,
+				Label: fmt.Sprintf("%s = %s · unset", e.Key, e.Value)})
+		default:
+			opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
+			if overrideKeys[e.Key] {
+				opt.Icon = ui.IconOverride
+			}
+			opts = append(opts, opt)
 		}
-		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
 		opts = append(opts, ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)})
@@ -209,10 +225,18 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		ui.Option{Value: actionExtends, Icon: ui.IconExtends, Label: extendsLabel(s.extends)},
 		ui.Option{Value: actionDefault, Icon: ui.IconDefault, Label: defaultLabel(s.isDefault)},
 		ui.Option{Value: actionDeleteVar, Icon: ui.IconDeleteVar, Label: "Delete variable…"},
+		ui.Option{Value: actionManageUnsets, Icon: ui.IconUnset, Label: manageUnsetsLabel(len(s.unset))},
 		ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"},
 		ui.Option{Value: actionDone, Icon: ui.IconDone, Label: doneLabel(s.dirty())},
 	)
 	return opts
+}
+
+func manageUnsetsLabel(n int) string {
+	if n == 0 {
+		return "Manage unsets…"
+	}
+	return fmt.Sprintf("Manage unsets… (%d)", n)
 }
 
 func pickerTail() []ui.Option {
@@ -220,6 +244,66 @@ func pickerTail() []ui.Option {
 		ui.Separator(),
 		{Value: actionCancel, Icon: ui.IconBack, Label: "Back", Action: true},
 	}
+}
+
+// manageUnsetOptions builds the Manage-unsets picker: declared fences first
+// (file order — including fences whose target resolves nowhere), then unset
+// own entries, then unset inherited ones, plus the Back tail. Values are bare
+// keys and unique across groups; MultiSelectChecked pre-marks the declared
+// ones via the state's unset list.
+func manageUnsetOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
+	opts := make([]ui.Option, 0, len(s.unset)+len(s.entries)+len(inherited)+2)
+	for _, k := range s.unset {
+		opts = append(opts, ui.Option{Value: k, Icon: ui.IconUnset, Label: k + " (declared here)"})
+	}
+	for _, e := range s.entries {
+		if slices.Contains(s.unset, e.Key) {
+			continue
+		}
+		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (own)"})
+	}
+	for _, e := range inherited {
+		if slices.Contains(s.unset, e.Key) {
+			continue
+		}
+		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (inherited)"})
+	}
+	return append(opts, pickerTail()...)
+}
+
+// applyUnsetPicks rewrites the working unset list from confirmed picks:
+// surviving fences keep their file order, newly picked keys append in pick
+// order. It returns newly-added fences whose key is also an own env entry
+// here — the same-layer pair validate warns about.
+func (s *editState) applyUnsetPicks(picked []string) []string {
+	pickedSet := make(map[string]bool, len(picked))
+	for _, k := range picked {
+		pickedSet[k] = true
+	}
+	wasDeclared := make(map[string]bool, len(s.unset))
+	for _, k := range s.unset {
+		wasDeclared[k] = true
+	}
+	var next config.Unsets
+	for _, k := range s.unset {
+		if pickedSet[k] {
+			next = append(next, k)
+		}
+	}
+	var conflicts []string
+	for _, k := range picked {
+		if wasDeclared[k] {
+			continue
+		}
+		if !slices.Contains(next, k) {
+			next = append(next, k)
+		}
+		if _, ok := s.find(k); ok {
+			conflicts = append(conflicts, k)
+		}
+	}
+	s.unset = next
+	return conflicts
 }
 
 // deleteVarOptions builds the delete picker: every own entry, with overrides
@@ -386,6 +470,27 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					}
 					s.deleteKey(key)
 				}
+			case actionManageUnsets:
+				picked, err := ui.MultiSelectChecked(fmt.Sprintf("Manage unsets (%s)", name),
+					manageUnsetOptions(s, inherited), s.unset)
+				if err != nil {
+					continue // sub-abort → back to menu
+				}
+				// Entering on the Back tail cancels wholesale.
+				if len(picked) == 1 && picked[0] == actionCancel {
+					continue
+				}
+				before := slices.Clone(s.unset)
+				conflicts := s.applyUnsetPicks(picked)
+				if len(conflicts) > 0 {
+					q := fmt.Sprintf("Profile also defines %s — a same-layer define+unset pair enver validate warns about. Keep?",
+						strings.Join(conflicts, ", "))
+					ans, cerr := ui.Confirm(q, false)
+					if cerr != nil || !ans {
+						s.unset = before
+						continue
+					}
+				}
 			case actionDeleteProfile:
 				if err := guardRemovable(cfg, name); err != nil {
 					fmt.Println(" ", err)
@@ -498,6 +603,7 @@ func probeConfig(cfg config.Config, s editState) config.Config {
 	tp := probe.Profiles[s.name]
 	tp.Extends = s.extends
 	tp.Env = s.envMap()
+	tp.Unset = s.unset
 	probe.Profiles[s.name] = tp
 	return probe
 }

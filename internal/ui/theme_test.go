@@ -21,6 +21,7 @@ func TestThemeIconSemanticColors(t *testing.T) {
 		{IconDeleteVar, "31m"},  // red
 		{IconDeleteProf, "31m"}, // red
 		{IconBack, "36m"},       // cyan
+		{IconUnset, "31m"},      // red
 	}
 	for _, c := range cases {
 		got := th.icon(c.glyph)

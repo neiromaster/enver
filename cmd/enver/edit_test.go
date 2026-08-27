@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -379,4 +380,175 @@ func TestMenuOptionsInheritedUsesIcon(t *testing.T) {
 		}
 	}
 	t.Fatal("inherited option not found in menu")
+}
+
+func findOption(t *testing.T, opts []ui.Option, value string) ui.Option {
+	t.Helper()
+	for _, o := range opts {
+		if o.Value == value {
+			return o
+		}
+	}
+	t.Fatalf("option %q not found", value)
+	return ui.Option{}
+}
+
+func TestEditStateDirtyDetectsUnsetChanges(t *testing.T) {
+	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
+	if s.dirty() {
+		t.Fatal("freshly loaded unset list should be clean")
+	}
+	s.unset = append(s.unset, "Y")
+	if !s.dirty() {
+		t.Fatal("appended unset should be dirty")
+	}
+	s.unset = config.Unsets{"X"}
+	if s.dirty() {
+		t.Fatal("restored unset list should be clean again")
+	}
+	s.unset = nil
+	if !s.dirty() {
+		t.Fatal("removed unset fence should be dirty")
+	}
+}
+
+func TestMenuOptionsManageUnsetsRow(t *testing.T) {
+	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
+	opt := findOption(t, s.menuOptions(nil, nil), actionManageUnsets)
+	if opt.Icon != ui.IconUnset {
+		t.Fatalf("manage row icon = %q, want %q", opt.Icon, ui.IconUnset)
+	}
+	if !strings.Contains(opt.Label, "Manage unsets") || !strings.Contains(opt.Label, "(1)") {
+		t.Fatalf("manage row label missing name/count: %q", opt.Label)
+	}
+
+	s0 := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	if got := findOption(t, s0.menuOptions(nil, nil), actionManageUnsets).Label; strings.Contains(got, "(") {
+		t.Fatalf("empty list should omit the count suffix: %q", got)
+	}
+}
+
+func TestMenuOptionsMarksFencedOwnVar(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"SHADOW": "from-base"}},
+	}}
+	s := newEditState("p",
+		config.Profile{Extends: config.Extends{"base"},
+			Env:   map[string]string{"SHADOW": "mine", "PLAIN": "v"},
+			Unset: config.Unsets{"SHADOW"}},
+		nil, false)
+	opts := s.menuOptions(inheritedForState(cfg, s), overrideKeySet(cfg, s))
+	fenced := findOption(t, opts, "SHADOW")
+	if fenced.Icon != ui.IconUnset {
+		t.Fatalf("fenced var icon = %q, want %q (fence outranks override)", fenced.Icon, ui.IconUnset)
+	}
+	if !strings.Contains(fenced.Label, "· unset") {
+		t.Fatalf("fenced var label missing · unset marker: %q", fenced.Label)
+	}
+	plain := findOption(t, opts, "PLAIN")
+	if plain.Icon != "" || strings.Contains(plain.Label, "· unset") {
+		t.Fatalf("unfenced own var should render plain, got %q / %q", plain.Icon, plain.Label)
+	}
+}
+
+func TestInheritedForStateExcludesDeclaredUnset(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"FROM_BASE": "b"}},
+	}}
+	s := newEditState("a",
+		config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
+			Unset: config.Unsets{"FROM_BASE"}},
+		nil, false)
+	if got := inheritedForState(cfg, s); len(got) != 0 {
+		t.Fatalf("declared-unset inherited key still resolved: %+v", got)
+	}
+	s.unset = nil
+	if got := inheritedForState(cfg, s); len(got) != 1 || got[0].Key != "FROM_BASE" {
+		t.Fatalf("lifting the fence should re-expose inherited key, got %+v", got)
+	}
+}
+
+func TestManageUnsetOptionsGroupsOrderAndDedupe(t *testing.T) {
+	inherited := []ui.EnvEntry{{Key: "API_KEY", Value: "k"}, {Key: "CACHE_TTL", Value: "c"}}
+	s := newEditState("p",
+		config.Profile{Env: map[string]string{"RETRIES": "5", "OWN": "x"},
+			Unset: config.Unsets{"CACHE_TTL", "ZZZ"}},
+		nil, false)
+	var vals []string
+	for _, o := range manageUnsetOptions(s, inherited) {
+		if o.Separator {
+			continue
+		}
+		vals = append(vals, o.Value)
+	}
+	want := []string{"CACHE_TTL", "ZZZ", "OWN", "RETRIES", "API_KEY", actionCancel}
+	if len(vals) != len(want) {
+		t.Fatalf("option values = %v, want %v", vals, want)
+	}
+	for i := range want {
+		if vals[i] != want[i] {
+			t.Fatalf("option values[%d] = %q, want %q (full: %v)", i, vals[i], want[i], vals)
+		}
+	}
+	declared := findOption(t, manageUnsetOptions(s, inherited), "CACHE_TTL")
+	if declared.Icon != ui.IconUnset || !strings.Contains(declared.Label, "(declared here)") {
+		t.Fatalf("declared option should carry ⊘ + hint, got %q / %q", declared.Icon, declared.Label)
+	}
+	if got := findOption(t, manageUnsetOptions(s, inherited), "RETRIES").Label; !strings.Contains(got, "(own)") {
+		t.Fatalf("own candidate label missing (own): %q", got)
+	}
+	if got := findOption(t, manageUnsetOptions(s, inherited), "API_KEY").Label; !strings.Contains(got, "(inherited)") {
+		t.Fatalf("inherited candidate label missing (inherited): %q", got)
+	}
+}
+
+func TestApplyUnsetPicksDiffAndConflicts(t *testing.T) {
+	s := newEditState("p",
+		config.Profile{Env: map[string]string{"A": "1", "B": "2"}, Unset: config.Unsets{"X"}},
+		nil, false)
+	conflicts := s.applyUnsetPicks([]string{"B", "X", "NEW"})
+	if !slices.Equal(s.unset, config.Unsets{"X", "B", "NEW"}) {
+		t.Fatalf("unset after picks = %v, want [X B NEW] (survivors keep order, adds append)", s.unset)
+	}
+	if len(conflicts) != 1 || conflicts[0] != "B" {
+		t.Fatalf("same-layer conflicts = %v, want [B]", conflicts)
+	}
+	// Re-applying the same set is a no-op with no fresh conflicts.
+	conflicts = s.applyUnsetPicks([]string{"B", "X", "NEW"})
+	if conflicts != nil || !slices.Equal(s.unset, config.Unsets{"X", "B", "NEW"}) {
+		t.Fatalf("re-apply changed state or reported conflicts: %v / %v", conflicts, s.unset)
+	}
+	// Dropping every pick empties the list.
+	s.applyUnsetPicks(nil)
+	if len(s.unset) != 0 {
+		t.Fatalf("empty picks should clear unsets, got %v", s.unset)
+	}
+}
+
+func TestCommitEditRoundTripsUnset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p",
+		config.Profile{Env: map[string]string{"A": "1"}, Comments: map[string]string{"A": "hint"},
+			Unset: config.Unsets{"F1", "F2"}},
+		false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, comments, isDefault, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{"p": prof}}
+	s := newEditState("p", prof, comments, isDefault)
+	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new"})
+	if err := commitEdit(path, cfg, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	gotProf, _, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(gotProf.Unset, config.Unsets{"F1", "F2"}) {
+		t.Fatalf("unset not round-tripped through edit: %v", gotProf.Unset)
+	}
 }

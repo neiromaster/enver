@@ -37,6 +37,37 @@ func newSelectModel(title string, options []Option, multi bool) *selectModel {
 	}
 }
 
+// newCheckedMultiModel is the MultiSelectChecked engine: the same multi model
+// with options whose Value appears in checked pre-marked. Unknown values and
+// action rows never seed a mark.
+func newCheckedMultiModel(title string, options []Option, checked []string) *selectModel {
+	m := newSelectModel(title, options, true)
+	if len(checked) == 0 {
+		return m
+	}
+	on := make(map[string]bool, len(checked))
+	for _, v := range checked {
+		on[v] = true
+	}
+	for i, o := range options {
+		if !o.Action && on[o.Value] {
+			m.selected[i] = true
+		}
+	}
+	return m
+}
+
+// MultiSelectChecked is MultiSelect with pre-checked rows (matched by Value).
+// Confirming returns the still-checked values; selecting an Action row (e.g.
+// Back) returns just that row's value like MultiSelect does.
+func MultiSelectChecked(title string, options []Option, checked []string) ([]string, error) {
+	out, err := run(newCheckedMultiModel(title, options, checked))
+	if err != nil {
+		return nil, err
+	}
+	return out.(*selectModel).multiResult(), nil
+}
+
 func (m *selectModel) Init() tea.Cmd { return nil }
 
 func (m *selectModel) nav() []int {
@@ -204,7 +235,7 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 		return
 	}
 	switch {
-	case k.Code == tea.KeySpace, k.Text == "x":
+	case k.Code == tea.KeySpace, k.Text == "x", k.Text == "-":
 		idx := nav[m.cursor]
 		if m.options[idx].Action {
 			return
@@ -323,7 +354,7 @@ func (m *selectModel) visibleIndices() []int {
 
 func (m *selectModel) helpText() string {
 	if m.multi {
-		return "↑↓ move · space toggle · * all · / filter · enter confirm · esc cancel"
+		return "↑↓ move · space/- toggle · * all · / filter · enter confirm · esc cancel"
 	}
 	return "↑↓ move · / filter · enter select · esc cancel"
 }

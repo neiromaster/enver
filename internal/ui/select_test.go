@@ -272,6 +272,45 @@ func TestSelectDefaultSkipsSeparator(t *testing.T) {
 	}
 }
 
+func TestMultiSelectCheckedSeedsSelection(t *testing.T) {
+	m := newCheckedMultiModel("t", opts3(), []string{"b"})
+	if !m.selected[1] {
+		t.Fatal("checked value b was not pre-selected")
+	}
+	if m.selected[0] || m.selected[2] {
+		t.Fatalf("unchecked rows were pre-selected: %v", m.selected)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Beta
+	m = press(m, tea.KeyPressMsg{Text: "x"})         // uncheck b again
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := m.multiResult()
+	if len(got) != 0 {
+		t.Fatalf("multiResult after unchecking = %v, want empty", got)
+	}
+}
+
+func TestMultiSelectCheckedIgnoresUnknownValues(t *testing.T) {
+	m := newCheckedMultiModel("t", opts3(), []string{"zzz"})
+	for i := range opts3() {
+		if m.selected[i] {
+			t.Fatalf("unknown checked value selected option %d", i)
+		}
+	}
+}
+
+func TestMultiSelectMinusKeyToggles(t *testing.T) {
+	m := newSelectModel("t", opts3(), true)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // Beta
+	m = press(m, tea.KeyPressMsg{Text: "-"})
+	if !m.selected[1] {
+		t.Fatal("'-' did not toggle the cursor option")
+	}
+	m = press(m, tea.KeyPressMsg{Text: "-"})
+	if m.selected[1] {
+		t.Fatal("'-' did not untoggle the cursor option")
+	}
+}
+
 func TestSelectActiveLabelCyan(t *testing.T) {
 	m := newSelectModel("t", []Option{
 		{Value: "a", Label: "Add", Icon: IconAdd},
