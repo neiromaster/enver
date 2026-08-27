@@ -59,16 +59,21 @@ the menu:
   choice that would form an `extends` cycle is rejected when you commit.
 - **Toggle default** — set or clear this profile as the default.
 - **Delete variable** — remove one or more of the profile's own variables.
+  Keys whose fence would outlive them carry a `· unset` mark on their row, and
+  deleting one says so before you leave the screen.
 - **Manage unsets** — choose which keys this profile must never set. Declared
   fences open pre-checked at the top (`⊘ … (declared here)`); remaining own
   and inherited keys are candidates below. Inside the picker,
   `space`/`-`/`x` toggle. Declaring a fence takes effect in the menu right
   away: the profile's own row grows a `· unset` mark (`⊘`), and a fenced
   inherited key disappears from the inherited view since it no longer
-  resolves. Fencing a key the profile also defines asks for confirmation,
-  because that same-layer pair is what `validate` warns about. A fence
-  outlives the variable it names — delete both separately if that is what you
-  mean.
+  resolves. Fencing a key the profile also defines asks for confirmation —
+  declining drops just that fence, not the rest of the pass — and so does
+  adding or renaming a variable onto an already-fenced key, where declining
+  lifts the fence instead. Confirming with nothing checked removes every
+  declared fence, behind its own confirmation. Leaving mid-edit offers to
+  resume the toggles rather than discarding them. A fence outlives the
+  variable it names — delete both separately if that is what you mean.
 - **Delete profile** — remove the whole profile. It is refused while other
   profiles extend it; if the profile is the default, the default is cleared
   along with it (see `remove` below).

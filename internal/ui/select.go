@@ -58,14 +58,31 @@ func newCheckedMultiModel(title string, options []Option, checked []string) *sel
 }
 
 // MultiSelectChecked is MultiSelect with pre-checked rows (matched by Value).
-// Confirming returns the still-checked values; selecting an Action row (e.g.
-// Back) returns just that row's value like MultiSelect does.
-func MultiSelectChecked(title string, options []Option, checked []string) ([]string, error) {
+// Confirming reports (values, true, nil) where values are the still-checked
+// Values in option order. Leaving without confirming — esc/ctrl+c or enter on
+// an Action row such as Back — reports (state, false, nil), state being the
+// checkbox layout at that moment, so callers can tell a bare exit from a
+// session that had toggles pending. Action rows never appear in values.
+func MultiSelectChecked(title string, options []Option, checked []string) ([]string, bool, error) {
 	out, err := run(newCheckedMultiModel(title, options, checked))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return out.(*selectModel).multiResult(), nil
+	m := out.(*selectModel)
+	return m.checkedValues(), !m.aborted(), nil
+}
+
+// checkedValues returns the checked non-Action Values in option order — both
+// when the session was confirmed and when it was abandoned mid-edit.
+func (m *selectModel) checkedValues() []string {
+	values := make([]string, 0, len(m.selected))
+	for i, o := range m.options {
+		if o.Action || !m.selected[i] {
+			continue
+		}
+		values = append(values, o.Value)
+	}
+	return values
 }
 
 func (m *selectModel) Init() tea.Cmd { return nil }
@@ -262,6 +279,15 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 }
 
 func (m *selectModel) Canceled() bool { return m.canceled }
+
+// aborted reports whether the session ended without a confirm: esc/ctrl+c, or
+// enter on an Action row such as the Back tail.
+func (m *selectModel) aborted() bool {
+	if m.canceled {
+		return true
+	}
+	return m.chosen >= 0 && m.chosen < len(m.options) && m.options[m.chosen].Action
+}
 
 func (m *selectModel) singleResult() string {
 	if m.chosen >= 0 && m.chosen < len(m.options) {

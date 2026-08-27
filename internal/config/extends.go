@@ -35,13 +35,15 @@ func (e *Extends) UnmarshalYAML(value *yaml.Node) error {
 type Unsets []string
 
 // UnmarshalYAML accepts unset as a scalar or a sequence, normalizing both to a
-// slice. A null or empty scalar yields nil (no unsets).
+// slice with duplicates collapsed at first occurrence (case-variants too on
+// Windows), so hand-authored repeats cannot survive into the edit UI or the
+// rewritten file. A null or empty scalar yields nil (no unsets).
 func (u *Unsets) UnmarshalYAML(value *yaml.Node) error {
 	names, err := decodeNameList(value, "unset")
 	if err != nil {
 		return err
 	}
-	*u = Unsets(names)
+	*u = Unsets(appendUniq(nil, names...))
 	return nil
 }
 

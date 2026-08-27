@@ -333,6 +333,48 @@ func TestOverrideSeedFillsValueAndComment(t *testing.T) {
 	}
 }
 
+func TestDeleteVarOptionsMarksFences(t *testing.T) {
+	s := newEditState("p",
+		config.Profile{Env: map[string]string{"FKEY": "v", "OWN": "x"}, Unset: config.Unsets{"FKEY"}},
+		nil, false)
+	opts := deleteVarOptions(s, nil)
+	fenced := findOption(t, opts, "FKEY")
+	if fenced.Icon != ui.IconUnset || !strings.Contains(fenced.Label, "· unset") {
+		t.Fatalf("fenced row = %q / %q, want ⊘ · unset", fenced.Icon, fenced.Label)
+	}
+	plain := findOption(t, opts, "OWN")
+	if plain.Icon != "" || strings.Contains(plain.Label, "· unset") {
+		t.Fatalf("unfenced row = %q / %q, want plain", plain.Icon, plain.Label)
+	}
+}
+
+func TestOverrideKeySetIgnoresWorkingFences(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"SHADOW": "from-base"}},
+	}}
+	s := newEditState("p",
+		config.Profile{Extends: config.Extends{"base"},
+			Env:   map[string]string{"SHADOW": "mine"},
+			Unset: config.Unsets{"SHADOW"}},
+		nil, false)
+	if !overrideKeySet(cfg, s)["SHADOW"] {
+		t.Fatal("a fenced override should still count as parent-contributed")
+	}
+	// The resolved inherited view stays fence-aware — the two probes disagree on purpose.
+	if got := inheritedForState(cfg, s); len(got) != 0 {
+		t.Fatalf("fenced key leaked into the resolved inherited view: %+v", got)
+	}
+}
+
+func TestSettleDefineFenceLiftsOnDecline(t *testing.T) {
+	s := newEditState("p",
+		config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X", "FKEY"}}, nil, false)
+	settleDefineFence(&s, "PLAIN")
+	if !nameSetsEqual(s.unset, config.Unsets{"X", "FKEY"}) {
+		t.Fatalf("unfenced define touched the list: %v", s.unset)
+	}
+}
+
 func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
@@ -502,26 +544,52 @@ func TestManageUnsetOptionsGroupsOrderAndDedupe(t *testing.T) {
 	}
 }
 
-func TestApplyUnsetPicksDiffAndConflicts(t *testing.T) {
-	s := newEditState("p",
-		config.Profile{Env: map[string]string{"A": "1", "B": "2"}, Unset: config.Unsets{"X"}},
-		nil, false)
-	conflicts := s.applyUnsetPicks([]string{"B", "X", "NEW"})
-	if !slices.Equal(s.unset, config.Unsets{"X", "B", "NEW"}) {
-		t.Fatalf("unset after picks = %v, want [X B NEW] (survivors keep order, adds append)", s.unset)
+func TestPlanUnsetsSurvivorsAppendConflicts(t *testing.T) {
+	own := map[string]bool{"B": true}
+	next, conflicts := planUnsets(config.Unsets{"X"}, []string{"B", "X", "NEW"}, func(k string) bool { return own[k] })
+	if !slices.Equal(next, config.Unsets{"X", "B", "NEW"}) {
+		t.Fatalf("next = %v, want [X B NEW] (survivors keep order, adds append)", next)
 	}
 	if len(conflicts) != 1 || conflicts[0] != "B" {
 		t.Fatalf("same-layer conflicts = %v, want [B]", conflicts)
 	}
-	// Re-applying the same set is a no-op with no fresh conflicts.
-	conflicts = s.applyUnsetPicks([]string{"B", "X", "NEW"})
-	if conflicts != nil || !slices.Equal(s.unset, config.Unsets{"X", "B", "NEW"}) {
-		t.Fatalf("re-apply changed state or reported conflicts: %v / %v", conflicts, s.unset)
+	// Re-planning the same set is stable with no fresh conflicts.
+	next2, conflicts2 := planUnsets(next, []string{"B", "X", "NEW"}, func(k string) bool { return own[k] })
+	if conflicts2 != nil || !slices.Equal(next2, config.Unsets{"X", "B", "NEW"}) {
+		t.Fatalf("re-plan changed the list or reported conflicts: %v / %v", conflicts2, next2)
 	}
-	// Dropping every pick empties the list.
-	s.applyUnsetPicks(nil)
-	if len(s.unset) != 0 {
-		t.Fatalf("empty picks should clear unsets, got %v", s.unset)
+}
+
+func TestPlanUnsetsCollapsesDuplicatePicks(t *testing.T) {
+	next, _ := planUnsets(nil, []string{"A", "A", "B", "A"}, func(string) bool { return false })
+	if !slices.Equal(next, config.Unsets{"A", "B"}) {
+		t.Fatalf("next = %v, want [A B]", next)
+	}
+}
+
+func TestDropUnsetKeyStripsOnlyTarget(t *testing.T) {
+	got := dropUnsetKey(config.Unsets{"A", "B", "C"}, "B")
+	if !slices.Equal(got, config.Unsets{"A", "C"}) {
+		t.Fatalf("drop = %v, want [A C]", got)
+	}
+	if kept := dropUnsetKey(config.Unsets{"A"}, "ZZZ"); !slices.Equal(kept, config.Unsets{"A"}) {
+		t.Fatalf("missing key should be a no-op, got %v", kept)
+	}
+	if len(dropUnsetKey(nil, "A")) != 0 {
+		t.Fatal("empty input should stay empty")
+	}
+}
+
+func TestEditStateDirtyIgnoresUnsetReorder(t *testing.T) {
+	s := newEditState("p",
+		config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"FA", "FB"}}, nil, false)
+	s.unset = config.Unsets{"FB", "FA"}
+	if s.dirty() {
+		t.Fatal("semantically inert unset reorder flagged as unsaved changes")
+	}
+	s.unset = config.Unsets{"FB"}
+	if !s.dirty() {
+		t.Fatal("a dropped fence was not detected through the reorder path")
 	}
 }
 

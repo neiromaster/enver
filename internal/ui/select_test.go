@@ -298,6 +298,55 @@ func TestMultiSelectCheckedIgnoresUnknownValues(t *testing.T) {
 	}
 }
 
+// checkedTestOptions is a checked-multi list with an action tail.
+func checkedTestOptions() []Option {
+	return []Option{
+		{Value: "a", Label: "A"},
+		{Value: "b", Label: "B"},
+		{Value: "back", Label: "Back", Action: true},
+	}
+}
+
+func TestMultiSelectCheckedEscAbortsButKeepsState(t *testing.T) {
+	m := newCheckedMultiModel("t", checkedTestOptions(), []string{"a"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto B
+	m = press(m, tea.KeyPressMsg{Text: "x"})         // toggle B on
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !m.aborted() {
+		t.Fatal("esc should count as aborted")
+	}
+	got := m.checkedValues()
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("checkedValues after esc = %v, want [a b]", got)
+	}
+}
+
+func TestMultiSelectCheckedEnterOnActionAborts(t *testing.T) {
+	m := newCheckedMultiModel("t", checkedTestOptions(), nil)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace}) // toggle A
+	m = press(m, tea.KeyPressMsg{Text: "G"})          // jump to the Back tail
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.aborted() {
+		t.Fatal("enter on Back should count as aborted")
+	}
+	got := m.checkedValues()
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("checkedValues = %v, want [a] with no action value leaked", got)
+	}
+}
+
+func TestMultiSelectCheckedConfirmReportsConfirmed(t *testing.T) {
+	m := newCheckedMultiModel("t", checkedTestOptions(), []string{"a"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.aborted() {
+		t.Fatal("plain confirm should not be aborted")
+	}
+	got := m.checkedValues()
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("confirmed values = %v, want [a]", got)
+	}
+}
+
 func TestMultiSelectMinusKeyToggles(t *testing.T) {
 	m := newSelectModel("t", opts3(), true)
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // Beta

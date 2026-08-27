@@ -26,10 +26,17 @@
 - `enver edit` manages unsets interactively: a **Manage unsets…** action opens
   a picker of candidate keys with the declared fences pre-checked (`space`,
   `-`, or `x` toggles). Fence state renders live in the menu (`⊘ KEY · unset`
-  on own rows; fenced inherited keys leave the resolved view), adding a fence
-  onto a key the profile also defines confirms first like the `validate`
-  warning suggests, and the Done row's unsaved-changes flag now tracks unset
-  edits. `edit` previously round-tripped the unset list untouched.
+  on own rows; fenced inherited keys leave the resolved view), and every route
+  into a same-layer define+unset pair confirms first like the `validate`
+  warning suggests: picking such a key asks — declining drops just the
+  disputed fences, not the rest of the pass — adding or renaming onto an
+  already-fenced key asks (declining lifts the fence), and confirming a full
+  wipe asks before it lands. Leaving the picker mid-edit offers to resume the
+  pending toggles rather than discarding them silently; the delete picker
+  marks keys whose fence would outlive the deletion; the Done row's
+  unsaved-changes flag compares unset edits order-insensitively; duplicate
+  entries in hand-written `unset:` lists collapse at load. `edit` previously
+  round-tripped the unset list untouched.
 - Env key names are validated everywhere they enter a config — YAML load,
   every write boundary, dotenv parsing, TUI input — rejecting anything outside
   `[A-Za-z_][A-Za-z0-9_]*`: names ride unquoted inside eval'd export lines.

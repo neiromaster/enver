@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -328,7 +329,7 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	for _, e := range d.removed {
 		fmt.Fprintf(&b, "  - %s = %s\n", e.key, e.val)
 	}
-	if !extendsEqual(extendsToWrite, oldExtends) {
+	if !slices.Equal(extendsToWrite, oldExtends) {
 		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))
 	}
 	fmt.Fprintf(&b, "Run `enver encrypt %s` to encrypt secrets.\n", name)

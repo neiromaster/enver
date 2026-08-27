@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -432,5 +433,21 @@ func TestUnsetCoversBothSpellings(t *testing.T) {
 	}
 	if _, ok := r.Env["Path"]; ok {
 		t.Fatalf("posix env = %v, want Path deleted by its own unset", r.Env)
+	}
+}
+
+func TestUnmarshalUnsetDeduplicatesRepeats(t *testing.T) {
+	var p Profile
+	src := `
+env:
+  A: "1"
+unset: [K2, K1, K2]
+`
+	if err := yaml.Unmarshal([]byte(src), &p); err != nil {
+		t.Fatal(err)
+	}
+	want := Unsets{"K2", "K1"}
+	if !slices.Equal(p.Unset, want) {
+		t.Fatalf("unset after load = %v, want %v (first occurrence kept, repeats dropped)", p.Unset, want)
 	}
 }
