@@ -544,27 +544,43 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				picked, confirmed, err := ui.MultiSelectChecked("Variables to delete", deleteVarOptions(s, overrideKeySet(cfg, s)), nil)
-				if err != nil || !confirmed {
-					continue
-				}
-				var deleted []string
-				for _, key := range picked {
-					if _, ok := s.find(key); ok {
-						deleted = append(deleted, key)
+				seed := []string{}
+				for {
+					picked, confirmed, err := ui.MultiSelectChecked("Variables to delete",
+						deleteVarOptions(s, overrideKeySet(cfg, s)), seed)
+					if err != nil {
+						break // sub-abort → back to menu
 					}
-					s.deleteKey(key)
-				}
-				var stillFenced []string
-				for _, k := range deleted {
-					if config.UnsetsHasKey(s.unset, k) {
-						stillFenced = append(stillFenced, k)
+					if !confirmed {
+						if slices.Equal(picked, seed) {
+							break
+						}
+						stay, cerr := ui.Confirm("Deletions pending — keep selection?", false)
+						if cerr != nil || !stay {
+							break
+						}
+						seed = picked
+						continue
 					}
-				}
-				slices.Sort(stillFenced)
-				if len(stillFenced) > 0 {
-					fmt.Printf("  %s deleted but its unset fence stands — lift it under Manage unsets\n",
-						strings.Join(stillFenced, ", "))
+					var deleted []string
+					for _, key := range picked {
+						if _, ok := s.find(key); ok {
+							deleted = append(deleted, key)
+						}
+						s.deleteKey(key)
+					}
+					var stillFenced []string
+					for _, k := range deleted {
+						if config.UnsetsHasKey(s.unset, k) {
+							stillFenced = append(stillFenced, k)
+						}
+					}
+					slices.Sort(stillFenced)
+					if len(stillFenced) > 0 {
+						fmt.Printf("  %s deleted but its unset fence stands — lift it under Manage unsets\n",
+							strings.Join(stillFenced, ", "))
+					}
+					break
 				}
 			case actionManageUnsets:
 				manageUnsets(&s, name, inherited)
