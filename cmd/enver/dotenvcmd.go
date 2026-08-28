@@ -48,17 +48,9 @@ func init() {
 // outPath exists and force is false. A comment-resolution error is non-fatal:
 // the file is still produced, with fewer or no comments.
 func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, confirm confirmFunc) error {
-	cfg, err := app.Load(appOpts())
-	if err != nil {
-		return err
-	}
-	profile, err = app.ProfileOrDefault(profile, cfg.Default)
-	if err != nil {
-		return err
-	}
 	resolveOpts := appOpts()
 	resolveOpts.NoExpand = true // dotenv emits raw templates, not expanded values
-	r, err := app.Resolve(cfg, profile, resolveOpts)
+	profile, r, err := app.ResolveDefault(resolveOpts, profile)
 	if err != nil {
 		return err
 	}

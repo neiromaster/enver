@@ -386,6 +386,54 @@ func TestResolveRecoveryUsesEmbeddedParams(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultAppliesDefaultAndResolves(t *testing.T) {
+	// Create a fixture config with a default profile and a shared value.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfgContent := `default: dev
+profiles:
+  dev:
+    env:
+      SHARED: dev-value
+  prod:
+    env:
+      SHARED: prod-value
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	// Empty profile name should resolve to the default profile.
+	opts := Options{ConfigPath: cfgPath, NoLocal: true, Name: "enver x"}
+	name, r, err := ResolveDefault(opts, "")
+	if err != nil {
+		t.Fatalf("ResolveDefault with empty profile: %v", err)
+	}
+	if name != "dev" {
+		t.Fatalf("profile = %q, want dev", name)
+	}
+	if r.Env["SHARED"] != "dev-value" {
+		t.Fatalf("env[SHARED] = %q, want dev-value", r.Env["SHARED"])
+	}
+
+	// Named profile should resolve directly.
+	name, r, err = ResolveDefault(opts, "prod")
+	if err != nil {
+		t.Fatalf("ResolveDefault with named profile: %v", err)
+	}
+	if name != "prod" {
+		t.Fatalf("profile = %q, want prod", name)
+	}
+	if r.Env["SHARED"] != "prod-value" {
+		t.Fatalf("env[SHARED] = %q, want prod-value", r.Env["SHARED"])
+	}
+
+	// Unknown profile must error.
+	if _, _, err := ResolveDefault(opts, "missing"); err == nil {
+		t.Fatal("ResolveDefault on unknown profile must error")
+	}
+}
+
 func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

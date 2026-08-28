@@ -35,6 +35,23 @@ func Load(opts Options) (config.Config, error) {
 	return config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
 }
 
+// ResolveDefault is the read-side trio: load the merged config, apply the
+// default to an empty profile name, resolve. Every consuming command shares
+// this sequence. The returned profile is the post-default name; JSON output
+// and the exec label still need it.
+func ResolveDefault(opts Options, profile string) (string, config.Resolved, error) {
+	cfg, err := Load(opts)
+	if err != nil {
+		return "", config.Resolved{}, err
+	}
+	profile, err = ProfileOrDefault(profile, cfg.Default)
+	if err != nil {
+		return "", config.Resolved{}, err
+	}
+	r, err := Resolve(cfg, profile, opts)
+	return profile, r, err
+}
+
 // Chdir changes to dir when non-empty. Wired into PersistentPreRunE and the
 // completion handlers, which bypass it; "" is a no-op.
 func Chdir(dir string) error {
@@ -91,15 +108,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if len(cmdArgs) == 0 {
 		return fmt.Errorf("%s requires a command after `--`", opts.Name)
 	}
-	cfg, err := Load(opts)
-	if err != nil {
-		return err
-	}
-	profile, err = ProfileOrDefault(profile, cfg.Default)
-	if err != nil {
-		return err
-	}
-	r, err := Resolve(cfg, profile, opts)
+	profile, r, err := ResolveDefault(opts, profile)
 	if err != nil {
 		return err
 	}

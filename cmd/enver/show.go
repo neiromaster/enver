@@ -23,15 +23,7 @@ var showCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		cfg, err := app.Load(appOpts())
-		if err != nil {
-			return err
-		}
-		profile, err = app.ProfileOrDefault(profile, cfg.Default)
-		if err != nil {
-			return err
-		}
-		r, err := app.Resolve(cfg, profile, appOpts())
+		p, r, err := app.ResolveDefault(appOpts(), profile)
 		if err != nil {
 			return err
 		}
@@ -39,7 +31,7 @@ var showCmd = &cobra.Command{
 		case "text":
 			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, showNoMask)
 		case "json":
-			return printEnvJSON(cmd.OutOrStdout(), profile, r.Chain, r.Env, r.Sources)
+			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources)
 		default:
 			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
 		}
@@ -56,15 +48,7 @@ var exportCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		cfg, err := app.Load(appOpts())
-		if err != nil {
-			return err
-		}
-		profile, err = app.ProfileOrDefault(profile, cfg.Default)
-		if err != nil {
-			return err
-		}
-		r, err := app.Resolve(cfg, profile, appOpts())
+		_, r, err := app.ResolveDefault(appOpts(), profile)
 		if err != nil {
 			return err
 		}
