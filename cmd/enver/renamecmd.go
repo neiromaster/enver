@@ -18,8 +18,7 @@ var renameCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := writeTarget()
-		targetCfg, err := config.LoadFile(path)
+		path, targetCfg, err := loadTarget()
 		if err != nil {
 			return err
 		}
@@ -54,8 +53,8 @@ var renameCmd = &cobra.Command{
 		if err := validateProfileName(newName); err != nil {
 			return err
 		}
-		if _, ok := targetCfg.Profiles[oldName]; !ok {
-			return notFoundInTarget(oldName, path)
+		if err := requireTargetProfile(targetCfg, path, oldName); err != nil {
+			return err
 		}
 		if newName == oldName {
 			fmt.Printf("%q is already named that; nothing to rename\n", newName)

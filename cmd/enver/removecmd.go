@@ -19,8 +19,7 @@ var removeCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := writeTarget()
-		targetCfg, err := config.LoadFile(path)
+		path, targetCfg, err := loadTarget()
 		if err != nil {
 			return err
 		}
@@ -38,8 +37,8 @@ var removeCmd = &cobra.Command{
 			}
 			name = picked
 		}
-		if _, ok := targetCfg.Profiles[name]; !ok {
-			return notFoundInTarget(name, path)
+		if err := requireTargetProfile(targetCfg, path, name); err != nil {
+			return err
 		}
 		merged, err := app.Load(appOpts())
 		if err != nil {

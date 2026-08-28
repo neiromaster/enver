@@ -21,8 +21,8 @@ var defaultCmd = &cobra.Command{
 		if defaultClear && len(args) > 0 {
 			return fmt.Errorf("--clear takes no profile, got %q", args[0])
 		}
-		path := writeTarget()
 		if defaultClear {
+			path := writeTarget()
 			targetCfg, err := config.LoadFile(path)
 			if err != nil {
 				return err
@@ -52,12 +52,12 @@ var defaultCmd = &cobra.Command{
 		if err := validateProfileName(name); err != nil {
 			return err
 		}
-		targetCfg, err := config.LoadFile(path)
+		path, targetCfg, err := loadTarget()
 		if err != nil {
 			return err
 		}
-		if _, ok := targetCfg.Profiles[name]; !ok {
-			return notFoundInTarget(name, path)
+		if err := requireTargetProfile(targetCfg, path, name); err != nil {
+			return err
 		}
 		if err := config.SetDefault(path, name); err != nil {
 			return err

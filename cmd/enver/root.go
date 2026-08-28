@@ -130,6 +130,24 @@ func writeTarget() string {
 	return config.LocalPath()
 }
 
+// loadTarget reads the file mutators rewrite: local by default, global under
+// --global. Existence is judged against this file, never the merged view — a
+// profile visible through extends but absent here is not a write target.
+func loadTarget() (path string, cfg config.Config, err error) {
+	path = writeTarget()
+	cfg, err = config.LoadFile(path)
+	return path, cfg, err
+}
+
+// requireTargetProfile reports notFound when the write target has no profile
+// named name, keeping the cross-layer hint in one place.
+func requireTargetProfile(cfg config.Config, path, name string) error {
+	if _, ok := cfg.Profiles[name]; !ok {
+		return notFoundInTarget(name, path)
+	}
+	return nil
+}
+
 // pickerConfig is the extends-picker set: merged by default (a local profile may
 // extend a global one), global-only under --global.
 func pickerConfig() (config.Config, error) {

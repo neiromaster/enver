@@ -17,8 +17,7 @@ var duplicateCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := writeTarget()
-		targetCfg, err := config.LoadFile(path)
+		path, targetCfg, err := loadTarget()
 		if err != nil {
 			return err
 		}

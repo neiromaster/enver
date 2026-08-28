@@ -455,8 +455,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	path := writeTarget()
-	targetCfg, err := config.LoadFile(path)
+	path, targetCfg, err := loadTarget()
 	if err != nil {
 		return err
 	}
