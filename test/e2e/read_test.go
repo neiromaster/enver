@@ -116,6 +116,53 @@ func TestShowJSONUnmasked(t *testing.T) {
 	}
 }
 
+func TestListJSONUnmasked(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: secretvalue1\n  q:\n    env:\n      A: \"1\"\n")
+	if r := s.run("default", "p"); r.ExitCode != 0 {
+		t.Fatalf("default set: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	r := s.run("list", "--format", "json")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	type entry struct {
+		Name     string `json:"name"`
+		Default  bool   `json:"default"`
+		Vars     int    `json:"vars"`
+		Resolved int    `json:"resolved"`
+	}
+	var payload struct {
+		Profiles []entry `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(r.Stdout), &payload); err != nil {
+		t.Fatalf("list json is not valid JSON: %v\n%s", err, r.Stdout)
+	}
+	var p, q *entry
+	for i := range payload.Profiles {
+		switch e := &payload.Profiles[i]; e.Name {
+		case "p":
+			p = e
+		case "q":
+			q = e
+		}
+	}
+	if p == nil || q == nil {
+		t.Fatalf("list json must name both profiles, got: %+v", payload.Profiles)
+	}
+	if !p.Default || q.Default {
+		t.Fatalf("the default marker must identify p only, got: %+v", payload.Profiles)
+	}
+	if p.Vars != 1 || p.Resolved != 1 || q.Vars != 1 || q.Resolved != 1 {
+		t.Fatalf("list json must carry the per-profile var counts, got: %+v", payload.Profiles)
+	}
+	// list json carries counts, never values, so the unmasked contract means
+	// no masked placeholder can appear in the payload at all.
+	if strings.Contains(r.Stdout, "…(len=") {
+		t.Fatalf("list json must carry no masked placeholder, got: %q", r.Stdout)
+	}
+}
+
 func TestShowHidesFencedVar(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    unset: [SECRET]\n    env:\n      SECRET: s\n      A: \"1\"\n")
