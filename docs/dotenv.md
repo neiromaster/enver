@@ -24,6 +24,10 @@ The summary prints a diff of what changed: `+` added, `~` overridden,
 Keys the profile's own `unset` list fences are marked `!` — written, though
 they never reach `show`, `export`, or `enver x`.
 
+`--force` scopes differently per command: `enver dotenv --force` overwrites
+the `-o` output file without prompting, while `enver import --force` only
+skips the `--replace` removal confirm.
+
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
 > file. Mind where it lands; keep values at rest encrypted with `enver
 > encrypt`.

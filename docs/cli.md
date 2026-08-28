@@ -10,7 +10,7 @@ All commands and global flags. Behavior details: [`config.md`](./config.md),
 enver x [profile] -- <command> [args...]  Run command with the profile's env
 enver show [profile] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
 enver export [profile] [--format bash|fish|powershell] Print `export K=V` (unmasked, for eval)
-enver dotenv [profile] [-o file]                       Write a profile to a .env file (with comments)
+enver dotenv [profile] [-o file] [--no-header] [--force]  Write a profile to a .env file (with comments)
 enver import <file> [profile] [--replace]              Import a .env file into a profile (--extends, --force)
 enver list [--format text|json]          List profiles
 enver add [name]                          Interactively add a profile
@@ -51,7 +51,7 @@ variable picked up from `./.enver.yaml` is marked `(local)`, one from the
 global config `(global)`. `--format json` carries the same provenance as a
 structured `sources` map.
 
-Secret-looking values (keys matching `key|token|secret|password|auth|credential`,
+Secret-looking values (keys matching `key|token|secret|password|passwd|auth|credential`,
 case-insensitive, or values that embed credentials in a URL such as
 `postgres://user:pass@host`) are masked in `enver show` output (use
 `--no-mask` to reveal) and encrypted by `enver encrypt`. Plain URLs without

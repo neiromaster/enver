@@ -1,4 +1,4 @@
-.PHONY: build install test vet clean fmt hooks completions
+.PHONY: build install test vet lint clean fmt hooks completions
 
 BINARY := enver
 PKG := github.com/neiromaster/enver
@@ -21,6 +21,9 @@ test:
 
 vet:
 	go vet ./...
+
+lint:
+	go tool golangci-lint run
 
 fmt:
 	go fmt ./...

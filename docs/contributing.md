@@ -7,11 +7,12 @@ Bug reports, docs and tests are welcome.
 ## Local checks
 
 ```sh
-make vet test
+make vet lint test
 ```
 
 A pre-commit hook (via [lefthook](https://github.com/evilmartians/lefthook))
-auto-formats staged Go files. Enable it once after cloning — lefthook and
+auto-formats staged Go files and runs golangci-lint. Enable it once after
+cloning — lefthook and
 golangci-lint are pinned as Go tool dependencies in the isolated `tools/`
 module (reached through `go.work`), so nothing global is required:
 

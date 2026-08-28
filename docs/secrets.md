@@ -78,7 +78,7 @@ From then on `enver x` runs without prompting.
   prefixes (older formats) are rejected. The key cache lives at
   `~/.config/enver/key` (mode `0600`) — **never commit the key**.
 - **Preview masking** — `enver show` redacts
-  `key|token|secret|password|auth|credential` values; use `--no-mask` or
+  `key|token|secret|password|passwd|auth|credential` values; use `--no-mask` or
   `enver export` to reveal them.
 - **Scope** — encryption protects against accidental leaks (git, dotfiles,
   casual disk access), not against an attacker with read access to both the
