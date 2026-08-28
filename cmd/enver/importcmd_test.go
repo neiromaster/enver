@@ -233,6 +233,21 @@ func TestImportEmptyErrors(t *testing.T) {
 	}
 }
 
+func TestImportAllSkippedNamesTheLines(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := app.ImportEnv(bytes.NewReader([]byte("1BAD=x\njusttext\n")), cfgPath, "p", "", app.ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "no variables to import") {
+		t.Fatalf("expected no-variables error, got: %v", err)
+	}
+	want := "skipped 2 lines: line 1 (invalid key name), line 2 (missing =)"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error should name the skipped lines, got: %v", err)
+	}
+	if _, _, ok, _ := config.ReadProfile(cfgPath, "p"); ok {
+		t.Error("all-skipped import must not create a profile")
+	}
+}
+
 func TestImportEmptyWithExtendsOK(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"X": "1"}}, false, false); err != nil {

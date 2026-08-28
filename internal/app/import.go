@@ -60,6 +60,9 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	}
 
 	if len(imported) == 0 && len(extendsToWrite) == 0 {
+		if len(skips) > 0 {
+			return "", fmt.Errorf("no variables to import: skipped %d %s: %s", len(skips), skipNoun(len(skips)), strings.Join(skippedLineParts(skips), ", "))
+		}
 		return "", fmt.Errorf("no variables to import")
 	}
 
@@ -269,6 +272,12 @@ func skippedLineNote(skips []dotenv.Skip) string {
 	if len(skips) == 0 {
 		return ""
 	}
+	return fmt.Sprintf("\nskipped %d %s: %s\n", len(skips), skipNoun(len(skips)), strings.Join(skippedLineParts(skips), ", "))
+}
+
+// skippedLineParts describes the skipped lines, at most 3 before folding the
+// rest into a count.
+func skippedLineParts(skips []dotenv.Skip) []string {
 	var parts []string
 	for i, s := range skips {
 		if i == 3 {
@@ -277,9 +286,12 @@ func skippedLineNote(skips []dotenv.Skip) string {
 		}
 		parts = append(parts, fmt.Sprintf("line %d (%s)", s.Line, s.Reason))
 	}
-	noun := "lines"
-	if len(skips) == 1 {
-		noun = "line"
+	return parts
+}
+
+func skipNoun(n int) string {
+	if n == 1 {
+		return "line"
 	}
-	return fmt.Sprintf("\nskipped %d %s: %s\n", len(skips), noun, strings.Join(parts, ", "))
+	return "lines"
 }
