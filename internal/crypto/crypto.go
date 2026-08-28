@@ -83,7 +83,7 @@ func GenerateKey(path string, force bool) error {
 	if _, err := rand.Read(salt); err != nil {
 		return err
 	}
-	return WriteKeyCache(path, KeyCache{Version: 1, Salt: salt, Key: key})
+	return WriteKeyCache(path, NewKeyCache(salt, key))
 }
 
 // LoadKey reads the key cache at path, returning the key and its salt.
@@ -351,6 +351,9 @@ func parseKeyCache(data []byte) (KeyCache, error) {
 	var c KeyCache
 	if err := json.Unmarshal(data, &c); err != nil {
 		return KeyCache{}, fmt.Errorf("invalid key cache: %w", err)
+	}
+	if c.Version != 1 {
+		return KeyCache{}, fmt.Errorf("invalid key cache: unsupported version %d", c.Version)
 	}
 	if len(c.Key) != keySize {
 		return KeyCache{}, fmt.Errorf("invalid key cache: key length %d, want %d", len(c.Key), keySize)

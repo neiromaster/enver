@@ -436,6 +436,8 @@ func TestKeyCacheRejectsInvalid(t *testing.T) {
 	wrongKey.Key = make([]byte, 16)
 	wrongSalt := valid
 	wrongSalt.Salt = make([]byte, 8)
+	unknownVersion := valid
+	unknownVersion.Version = 2
 
 	cases := []struct {
 		name string
@@ -445,6 +447,7 @@ func TestKeyCacheRejectsInvalid(t *testing.T) {
 		{"truncated JSON", []byte(`{"v":1`)},
 		{"wrong-length key", mustMarshalJSON(t, wrongKey)},
 		{"wrong-length salt", mustMarshalJSON(t, wrongSalt)},
+		{"unknown version", mustMarshalJSON(t, unknownVersion)},
 	}
 	for _, tc := range cases {
 		t.Run("parse "+tc.name, func(t *testing.T) {
