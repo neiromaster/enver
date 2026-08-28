@@ -487,9 +487,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	wasDefault := isDefault
 
 	s := newEditState(name, prof, comments, isDefault)
+	overrides := overrideKeySet(cfg, s)
 	for {
 		inherited := listedInheritedForState(cfg, s)
-		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
+		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrides))
 		if err != nil {
 			// Only a cancel with pending edits is worth confirming; any other
 			// error (no TTY, tea failure) or a clean cancel just exits.
@@ -544,7 +545,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, overrideKeySet(cfg, s)))
+				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, overrides))
 				if err != nil {
 					continue
 				}
