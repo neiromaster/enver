@@ -44,11 +44,11 @@ func ResolveDefault(opts Options, profile string) (string, config.Resolved, erro
 	if err != nil {
 		return "", config.Resolved{}, err
 	}
-	profile, err = ProfileOrDefault(profile, cfg.Default)
+	profile, err = profileOrDefault(profile, cfg.Default)
 	if err != nil {
 		return "", config.Resolved{}, err
 	}
-	r, err := Resolve(cfg, profile, opts)
+	r, err := resolve(cfg, profile, opts)
 	return profile, r, err
 }
 
@@ -61,11 +61,11 @@ func Chdir(dir string) error {
 	return os.Chdir(dir)
 }
 
-// Resolve walks the profile's extends chain, transparently decrypts any
+// resolve walks the profile's extends chain, transparently decrypts any
 // enc:v3: values, and expands $VAR interpolation unless opts.NoExpand. A key
 // is required only when encrypted values are present. Comments ride through
 // untouched.
-func Resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
+func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
 	r, err := cfg.ResolveProfile(profile)
 	if err != nil {
 		return config.Resolved{}, err
@@ -118,10 +118,10 @@ func Run(args []string, dashAt int, opts Options) error {
 	return nil
 }
 
-// ProfileOrDefault applies the config default to an empty profile name and
+// profileOrDefault applies the config default to an empty profile name and
 // errors when no profile is selectable. Centralizes the guard shared by Run,
 // show, export, and dotenv so the fallback and message stay consistent.
-func ProfileOrDefault(profile, def string) (string, error) {
+func profileOrDefault(profile, def string) (string, error) {
 	if profile == "" {
 		profile = def
 	}

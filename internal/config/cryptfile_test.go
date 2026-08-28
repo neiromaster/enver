@@ -49,7 +49,7 @@ func writeEncryptedFixture(t *testing.T) string {
 	return path
 }
 
-func TestScanCryptCollectsFirstSaltAndRejectsMixedEras(t *testing.T) {
+func TestScanCryptCollectsFirstSalt(t *testing.T) {
 	path := writeEncryptedFixture(t) // two enc:v3 values, one salt
 
 	var salts crypto.SaltScan

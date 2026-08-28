@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -139,5 +140,38 @@ func TestKeygenDeclinedConfirmReturnsErrAborted(t *testing.T) {
 	keptKey, _, err := crypto.LoadKey(keyPath)
 	if err != nil || !bytes.Equal(staleKey, keptKey) {
 		t.Fatal("a declined keygen must not touch the key file")
+	}
+}
+
+// TestKeygenScanErrorPropagatesWrapped pins the scan seam: a failing config
+// scan aborts keygen with the scan context wrapping the source error, and the
+// existing key file stays byte-identical.
+func TestKeygenScanErrorPropagatesWrapped(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key")
+	sentinel := []byte("sentinel key bytes")
+	if err := os.WriteFile(keyPath, sentinel, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldInteractive := Interactive
+	Interactive = func() bool { return true }
+	t.Cleanup(func() { Interactive = oldInteractive })
+
+	stubErr := errors.New("boom")
+	err := Keygen(KeygenOptions{
+		Path:  keyPath,
+		Force: true,
+		Scan:  func() (CryptScan, error) { return CryptScan{}, stubErr },
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot scan configs for encrypted values") {
+		t.Fatalf("Keygen scan failure = %v, want the scan-context error", err)
+	}
+	if !errors.Is(err, stubErr) {
+		t.Fatalf("Keygen scan failure = %v, want it to wrap the stub error", err)
+	}
+	kept, rerr := os.ReadFile(keyPath)
+	if rerr != nil || !bytes.Equal(kept, sentinel) {
+		t.Fatal("a failed scan must leave the key file byte-identical")
 	}
 }

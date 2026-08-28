@@ -27,7 +27,7 @@ type ImportOptions struct {
 // own env and unset list first, so an imported key the old profile fenced
 // survives the import. The extends value is preserved unless extendsFlag is
 // non-empty, in which case it is set; parents and cycles are validated by the
-// caller against the merged view. Returns a one-line summary.
+// caller against the merged view. It returns a summary of the import.
 func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
