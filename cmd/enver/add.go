@@ -141,8 +141,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	if err := interactiveOnly("add"); err != nil {
 		return err
 	}
-	cfgPath := writeTarget()
-	targetCfg, err := config.LoadFile(cfgPath)
+	cfgPath, targetCfg, err := loadTarget()
 	if err != nil {
 		return err
 	}
