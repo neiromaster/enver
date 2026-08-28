@@ -22,9 +22,13 @@ var validateCmd = &cobra.Command{
 		}
 		w := cmd.OutOrStdout()
 		// Isolated-global catches a global profile extending a local-only name.
+		globalIssues, err := config.ValidateGlobal(config.GlobalPath(globalFlags.configPath))
+		if err != nil {
+			return err
+		}
 		issues := dedupIssues(append(
 			config.Validate(cfg),
-			config.ValidateGlobal(config.GlobalPath(globalFlags.configPath))...,
+			globalIssues...,
 		))
 		hasErr := false
 		for _, is := range issues {

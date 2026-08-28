@@ -89,15 +89,16 @@ func Validate(cfg Config) []Issue {
 }
 
 // ValidateGlobal audits the global config in isolation (File="global"), catching
-// a global profile that extends a local-only name.
-func ValidateGlobal(globalPath string) []Issue {
+// a global profile that extends a local-only name. A load or parse failure is
+// returned as an error, not reported as a valid file.
+func ValidateGlobal(globalPath string) ([]Issue, error) {
 	cfg, err := LoadFile(globalPath)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	issues := Validate(cfg)
 	for i := range issues {
 		issues[i].File = "global"
 	}
-	return issues
+	return issues, nil
 }

@@ -65,6 +65,16 @@ func TestValidateDeepDanglingNotLabeledCycle(t *testing.T) {
 	}
 }
 
+func TestValidateGlobalReportsMalformedFile(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	if err := os.WriteFile(globalPath, []byte("a: 'unterminated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateGlobal(globalPath); err == nil {
+		t.Fatal("ValidateGlobal swallowed a parse error and reported the file valid")
+	}
+}
+
 func TestValidateGlobalIsolated(t *testing.T) {
 	dir := t.TempDir()
 	globalPath := filepath.Join(dir, "global.yaml")
@@ -75,8 +85,12 @@ func TestValidateGlobalIsolated(t *testing.T) {
 
 	// ValidateGlobal loads the global file alone, so "dev" dangles and the issue
 	// is attributed to the global scope.
+	issues, err := ValidateGlobal(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var found bool
-	for _, is := range ValidateGlobal(globalPath) {
+	for _, is := range issues {
 		if is.Profile == "broken" && is.Kind == "dangling-extends" && is.Target == "dev" && is.File == "global" {
 			found = true
 		}
