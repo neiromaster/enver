@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -186,11 +187,14 @@ func findLocal() []string {
 // where resolveEnv applies it era-gated after the inherited fold. The merged
 // profile's declared list is the overriding layer's own, and UnsetOrigins
 // attributes exactly those entries; profiles absent from the override shed
-// their earlier-era declared fences the same way. Merge folds override into
-// base's maps in place; the returned config shares state with base, which
-// must not be used as the pre-merge view afterwards.
+// their earlier-era declared fences the same way. Merge never mutates its
+// inputs: the fold writes into clones, so the returned config shares no state
+// with base or override.
 func Merge(base, override Config) Config {
 	out := base
+	out.Profiles = cloneProfiles(base.Profiles)
+	out.Origins = cloneProvenance(base.Origins)
+	out.UnsetOrigins = cloneProvenance(base.UnsetOrigins)
 	if override.Default != "" {
 		out.Default = override.Default
 	}
@@ -247,6 +251,34 @@ func Merge(base, override Config) Config {
 		bp := out.Profiles[name]
 		splitUnsets(&bp, nil)
 		out.Profiles[name] = bp
+	}
+	return out
+}
+
+// cloneProfiles copies the profiles map and every per-profile slice and map
+// the fold replaces or appends to, so mutations never reach the inputs.
+func cloneProfiles(in map[string]Profile) map[string]Profile {
+	out := make(map[string]Profile, len(in))
+	for name, p := range in {
+		p.Extends = slices.Clone(p.Extends)
+		p.Unset = slices.Clone(p.Unset)
+		p.Carried = slices.Clone(p.Carried)
+		p.Env = maps.Clone(p.Env)
+		p.Comments = maps.Clone(p.Comments)
+		out[name] = p
+	}
+	return out
+}
+
+// cloneProvenance copies a provenance map (outer map plus each inner map) so
+// mutations never reach the inputs. Nil-safe.
+func cloneProvenance(in map[string]map[string]string) map[string]map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(in))
+	for profile, inner := range in {
+		out[profile] = maps.Clone(inner)
 	}
 	return out
 }

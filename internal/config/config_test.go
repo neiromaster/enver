@@ -2,10 +2,12 @@ package config
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -880,5 +882,58 @@ func TestOriginLookupPlatformSemantics(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("posix originLookup = %q, %v; want zero, false", got, found)
+	}
+}
+
+// TestMergeDoesNotMutateInputs pins the purity contract: Merge writes into
+// clones, so callers may reuse base or override as the pre-merge view
+// afterwards, including provenance maps filled by earlier merges.
+func TestMergeDoesNotMutateInputs(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{
+		"shared": {Env: map[string]string{"A": "1", "B": "2"}, Unset: Unsets{"B"}},
+		"quiet":  {Env: map[string]string{"C": "3"}},
+	},
+		Origins:      map[string]map[string]string{"shared": {"A": LayerGlobal}},
+		UnsetOrigins: map[string]map[string]string{"shared": {"B": LayerGlobal}},
+	}
+	override := Config{Profiles: map[string]Profile{
+		"shared": {Env: map[string]string{"A": "9"}, Unset: Unsets{"A"}},
+	}}
+
+	merged := Merge(base, override)
+
+	// Base profiles unchanged.
+	if !maps.Equal(base.Profiles["shared"].Env, map[string]string{"A": "1", "B": "2"}) {
+		t.Errorf("base shared.Env mutated: %v", base.Profiles["shared"].Env)
+	}
+	if !slices.Equal(base.Profiles["shared"].Unset, Unsets{"B"}) {
+		t.Errorf("base shared.Unset mutated: %v", base.Profiles["shared"].Unset)
+	}
+	if !maps.Equal(base.Profiles["quiet"].Env, map[string]string{"C": "3"}) {
+		t.Errorf("base quiet.Env mutated: %v", base.Profiles["quiet"].Env)
+	}
+
+	// Base provenance unchanged.
+	if !maps.Equal(base.Origins["shared"], map[string]string{"A": LayerGlobal}) {
+		t.Errorf("base.Origins[shared] mutated: %v", base.Origins["shared"])
+	}
+	if !maps.Equal(base.UnsetOrigins["shared"], map[string]string{"B": LayerGlobal}) {
+		t.Errorf("base.UnsetOrigins[shared] mutated: %v", base.UnsetOrigins["shared"])
+	}
+
+	// Override unchanged.
+	if !maps.Equal(override.Profiles["shared"].Env, map[string]string{"A": "9"}) {
+		t.Errorf("override shared.Env mutated: %v", override.Profiles["shared"].Env)
+	}
+	if !slices.Equal(override.Profiles["shared"].Unset, Unsets{"A"}) {
+		t.Errorf("override shared.Unset mutated: %v", override.Profiles["shared"].Unset)
+	}
+
+	// Merged result correctness.
+	if v := merged.Profiles["shared"].Env["A"]; v != "9" {
+		t.Errorf("merged shared.A = %q, want 9", v)
+	}
+	if _, ok := merged.Profiles["shared"].Env["B"]; ok {
+		t.Errorf("merged shared.B survived the inherited fence: %v", merged.Profiles["shared"].Env)
 	}
 }
