@@ -1,9 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // Issue is one config-health finding.
@@ -47,7 +47,7 @@ func Validate(cfg Config) []Issue {
 		}
 		if len(p.Extends) > 0 {
 			if _, err := cfg.ResolveProfile(n); err != nil {
-				if strings.Contains(err.Error(), "cycle") {
+				if errors.Is(err, ErrExtendsCycle) {
 					issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
 				}
 			}
