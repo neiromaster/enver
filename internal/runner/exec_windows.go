@@ -9,13 +9,10 @@ import (
 )
 
 // execChild spawns the child and waits, since Windows has no execve. The child
-// inherits stdio; its exit code is returned.
+// inherits stdio; its exit code is returned. Args keeps the typed name as
+// argv[0], matching the unix execve path.
 func execChild(path string, cmdArgs []string, env []string, name string) int {
-	cmd := exec.Command(path, cmdArgs[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := &exec.Cmd{Path: path, Args: cmdArgs, Env: env, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
