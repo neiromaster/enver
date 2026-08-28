@@ -416,7 +416,7 @@ func TestSaltFromValue(t *testing.T) {
 	}
 }
 
-func TestEncryptValueRejectsBadSaltLength(t *testing.T) {
+func TestEncryptValueWithParamsRejectsBadSaltLength(t *testing.T) {
 	key := make([]byte, keySize)
 	badSalts := [][]byte{
 		make([]byte, 20), // too long
@@ -425,7 +425,7 @@ func TestEncryptValueRejectsBadSaltLength(t *testing.T) {
 	}
 	for _, salt := range badSalts {
 		if _, err := EncryptValueWithParams("secret", key, salt, CurrentParams); err == nil {
-			t.Fatalf("EncryptValue with %d-byte salt must error", len(salt))
+			t.Fatalf("EncryptValueWithParams with %d-byte salt must error", len(salt))
 		}
 	}
 }

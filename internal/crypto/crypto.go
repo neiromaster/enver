@@ -200,7 +200,7 @@ func parseV3(v string) (Argon2Params, string, error) {
 	return p, parts[4], nil
 }
 
-// DecryptValue reverses EncryptValue. Returns an error if v is not an enc:v3:
+// DecryptValue reverses EncryptValueWithParams. Returns an error if v is not an enc:v3:
 // value or the key/payload are invalid.
 func DecryptValue(v string, key []byte) (string, error) {
 	if !strings.HasPrefix(v, prefixV3) {

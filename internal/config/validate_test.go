@@ -187,7 +187,7 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 				}
 				return got
 			}
-			isolated := collect(global) // before Merge: Merge overwrites base.Profiles in place
+			isolated := collect(global)
 			check := func(got, want []string) {
 				t.Helper()
 				if !reflect.DeepEqual(got, want) {
