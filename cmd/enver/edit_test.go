@@ -673,3 +673,21 @@ func TestCommitEditRoundTripsUnset(t *testing.T) {
 		t.Fatalf("unset not round-tripped through edit: %v", gotProf.Unset)
 	}
 }
+
+// TestInheritedEntriesExcludesOwnKeys pins the read-only backdrop: keys the
+// profile defines itself never show up as inherited rows. Membership goes
+// through config.HasEnvKey so Windows case folding matches resolution.
+func TestInheritedEntriesExcludesOwnKeys(t *testing.T) {
+	resolved := map[string]string{"A": "1", "B": "2", "C": "3"}
+	own := map[string]string{"B": "over"}
+
+	got := inheritedEntries(resolved, own)
+
+	keys := make([]string, 0, len(got))
+	for _, e := range got {
+		keys = append(keys, e.Key)
+	}
+	if !slices.Equal(keys, []string{"A", "C"}) {
+		t.Errorf("inheritedEntries keys = %v, want [A C]", keys)
+	}
+}

@@ -171,7 +171,7 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 	}
 	out := make(map[string]bool, len(s.entries))
 	for _, e := range s.entries {
-		if _, ok := pr.Env[e.Key]; ok {
+		if config.HasEnvKey(pr.Env, e.Key) {
 			out[e.Key] = true
 		}
 	}
@@ -656,7 +656,7 @@ func editTitle(s editState) string {
 func inheritedEntries(resolved map[string]string, own map[string]string) []ui.EnvEntry {
 	var out []ui.EnvEntry
 	for k, v := range resolved {
-		if _, ok := own[k]; !ok {
+		if !config.HasEnvKey(own, k) {
 			out = append(out, ui.EnvEntry{Key: k, Value: v})
 		}
 	}
