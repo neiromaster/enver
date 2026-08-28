@@ -15,11 +15,7 @@ import (
 
 var keygenRandom bool
 
-var (
-	uiPassword    = ui.Password
-	uiInteractive = ui.Interactive
-	uiConfirm     = ui.Confirm
-)
+var uiConfirm = ui.Confirm
 
 var keygenCmd = &cobra.Command{
 	Use:   "keygen",
@@ -49,7 +45,7 @@ var keygenCmd = &cobra.Command{
 			fmt.Println("Keep this file private. Commit encrypted configs, never the key.")
 			return nil
 		}
-		if !uiInteractive() {
+		if !app.Interactive() {
 			return fmt.Errorf("keygen requires a terminal; use --random for a non-interactive key")
 		}
 		if !force {
@@ -61,11 +57,11 @@ var keygenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		pass, err := uiPassword("Enter passphrase:")
+		pass, err := app.PromptPassphrase("Enter passphrase:")
 		if err != nil {
 			return err
 		}
-		confirm, err := uiPassword("Confirm passphrase:")
+		confirm, err := app.PromptPassphrase("Confirm passphrase:")
 		if err != nil {
 			return err
 		}

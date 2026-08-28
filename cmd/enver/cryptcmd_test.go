@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/spf13/cobra"
@@ -278,13 +279,13 @@ func TestKeygenReusesParamsFromConfig(t *testing.T) {
 	}
 
 	globalFlags.keyPath = filepath.Join(dir, "key")
-	oldPassword := uiPassword
-	oldInteractive := uiInteractive
-	uiPassword = func(prompt string) (string, error) { return "test-pass", nil }
-	uiInteractive = func() bool { return true }
+	oldPassword := app.PromptPassphrase
+	oldInteractive := app.Interactive
+	app.PromptPassphrase = func(prompt string) (string, error) { return "test-pass", nil }
+	app.Interactive = func() bool { return true }
 	t.Cleanup(func() {
-		uiPassword = oldPassword
-		uiInteractive = oldInteractive
+		app.PromptPassphrase = oldPassword
+		app.Interactive = oldInteractive
 	})
 
 	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
@@ -326,17 +327,17 @@ func TestKeygenVerifiesPassphraseAgainstConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldPassword := uiPassword
-	oldInteractive := uiInteractive
-	uiInteractive = func() bool { return true }
+	oldPassword := app.PromptPassphrase
+	oldInteractive := app.Interactive
+	app.Interactive = func() bool { return true }
 	t.Cleanup(func() {
-		uiPassword = oldPassword
-		uiInteractive = oldInteractive
+		app.PromptPassphrase = oldPassword
+		app.Interactive = oldInteractive
 	})
 
 	// A mistyped passphrase derives the wrong key for the reused salt: keygen
 	// must refuse instead of caching a key the values never open with.
-	uiPassword = func(prompt string) (string, error) { return "wrong-pass", nil }
+	app.PromptPassphrase = func(prompt string) (string, error) { return "wrong-pass", nil }
 	if err := keygenCmd.RunE(keygenCmd, nil); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("keygen with wrong passphrase: err=%v, want a mismatch error", err)
 	}
@@ -344,7 +345,7 @@ func TestKeygenVerifiesPassphraseAgainstConfig(t *testing.T) {
 		t.Fatal("mismatched passphrase must not write a key file")
 	}
 
-	uiPassword = func(prompt string) (string, error) { return "right-pass", nil }
+	app.PromptPassphrase = func(prompt string) (string, error) { return "right-pass", nil }
 	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
 		t.Fatalf("keygen with right passphrase: %v", err)
 	}
@@ -396,15 +397,15 @@ func TestKeygenForceMatchingPassphraseSkipsStrandingConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldPassword, oldInteractive, oldConfirm := uiPassword, uiInteractive, uiConfirm
-	uiInteractive = func() bool { return true }
-	uiPassword = func(prompt string) (string, error) { return "right-pass", nil }
+	oldPassword, oldInteractive, oldConfirm := app.PromptPassphrase, app.Interactive, uiConfirm
+	app.Interactive = func() bool { return true }
+	app.PromptPassphrase = func(prompt string) (string, error) { return "right-pass", nil }
 	uiConfirm = func(msg string, _ bool) (bool, error) {
 		t.Errorf("matching passphrase must not be confirmed as stranding: %q", msg)
 		return false, nil
 	}
 	t.Cleanup(func() {
-		uiPassword, uiInteractive, uiConfirm = oldPassword, oldInteractive, oldConfirm
+		app.PromptPassphrase, app.Interactive, uiConfirm = oldPassword, oldInteractive, oldConfirm
 	})
 	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
 		t.Fatal(err)
@@ -447,9 +448,9 @@ func TestKeygenForceWrongPassphraseConfirmsStranding(t *testing.T) {
 	}
 
 	confirmed := false
-	oldPassword, oldInteractive, oldConfirm := uiPassword, uiInteractive, uiConfirm
-	uiInteractive = func() bool { return true }
-	uiPassword = func(prompt string) (string, error) { return "wrong-pass", nil }
+	oldPassword, oldInteractive, oldConfirm := app.PromptPassphrase, app.Interactive, uiConfirm
+	app.Interactive = func() bool { return true }
+	app.PromptPassphrase = func(prompt string) (string, error) { return "wrong-pass", nil }
 	uiConfirm = func(msg string, _ bool) (bool, error) {
 		confirmed = true
 		if !strings.Contains(msg, "strands") {
@@ -458,7 +459,7 @@ func TestKeygenForceWrongPassphraseConfirmsStranding(t *testing.T) {
 		return true, nil
 	}
 	t.Cleanup(func() {
-		uiPassword, uiInteractive, uiConfirm = oldPassword, oldInteractive, oldConfirm
+		app.PromptPassphrase, app.Interactive, uiConfirm = oldPassword, oldInteractive, oldConfirm
 	})
 	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
 		t.Fatal(err)
