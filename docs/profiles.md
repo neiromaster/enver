@@ -12,7 +12,10 @@ config, preserving any existing structure and comments:
   digit. Pass it as an argument (`enver add glm`) to skip this prompt.
 - **Extends** — one or more parents picked from a list of existing profiles,
   in inheritance order; reorder in place with `<`/`>` or `←`/`→`, confirm
-  nothing picked for no `extends`. Skipped when no profiles exist yet.
+  nothing picked for no `extends`. Skipped when no profiles exist yet. A pick
+  that would form an `extends` cycle is rejected immediately; a chain value
+  the picker cannot offer — a parent in the other layer, or a deleted one —
+  shows up as a dimmed `(external)` row you keep or drop explicitly.
 - **Variables** — for each, enter a name, a value, and an optional comment;
   leave the name blank to finish. A profile needs at least one variable or an
   extends.
@@ -58,8 +61,10 @@ the menu:
   comment, or add a new one (name, value, optional comment, as in `add`).
 - **Change extends** — pick one or more parents; the selection order is the
   inheritance order and can be rearranged in place (`<`/`>`, `←`/`→`).
-  Confirming with nothing picked clears `extends`, and a choice that would
-  form an `extends` cycle is rejected when you commit.
+  Confirming with nothing picked clears `extends`, a choice that would form
+  an `extends` cycle is rejected when you commit, and chain values the
+  picker cannot offer (other layer, deleted) show as dimmed `(external)`
+  rows you keep or drop explicitly.
 - **Toggle default** — set or clear this profile as the default.
 - **Delete variable** — remove one or more of the profile's own variables.
   Keys whose fence would outlive them carry a `· unset` mark on their row, and

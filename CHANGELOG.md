@@ -8,7 +8,11 @@
   order, and confirming reports the chain in inheritance order. Previously
   both commands handled a single parent; multi-parent chains required YAML or
   `enver import`. In `edit`, confirming with nothing selected clears
-  `extends`; the unused `ui.SelectDefault` helper was removed.
+  `extends`; the unused `ui.SelectDefault` helper was removed. Chain values
+  the picker cannot offer — a parent in the other layer or a deleted one —
+  appear as dimmed `(external)` rows instead of being dropped on confirm;
+  `add` rejects a pick that would form an `extends` cycle, and its inherited
+  summary keeps the healthy parents' keys when one ancestor is unresolvable.
 - **Breaking:** encrypted values now use `enc:v3:argon2id:<t>:<m>:<p>:...` with
   KDF parameters embedded in each value. Only `enc:v3:` is readable; values
   with other `enc:` prefixes fail loudly, as do configs mixing values from
