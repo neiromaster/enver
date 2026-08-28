@@ -85,10 +85,7 @@ func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, 
 				return fmt.Errorf("output file %q exists; pass --force to overwrite", path)
 			}
 			if !ok {
-				if _, err := fmt.Fprintln(stdout, "aborted"); err != nil {
-					return err
-				}
-				return nil
+				return aborted(stdout)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -356,6 +357,64 @@ func TestKeygenVerifiesPassphraseAgainstConfig(t *testing.T) {
 	plain, err := crypto.DecryptValue(enc, key)
 	if err != nil || plain != "secret" {
 		t.Fatalf("decrypt with written key = (%q, %v), want (secret, nil)", plain, err)
+	}
+}
+
+// TestKeygenDeclinedConfirmAbortsCleanly pins the abort contract: declining the
+// stranding confirm is a choice, not a failure — keygen exits 0 with the shared
+// abort notice and leaves the old key in place.
+func TestKeygenDeclinedConfirmAbortsCleanly(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+
+	params := crypto.Argon2Params{Time: 2, Memory: 16 * 1024, Threads: 1}
+	salt := []byte("0123456789abcdef")
+	right, err := crypto.DeriveKey("right-pass", salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", right, salt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.GlobalPath(globalFlags.configPath), []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := crypto.GenerateKey(globalFlags.keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+	staleKey, _, err := crypto.LoadKey(globalFlags.keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldPassword, oldInteractive, oldConfirm := app.PromptPassphrase, app.Interactive, uiConfirm
+	app.Interactive = func() bool { return true }
+	app.PromptPassphrase = func(prompt string) (string, error) { return "wrong-pass", nil }
+	uiConfirm = func(string, bool) (bool, error) { return false, nil }
+	t.Cleanup(func() {
+		app.PromptPassphrase, app.Interactive, uiConfirm = oldPassword, oldInteractive, oldConfirm
+	})
+	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keygenCmd.Flags().Set("force", "false") })
+
+	var out bytes.Buffer
+	keygenCmd.SetOut(&out)
+	t.Cleanup(func() { keygenCmd.SetOut(nil) })
+
+	if err := keygenCmd.RunE(keygenCmd, nil); err != nil {
+		t.Fatalf("declined confirm must exit 0, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "aborted") {
+		t.Fatalf("output = %q, want the abort notice", out.String())
+	}
+	keptKey, _, err := crypto.LoadKey(globalFlags.keyPath)
+	if err != nil || !bytes.Equal(staleKey, keptKey) {
+		t.Fatal("declined confirm must leave the old key in place")
 	}
 }
 

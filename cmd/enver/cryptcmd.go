@@ -107,7 +107,7 @@ var keygenCmd = &cobra.Command{
 				return cerr
 			}
 			if !ok {
-				return fmt.Errorf("aborted: key not overwritten")
+				return aborted(cmd.OutOrStdout())
 			}
 		}
 		if err := crypto.WriteKeyCache(path, crypto.NewKeyCache(salt, key)); err != nil {

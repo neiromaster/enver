@@ -54,8 +54,7 @@ var removeCmd = &cobra.Command{
 			}
 			ans, err := ui.Confirm(fmt.Sprintf("Delete profile %q?", name), false)
 			if err != nil || !ans {
-				fmt.Println("\naborted")
-				return nil
+				return aborted(cmd.OutOrStdout())
 			}
 		}
 		clearedDefault := targetCfg.Default == name

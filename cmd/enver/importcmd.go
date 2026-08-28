@@ -102,10 +102,9 @@ var importCmd = &cobra.Command{
 		}
 		if summary != "" {
 			fmt.Print(summary)
-		} else {
-			fmt.Println("aborted")
+			return nil
 		}
-		return nil
+		return aborted(cmd.OutOrStdout())
 	},
 }
 

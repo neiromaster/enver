@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -111,6 +112,14 @@ func interactiveOnly(name string) error {
 		return nil
 	}
 	return fmt.Errorf("%s is interactive; run it in a terminal", name)
+}
+
+// aborted prints the shared notice for a declined destructive confirm and
+// returns the write error, so declining exits 0 instead of reading as a
+// failure. Call it on the stream the command prints its notices to (stdout).
+func aborted(w io.Writer) error {
+	_, err := fmt.Fprintln(w, "\naborted")
+	return err
 }
 
 // writeTarget is the file mutators write: local by default, global under --global.
