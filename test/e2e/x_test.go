@@ -91,3 +91,24 @@ func TestXFenceHidesUnsetFromChild(t *testing.T) {
 		t.Fatalf("a fenced var must not reach the child, got %q (stderr: %s)", r.Stdout, r.Stderr)
 	}
 }
+
+func TestXInheritedUnsetStillFences(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  leaf:\n    extends: [base]\n    unset: [A]\n")
+	r := s.run(append([]string{"x", "leaf", "--"}, childAbsentProbe("A")...)...)
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "absent") {
+		t.Fatalf("a fence inherited along the chain must stay carried to the child, got %q (stderr: %s)", r.Stdout, r.Stderr)
+	}
+}
+
+func TestXChildRedefinitionBeatsInheritedUnset(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  mid:\n    extends: [base]\n    unset: [A]\n  leaf:\n    extends: [mid]\n    env:\n      A: from-leaf\n")
+	r := s.run(append([]string{"x", "leaf", "--"}, childPrinter("A")...)...)
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if got := strings.TrimSpace(r.Stdout); got != "from-leaf" {
+		t.Fatalf("a closer redefinition must override the inherited unset, got %q (stderr: %s)", got, r.Stderr)
+	}
+}

@@ -163,6 +163,33 @@ func TestListJSONUnmasked(t *testing.T) {
 	}
 }
 
+func TestShowResolvesExtendsChain(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  child:\n    extends: [base]\n    env:\n      B: own\n")
+	r := s.run("show", "child")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "# profile: child → base") {
+		t.Fatalf("the header must name the inheritance chain, got: %q", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "A=from-base") || !strings.Contains(r.Stdout, "B=own") {
+		t.Fatalf("child must resolve its own and its inherited vars, got: %q", r.Stdout)
+	}
+}
+
+func TestShowClosestWinsAlongChain(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  child:\n    extends: [base]\n    env:\n      A: from-child\n")
+	r := s.run("show", "child")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "A=from-child") || strings.Contains(r.Stdout, "from-base") {
+		t.Fatalf("the closer definition must win the chain, got: %q", r.Stdout)
+	}
+}
+
 func TestShowHidesFencedVar(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    unset: [SECRET]\n    env:\n      SECRET: s\n      A: \"1\"\n")
