@@ -140,7 +140,7 @@ func TestMaskValue(t *testing.T) {
 }
 
 // TestMaskValueShortSecretRedacted pins the length floor: a prefix shows only
-// when it stays under a third of the value, so a short secret never leaks.
+// when it stays no more than a third of the value, so a short secret never leaks.
 func TestMaskValueShortSecretRedacted(t *testing.T) {
 	cases := []struct{ v, want string }{
 		{"", ""},

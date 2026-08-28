@@ -546,7 +546,7 @@ func IsSensitive(k, v string) bool {
 
 // MaskValue redacts secret-looking values for display. A secret shows its
 // first four characters only when the value is long enough to keep the prefix
-// under a third of it; shorter values reveal just their length.
+// no more than a third of it; shorter values reveal just their length.
 func MaskValue(k, v string) string {
 	if !IsSensitive(k, v) || v == "" {
 		return v
