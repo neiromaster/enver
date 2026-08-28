@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -100,7 +101,7 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources map[st
 	if _, err := fmt.Fprintf(w, "# profile: %s\n", strings.Join(chain, " → ")); err != nil {
 		return err
 	}
-	for _, k := range sortedEnvKeys(env) {
+	for _, k := range slices.Sorted(maps.Keys(env)) {
 		v := env[k]
 		if !unmasked {
 			v = config.MaskValue(k, v)
@@ -141,7 +142,7 @@ func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]st
 // bash emits `export K='V'`; fish emits `set -gx K 'V'`; powershell emits
 // `$env:K = 'V'`. Values are always unmasked.
 func printExport(w io.Writer, env map[string]string, format string) error {
-	for _, k := range sortedEnvKeys(env) {
+	for _, k := range slices.Sorted(maps.Keys(env)) {
 		v := env[k]
 		var line string
 		switch format {
@@ -157,15 +158,6 @@ func printExport(w io.Writer, env map[string]string, format string) error {
 		}
 	}
 	return nil
-}
-
-func sortedEnvKeys(env map[string]string) []string {
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func shellQuote(s string) string {

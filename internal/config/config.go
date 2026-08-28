@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -145,7 +144,7 @@ func checkEnvNames(c Config) error {
 // checkProfileEnvNames is the write-side twin of the load-time check: no
 // invalid name is ever written, whatever authored the Profile struct.
 func checkProfileEnvNames(name string, p Profile) error {
-	for _, k := range sortedEnvKeys(p.Env) {
+	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
 		if !ValidEnvKey(k) {
 			return fmt.Errorf("profile %q defines invalid env key name %q (want [A-Za-z_][A-Za-z0-9_]*)", name, k)
 		}
@@ -219,7 +218,7 @@ func Merge(base, override Config) Config {
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
-		ownKeys := sortedEnvKeys(p.Env)
+		ownKeys := slices.Sorted(maps.Keys(p.Env))
 		for _, k := range ownKeys {
 			SetEnvKey(bp.Env, k, p.Env[k])
 			if out.Origins == nil {
@@ -435,11 +434,11 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// case-variant pair (PATH and path in one env block) resolves
 	// deterministically on Windows, where the later spelling wins; POSIX
 	// keeps both keys, as authored.
-	for _, k := range sortedEnvKeys(p.Env) {
+	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
 		setEnvKeyed(out.env, k, p.Env[k])
 		setEnvKeyed(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
 	}
-	for _, k := range sortedEnvKeys(p.Comments) {
+	for _, k := range slices.Sorted(maps.Keys(p.Comments)) {
 		if cc := p.Comments[k]; cc != "" {
 			setEnvKeyed(out.comments, k, cc)
 		}
@@ -513,7 +512,7 @@ func (c Config) ProfileNames() []string {
 	for n := range c.Profiles {
 		names = append(names, n)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -525,7 +524,7 @@ func (c Config) ExtendedBy(name string) []string {
 			out = append(out, n)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

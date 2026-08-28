@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"sort"
 )
 
 // IssueKind labels the class of a config-health finding.
@@ -87,16 +86,6 @@ func Validate(cfg Config) []Issue {
 		}
 	}
 	return issues
-}
-
-// sortedEnvKeys returns the keys of env sorted, for stable issue order.
-func sortedEnvKeys(env map[string]string) []string {
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // ValidateGlobal audits the global config in isolation (File="global"), catching

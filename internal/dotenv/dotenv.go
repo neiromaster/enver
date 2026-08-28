@@ -4,7 +4,7 @@
 package dotenv
 
 import (
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -79,7 +79,7 @@ func Format(env map[string]string, comments map[string]string, opts Options) []b
 	for k := range env {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		b.WriteString(formatComment(comments[k]))
 		if needsQuote(env[k]) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -111,7 +111,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 			inherited = append(inherited, k)
 		}
 	}
-	sort.Strings(inherited)
+	slices.Sort(inherited)
 	for _, k := range inherited {
 		out = append(out, ui.SummaryEntry{Key: k, Value: config.MaskValue(k, parentEnv[k]), Kind: ui.EntryInherited})
 	}

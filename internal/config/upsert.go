@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -90,7 +90,7 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 		for k := range p.Env {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, k := range keys {
 			setScalar(env, k, p.Env[k])
 			if c := p.Comments[k]; c != "" {

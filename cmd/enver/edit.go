@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -44,11 +45,7 @@ type editState struct {
 }
 
 func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
-	keys := make([]string, 0, len(prof.Env))
-	for k := range prof.Env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(prof.Env))
 	entries := make([]ui.EnvEntry, 0, len(keys))
 	for _, k := range keys {
 		entries = append(entries, ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k]})
@@ -561,7 +558,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 						stillFenced = append(stillFenced, k)
 					}
 				}
-				sort.Strings(stillFenced)
+				slices.Sort(stillFenced)
 				if len(stillFenced) > 0 {
 					fmt.Printf("  %s deleted but its unset fence stands — lift it under Manage unsets\n",
 						strings.Join(stillFenced, ", "))

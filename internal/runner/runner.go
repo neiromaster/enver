@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 
 	"github.com/neiromaster/enver/internal/config"
 	"golang.org/x/term"
@@ -28,7 +28,7 @@ func MergedEnv(osEnv, profileEnv map[string]string) []string {
 	for k := range curMap {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	res := make([]string, 0, len(keys))
 	for _, k := range keys {
 		res = append(res, k+"="+curMap[k])

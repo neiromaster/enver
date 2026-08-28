@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -200,7 +199,7 @@ func computeImportDiff(oldEnv, imported map[string]string) importDiff {
 	for k := range imported {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		v := imported[k]
 		old, ok := oldEnv[k]
@@ -222,7 +221,7 @@ func removedKeys(oldEnv, imported map[string]string) []diffEntry {
 			keys = append(keys, k)
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	out := make([]diffEntry, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, diffEntry{k, oldEnv[k]})

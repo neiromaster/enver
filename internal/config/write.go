@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,7 +73,7 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) e
 		for k := range p.Env {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, k := range keys {
 			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: k, Tag: "!!str"}
 			valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: p.Env[k], Tag: "!!str"}
