@@ -23,6 +23,8 @@ The summary prints a diff of what changed: `+` added, `~` overridden,
 `-` removed (values shown in full — the data came from your own .env file).
 Keys the profile's own `unset` list fences are marked `!` — written, though
 they never reach `show`, `export`, or `enver x`.
+Lines the parser cannot read — an invalid key name or a line without `=` —
+are skipped and listed in the summary, so a half-landed import is never silent.
 
 `--force` scopes differently per command: `enver dotenv --force` overwrites
 the `-o` output file without prompting, while `enver import --force` only

@@ -455,6 +455,22 @@ func TestImportMergeReportsFencedKeys(t *testing.T) {
 	}
 }
 
+// TestImportSummaryNotesSkippedLines pins the loud-skip contract: lines the
+// parser drops surface in the summary, so a half-landed import is never silent.
+func TestImportSummaryNotesSkippedLines(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	r := strings.NewReader("A=1\nbad-name=2\nnoeq\nB=3\n")
+	summary, err := runImport(r, cfgPath, "a", false, false, "", nil, nil)
+	if err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+	for _, want := range []string{"skipped 2 lines", "line 2 (invalid key name)", "line 3 (missing =)"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary %q missing %q", summary, want)
+		}
+	}
+}
+
 // runImportCmd executes the import command against a fixture directory with
 // the given flags, writing env into a local .env file. dir is the chdir root
 // holding global.yaml; the caller has already wired globalFlags.

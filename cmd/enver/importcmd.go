@@ -134,13 +134,14 @@ func effectiveResolve(profile string) (config.Resolved, error) {
 // the caller against the merged view.
 // force and confirm gate destructive replaces: key removals and the unset-list
 // wipe alike. resolve computes the post-write effective resolution for fence
-// reporting; nil disables it (tests). Returns a one-line summary.
+// reporting; nil disables it (tests). Returns the summary, with any lines the
+// parser skipped appended so a half-landed import is visible.
 func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFlag string, confirm confirmFunc, resolve func(string) (config.Resolved, error)) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
 	}
-	entries, err := dotenv.Parse(data)
+	entries, skips, err := dotenv.Parse(data)
 	if err != nil {
 		return "", err
 	}
@@ -178,6 +179,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 	}
 	d := computeImportDiff(oldEnv, imported)
 
+	var mode string
 	if exists && replace {
 		d.removed = removedKeys(oldEnv, imported)
 		oldUnset := existingProf.Unset
@@ -195,16 +197,35 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 		if err := config.WriteProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments}, false, false); err != nil {
 			return "", err
 		}
-		return formatImportSummary(name, len(imported), "replaced", d, extendsToWrite, oldExtends, fencedImportedKeys(resolve, name, imported)), nil
+		mode = "replaced"
+	} else {
+		if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported, Comments: comments}, false, false); err != nil {
+			return "", err
+		}
+		mode = "created"
+		if exists {
+			mode = "merge"
+		}
 	}
-	if err := config.UpsertProfile(cfgPath, name, config.Profile{Extends: extendsToWrite, Env: imported, Comments: comments}, false, false); err != nil {
-		return "", err
+	summary := formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends, fencedImportedKeys(resolve, name, imported))
+	return summary + skippedLineNote(skips), nil
+}
+
+// skippedLineNote renders the skipped-line appendix for the import summary,
+// listing at most 3 lines before folding the rest into a count.
+func skippedLineNote(skips []dotenv.Skip) string {
+	if len(skips) == 0 {
+		return ""
 	}
-	mode := "created"
-	if exists {
-		mode = "merge"
+	var parts []string
+	for i, s := range skips {
+		if i == 3 {
+			parts = append(parts, fmt.Sprintf("… %d more", len(skips)-3))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("line %d (%s)", s.Line, s.Reason))
 	}
-	return formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends, fencedImportedKeys(resolve, name, imported)), nil
+	return fmt.Sprintf("\nskipped %d lines: %s", len(skips), strings.Join(parts, ", "))
 }
 
 type diffEntry struct{ key, val string }

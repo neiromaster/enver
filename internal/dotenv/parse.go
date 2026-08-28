@@ -14,6 +14,12 @@ type Entry struct {
 	Comment string
 }
 
+// Skip is one input line Parse could not turn into an entry.
+type Skip struct {
+	Line   int    // 1-based physical line number
+	Reason string // "invalid key name" or "missing ="
+}
+
 func validKey(k string) bool { return envname.Valid(k) }
 
 type parseError struct{ msg string }
@@ -28,9 +34,8 @@ func (e parseError) Error() string { return e.msg }
 // (whitespace-then-#) comment stripped. Single, double, and backtick quotes may span
 // physical lines. Consecutive comment lines above a KEY (no blank between) attach to
 // it; a blank line resets. A leading export is stripped. Invalid keys and lines
-// without = are skipped.
-func Parse(data []byte) ([]Entry, error) {
-	var entries []Entry
+// without = are skipped and reported in skips.
+func Parse(data []byte) (entries []Entry, skips []Skip, err error) {
 	var pending []string
 	var open byte // open quote for a multi-line value, else 0
 	var key, comment string
@@ -42,13 +47,14 @@ func Parse(data []byte) ([]Entry, error) {
 		val.Reset()
 	}
 
-	for _, raw := range strings.Split(string(data), "\n") {
+	for i, raw := range strings.Split(string(data), "\n") {
+		lineNo := i + 1
 		line := strings.TrimRight(raw, "\r")
 		if open != 0 {
 			val.WriteByte('\n')
 			closed, err := consumeQuote(&val, open, line)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if closed {
 				closeEntry()
@@ -66,11 +72,17 @@ func Parse(data []byte) ([]Entry, error) {
 		default:
 			body := strings.TrimPrefix(trimmed, "export ")
 			k, rest, ok := strings.Cut(body, "=")
-			if !ok || !validKey(strings.TrimSpace(k)) {
+			if !ok {
+				skips = append(skips, Skip{Line: lineNo, Reason: "missing ="})
 				pending = nil
 				continue
 			}
 			key = strings.TrimSpace(k)
+			if !validKey(key) {
+				skips = append(skips, Skip{Line: lineNo, Reason: "invalid key name"})
+				pending = nil
+				continue
+			}
 			comment = strings.Join(pending, "\n")
 			pending = nil
 			trimmed := strings.TrimLeft(rest, " \t")
@@ -82,7 +94,7 @@ func Parse(data []byte) ([]Entry, error) {
 			}
 			q, err := beginValue(&val, trimmed)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if q == 0 {
 				closeEntry()
@@ -92,9 +104,9 @@ func Parse(data []byte) ([]Entry, error) {
 		}
 	}
 	if open != 0 {
-		return nil, parseError{"unterminated " + string(open) + " quote"}
+		return nil, nil, parseError{"unterminated " + string(open) + " quote"}
 	}
-	return entries, nil
+	return entries, skips, nil
 }
 
 // beginValue writes the first line of a value to val and returns the open quote

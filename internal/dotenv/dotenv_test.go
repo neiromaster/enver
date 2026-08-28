@@ -153,7 +153,7 @@ func TestFormatRoundTripApostrophe(t *testing.T) {
 		"COMPLEX": `It's "awesome"`,
 	}
 	out := Format(env, nil, Options{Header: false})
-	got, err := Parse(out)
+	got, _, err := Parse(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestParseInlineCommentSpace(t *testing.T) {
 		{"KEY=\t#tab-comment", "KEY", ""},
 	}
 	for _, c := range cases {
-		got, err := Parse([]byte(c.in))
+		got, _, err := Parse([]byte(c.in))
 		if err != nil {
 			t.Fatalf("Parse(%q): %v", c.in, err)
 		}
@@ -202,7 +202,7 @@ func TestParseInlineCommentSpace(t *testing.T) {
 func TestFormatRoundTripThroughParse(t *testing.T) {
 	env := map[string]string{"URL": "postgres://$HOST/db", "COST": "price$$5", "PLAIN": "hi"}
 	out := Format(env, nil, Options{Header: false})
-	got, err := Parse(out)
+	got, _, err := Parse(out)
 	if err != nil {
 		t.Fatal(err)
 	}
