@@ -1,12 +1,22 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"gopkg.in/yaml.v3"
 )
+
+// requireMappingRoot rejects a parsed document whose root is not a mapping,
+// so every reader and writer fails identically on the same input.
+func requireMappingRoot(path string, root *yaml.Node) error {
+	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("config file %s is not a mapping", path)
+	}
+	return nil
+}
 
 // loadOrInitRoot reads the YAML document at path into a node tree, synthesising an
 // empty mapping document when the file is missing or empty. It is the shared
@@ -22,8 +32,8 @@ func loadOrInitRoot(path string) (*yaml.Node, error) {
 		if err := yaml.Unmarshal(data, &root); err != nil {
 			return nil, err
 		}
-		if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-			root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
+		if err := requireMappingRoot(path, &root); err != nil {
+			return nil, err
 		}
 		return &root, nil
 	case os.IsNotExist(err):

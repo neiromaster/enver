@@ -198,3 +198,22 @@ func TestWriteProfileRejectsInvalidNames(t *testing.T) {
 		t.Fatalf("the earlier valid write must have left a loadable file: %v", err)
 	}
 }
+
+func TestWriteProfileRejectsNonMappingRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "- a\n- b\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := WriteProfile(path, "p", Profile{Env: map[string]string{"K": "v"}}, false, false)
+	if err == nil || !strings.Contains(err.Error(), "not a mapping") {
+		t.Fatalf("WriteProfile on sequence root: err=%v, want not-a-mapping error", err)
+	}
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(data) != body {
+		t.Fatalf("file was modified: %q", data)
+	}
+}

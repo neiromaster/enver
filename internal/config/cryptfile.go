@@ -21,8 +21,8 @@ func loadNode(path string) (*yaml.Node, error) {
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return nil, err
 	}
-	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("config file %s is not a mapping", path)
+	if err := requireMappingRoot(path, &root); err != nil {
+		return nil, err
 	}
 	return &root, nil
 }
