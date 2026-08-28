@@ -8,12 +8,22 @@ import (
 
 // childPrinter returns a child command that prints the named env var raw
 // (no trailing newline beyond the child's own): sh on POSIX, cmd on windows.
-// This is the only GOOS branch the suite is allowed.
+// Together with childAbsentProbe these are the only GOOS branches the suite
+// is allowed.
 func childPrinter(varName string) []string {
 	if runtime.GOOS == "windows" {
 		return []string{"cmd", "/c", "echo %" + varName + "%"}
 	}
 	return []string{"sh", "-c", `printf %s "$` + varName + `"`}
+}
+
+// childAbsentProbe prints absent only when the named var is empty or unset
+// in the child env: a fence must leave nothing behind to detect.
+func childAbsentProbe(varName string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd", "/c", "if not defined " + varName + " echo absent"}
+	}
+	return []string{"sh", "-c", `test -z "$` + varName + `" && echo absent`}
 }
 
 func TestXPropagatesChildExitCode(t *testing.T) {
@@ -76,8 +86,8 @@ func TestXNoExpandKeepsLiteral(t *testing.T) {
 func TestXFenceHidesUnsetFromChild(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    unset: [SECRET]\n    env:\n      SECRET: s\n")
-	r := s.run(append([]string{"x", "p", "--"}, childPrinter("SECRET")...)...)
-	if r.ExitCode != 0 || strings.TrimSpace(r.Stdout) != "" {
-		t.Fatalf("a fenced var must not reach the child, got %q", r.Stdout)
+	r := s.run(append([]string{"x", "p", "--"}, childAbsentProbe("SECRET")...)...)
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "absent") {
+		t.Fatalf("a fenced var must not reach the child, got %q (stderr: %s)", r.Stdout, r.Stderr)
 	}
 }
