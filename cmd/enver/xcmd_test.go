@@ -26,7 +26,7 @@ func TestXNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	enc, err := crypto.EncryptValue("secret", key, salt)
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}

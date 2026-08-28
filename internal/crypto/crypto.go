@@ -116,12 +116,6 @@ func IsEncrypted(v string) bool {
 	return strings.HasPrefix(v, prefixV3)
 }
 
-// EncryptValue returns "enc:v3:argon2id:<t>:<m>:<p>:<base64(salt||nonce||ciphertext)>"
-// with the current KDF parameters.
-func EncryptValue(plain string, key, salt []byte) (string, error) {
-	return EncryptValueWithParams(plain, key, salt, CurrentParams)
-}
-
 // EncryptValueWithParams encrypts with explicit KDF parameters embedded in the
 // value header, so decryption and passphrase recovery never depend on the
 // compile-time constants.

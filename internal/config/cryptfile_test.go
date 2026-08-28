@@ -15,7 +15,7 @@ import (
 // profile-scoped salt guard must let coexist with encrypting p.
 func writeMixedSaltConfig(t *testing.T, keyT, saltT []byte) (path, encT string) {
 	t.Helper()
-	encT, err := crypto.EncryptValue("old", keyT, saltT)
+	encT, err := crypto.EncryptValueWithParams("old", keyT, saltT, crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestDecryptFileWrongKeyActionableError(t *testing.T) {
 	keyB := make([]byte, 32)
 	keyB[0] = 1
 	salt := []byte("aaaaaaaaaaaaaaaa")
-	enc, err := crypto.EncryptValue("v", keyA, salt)
+	enc, err := crypto.EncryptValueWithParams("v", keyA, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}

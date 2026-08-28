@@ -26,7 +26,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		"unicode: ключ-пароль-密码 🔐",
 	}
 	for _, plain := range cases {
-		enc, err := EncryptValue(plain, key, salt)
+		enc, err := EncryptValueWithParams(plain, key, salt, CurrentParams)
 		if err != nil {
 			t.Fatalf("encrypt %q: %v", plain, err)
 		}
@@ -47,8 +47,8 @@ func TestEncryptUsesRandomNonce(t *testing.T) {
 	key := make([]byte, keySize)
 	salt := make([]byte, saltSize)
 	plain := "sk-same-input"
-	a, _ := EncryptValue(plain, key, salt)
-	b, _ := EncryptValue(plain, key, salt)
+	a, _ := EncryptValueWithParams(plain, key, salt, CurrentParams)
+	b, _ := EncryptValueWithParams(plain, key, salt, CurrentParams)
 	if a == b {
 		t.Fatal("two encryptions of the same value produced identical ciphertext (nonce not random)")
 	}
@@ -58,7 +58,7 @@ func TestDecryptWrongKeyFails(t *testing.T) {
 	keyA := make([]byte, keySize)
 	keyB := make([]byte, keySize)
 	keyB[0] = 1
-	enc, _ := EncryptValue("secret", keyA, make([]byte, saltSize))
+	enc, _ := EncryptValueWithParams("secret", keyA, make([]byte, saltSize), CurrentParams)
 	if _, err := DecryptValue(enc, keyB); err == nil {
 		t.Fatal("decrypt with wrong key should fail (GCM auth)")
 	}
@@ -74,7 +74,7 @@ func TestDecryptNonEncryptedFails(t *testing.T) {
 func TestEncryptValueV3Format(t *testing.T) {
 	key := make([]byte, 32)
 	salt := make([]byte, SaltSize)
-	enc, err := EncryptValue("secret", key, salt)
+	enc, err := EncryptValueWithParams("secret", key, salt, CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestSaltScan(t *testing.T) {
 func TestCheckReadable(t *testing.T) {
 	key := make([]byte, 32)
 	salt := make([]byte, SaltSize)
-	enc, err := EncryptValue("secret", key, salt)
+	enc, err := EncryptValueWithParams("secret", key, salt, CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestLoadKeyRoundTrip(t *testing.T) {
 	if len(salt) != saltSize {
 		t.Fatalf("loaded salt len = %d, want %d", len(salt), saltSize)
 	}
-	enc, err := EncryptValue("secret", loaded, salt)
+	enc, err := EncryptValueWithParams("secret", loaded, salt, CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 func TestEncryptV3RoundTrip(t *testing.T) {
 	salt := make([]byte, 16)
 	key := make([]byte, keySize)
-	enc, err := EncryptValue("secret", key, salt)
+	enc, err := EncryptValueWithParams("secret", key, salt, CurrentParams)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestEncryptV3RoundTrip(t *testing.T) {
 func TestSaltFromValue(t *testing.T) {
 	salt := []byte("0123456789abcdef")
 	key := make([]byte, keySize)
-	enc, err := EncryptValue("secret", key, salt)
+	enc, err := EncryptValueWithParams("secret", key, salt, CurrentParams)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestEncryptValueRejectsBadSaltLength(t *testing.T) {
 		nil,
 	}
 	for _, salt := range badSalts {
-		if _, err := EncryptValue("secret", key, salt); err == nil {
+		if _, err := EncryptValueWithParams("secret", key, salt, CurrentParams); err == nil {
 			t.Fatalf("EncryptValue with %d-byte salt must error", len(salt))
 		}
 	}

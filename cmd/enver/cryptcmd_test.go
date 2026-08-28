@@ -168,11 +168,11 @@ func TestScanConfigCryptConflictingEras(t *testing.T) {
 	globalFlags.configPath = filepath.Join(dir, "global.yaml")
 
 	key := make([]byte, 32)
-	encA, err := crypto.EncryptValue("a", key, []byte("0123456789abcdef"))
+	encA, err := crypto.EncryptValueWithParams("a", key, []byte("0123456789abcdef"), crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encB, err := crypto.EncryptValue("b", key, []byte("fedcba9876543210"))
+	encB, err := crypto.EncryptValueWithParams("b", key, []byte("fedcba9876543210"), crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}

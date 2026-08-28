@@ -325,7 +325,7 @@ func TestFirstSaltAndSample(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	key := make([]byte, 32)
 	salt := []byte("0123456789abcdef")
-	enc, err := crypto.EncryptValue("secret", key, salt)
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -529,11 +529,11 @@ func TestFirstSaltAndSampleConflictingSalts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	key := make([]byte, 32)
-	a, err := crypto.EncryptValue("a", key, []byte("0123456789abcdef"))
+	a, err := crypto.EncryptValueWithParams("a", key, []byte("0123456789abcdef"), crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := crypto.EncryptValue("b", key, []byte("fedcba9876543210"))
+	b, err := crypto.EncryptValueWithParams("b", key, []byte("fedcba9876543210"), crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
