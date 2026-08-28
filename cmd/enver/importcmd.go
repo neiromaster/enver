@@ -31,6 +31,17 @@ var (
 	importExtends string
 )
 
+// splitExtends parses a comma-separated --extends value, dropping empties.
+func splitExtends(raw string) config.Extends {
+	var out config.Extends
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 var importCmd = &cobra.Command{
 	Use:               "import <file> [profile]",
 	Short:             "Import a .env file into a profile",
@@ -67,6 +78,24 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
+		if importExtends != "" {
+			parents := splitExtends(importExtends)
+			// Parents and cycles are judged on the merged view: resolution
+			// spans both layers, so a global pick can loop through a local
+			// parent and vice versa.
+			merged, err := app.Load(appOpts())
+			if err != nil {
+				return err
+			}
+			for _, p := range parents {
+				if _, ok := merged.Profiles[p]; !ok {
+					return fmt.Errorf("extends profile %q does not exist", p)
+				}
+			}
+			if extendsCycles(merged, name, parents) {
+				return fmt.Errorf("extends %s would create a cycle", strings.Join(parents, ", "))
+			}
+		}
 		summary, err := runImport(r, writeTarget(), name, importReplace, importForce, importExtends, ui.Confirm, effectiveResolve)
 		if err != nil {
 			return err
@@ -101,7 +130,8 @@ func effectiveResolve(profile string) (config.Resolved, error) {
 // override existing same-named keys (merge); when replace is true the profile's
 // own env and unset list are wiped first, so an imported key the old profile
 // fenced survives the import. The extends value is preserved unless extendsFlag
-// is non-empty, in which case it is set (and the parent must already exist).
+// is non-empty, in which case it is set; parents and cycles are validated by
+// the caller against the merged view.
 // force and confirm gate destructive replaces: key removals and the unset-list
 // wipe alike. resolve computes the post-write effective resolution for fence
 // reporting; nil disables it (tests). Returns a one-line summary.
@@ -131,16 +161,7 @@ func runImport(r io.Reader, cfgPath, name string, replace, force bool, extendsFl
 
 	extendsToWrite := config.Extends(nil)
 	if extendsFlag != "" {
-		for _, raw := range strings.Split(extendsFlag, ",") {
-			p := strings.TrimSpace(raw)
-			if p == "" {
-				continue
-			}
-			if _, ok := existing.Profiles[p]; !ok {
-				return "", fmt.Errorf("extends profile %q does not exist", p)
-			}
-			extendsToWrite = append(extendsToWrite, p)
-		}
+		extendsToWrite = splitExtends(extendsFlag)
 	} else if exists {
 		extendsToWrite = existingProf.Extends
 	}

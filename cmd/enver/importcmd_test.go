@@ -167,9 +167,15 @@ func TestImportExtendsCreate(t *testing.T) {
 	}
 }
 
+// TestImportExtendsMissingParent runs at the command level: parents are
+// validated against the merged view in RunE, not inside runImport.
 func TestImportExtendsMissingParent(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	_, err := runImport(bytes.NewReader([]byte("A=1\n")), cfgPath, "p", false, false, "ghost", nil, nil)
+	global := importFixtureLayers(t)
+	globalFlags.configPath = global
+	globalFlags.global = true
+	globalFlags.noLocal = true
+
+	err := runImportCmd(t, "A=1\n", "p", "--extends", "ghost")
 	if err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("expected missing-parent error, got: %v", err)
 	}
@@ -446,5 +452,78 @@ func TestImportMergeReportsFencedKeys(t *testing.T) {
 	}
 	if !strings.Contains(summary, "+ B = 2") {
 		t.Errorf("an unfenced key still reports as added, got:\n%s", summary)
+	}
+}
+
+// runImportCmd executes the import command against a fixture directory with
+// the given flags, writing env into a local .env file. dir is the chdir root
+// holding global.yaml; the caller has already wired globalFlags.
+func runImportCmd(t *testing.T, envBody string, args ...string) error {
+	t.Helper()
+	envFile := filepath.Join(t.TempDir(), "vars.env")
+	if err := os.WriteFile(envFile, []byte(envBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return importCmd.RunE(&cobra.Command{}, append([]string{envFile}, args...))
+}
+
+func importFixtureLayers(t *testing.T) string {
+	t.Helper()
+	saved := globalFlags
+	t.Cleanup(func() { globalFlags = saved })
+
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "global.yaml")
+}
+
+// TestImportExtendsSelfCycleRefused pins the cycle guard: import must refuse
+// an extends value that loops, like add and edit do, instead of writing a
+// profile that fails resolution later.
+func TestImportExtendsSelfCycleRefused(t *testing.T) {
+	global := importFixtureLayers(t)
+	if err := config.UpsertProfile(global, "a", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	globalFlags.configPath = global
+	globalFlags.global = true
+	globalFlags.noLocal = true
+
+	err := runImportCmd(t, "OWN=2\n", "a", "--extends", "a")
+	if err == nil || !strings.Contains(err.Error(), "would create a cycle") {
+		t.Fatalf("err=%v, want cycle refusal", err)
+	}
+	prof, _, _, _, _ := config.ReadProfile(global, "a")
+	if prof.Env["OWN"] != "" {
+		t.Fatalf("profile was written despite cycle refusal: %+v", prof)
+	}
+}
+
+// TestImportExtendsParentFromOtherLayerAccepted pins the merged-view rule:
+// a parent living only in the other layer is a valid extends target for
+// import, exactly as it is for add and edit.
+func TestImportExtendsParentFromOtherLayerAccepted(t *testing.T) {
+	global := importFixtureLayers(t)
+	if err := config.UpsertProfile(global, "gparent", config.Profile{Env: map[string]string{"ROOT": "1"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	globalFlags.configPath = global
+	globalFlags.global = false
+	globalFlags.noLocal = false
+
+	if err := runImportCmd(t, "OWN=2\n", "child", "--extends", "gparent"); err != nil {
+		t.Fatalf("merged-view parent rejected: %v", err)
+	}
+	local := config.LocalPath()
+	prof, _, _, _, _ := config.ReadProfile(local, "child")
+	if !prof.Extends.Has("gparent") {
+		t.Fatalf("child.Extends = %q, want gparent", prof.Extends)
 	}
 }
