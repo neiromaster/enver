@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -60,7 +61,10 @@ func TestParentEnvForResolvesChain(t *testing.T) {
 		"ci":   {Env: map[string]string{"A": "2", "B": "3"}},
 		"dev":  {Env: map[string]string{"A": "own", "C": "own"}, Unset: config.Unsets{"A"}},
 	}}
-	got := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	if len(warns) != 0 {
+		t.Fatalf("healthy chain must not warn: %v", warns)
+	}
 	if got["A"] != "2" || got["B"] != "3" {
 		t.Fatalf("parentEnv = %v, want A=2 (later parent wins), B=3", got)
 	}
@@ -76,8 +80,9 @@ func TestParentEnvForEmptyExtendsIsEmpty(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"dev": {Env: map[string]string{"A": "own"}},
 	}}
-	if got := parentEnvFor(cfg, "dev", nil); len(got) != 0 {
-		t.Fatalf("parentEnv = %v, want empty", got)
+	got, warns := parentEnvFor(cfg, "dev", nil)
+	if len(got) != 0 || len(warns) != 0 {
+		t.Fatalf("parentEnv = %v, warns = %v, want empty", got, warns)
 	}
 }
 
@@ -86,8 +91,31 @@ func TestParentEnvForCycleIsEmpty(t *testing.T) {
 		"base": {Extends: config.Extends{"dev"}, Env: map[string]string{"A": "1"}},
 		"dev":  {},
 	}}
-	if got := parentEnvFor(cfg, "dev", config.Extends{"base"}); len(got) != 0 {
+	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base"})
+	if len(got) != 0 {
 		t.Fatalf("parentEnv = %v, want empty (pending cycle)", got)
+	}
+	if len(warns) == 0 {
+		t.Fatal("pending cycle must be reported as a warning")
+	}
+}
+
+func TestParentEnvForSkipsBrokenBranch(t *testing.T) {
+	// base's ancestry is broken (ghost is gone); ci is healthy and must
+	// survive into the backdrop even though the whole chain fails to resolve.
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Extends: config.Extends{"ghost"}, Env: map[string]string{"A": "1"}},
+		"ci":   {Env: map[string]string{"B": "3"}},
+	}}
+	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	if got["B"] != "3" {
+		t.Fatalf("parentEnv = %v, want ci's B=3 to survive base's broken ancestry", got)
+	}
+	if _, ok := got["A"]; ok {
+		t.Fatalf("parentEnv = %v, broken branch's keys must be absent", got)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "base") {
+		t.Fatalf("warns = %v, want exactly one warning naming base", warns)
 	}
 }
 

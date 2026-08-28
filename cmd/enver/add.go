@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -43,25 +44,38 @@ func promptProfileName() (string, bool) {
 // the collecting summary: parents merge left-to-right, while the target
 // profile's own env and working fences are stripped, so its own keys never
 // read as inherited and a declared unset cannot hide a parent key from the
-// summary. A pending cycle resolves to nothing; extendsCycles rejects the
-// pick before the summary is ever built.
-func parentEnvFor(cfg config.Config, self string, extends config.Extends) map[string]string {
+// summary. When the chain does not resolve, each parent's subtree resolves on
+// its own — one broken ancestor must not blank every healthy parent — and the
+// healthy ones still merge in pick order, while the broken ones come back as
+// warnings for the caller to print.
+func parentEnvFor(cfg config.Config, self string, extends config.Extends) (map[string]string, []string) {
 	if len(extends) == 0 {
-		return map[string]string{}
+		return map[string]string{}, nil
 	}
-	probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
-	for k, v := range cfg.Profiles {
-		probe.Profiles[k] = v
+	blankSelf := func(p *config.Profile) {
+		p.Env = nil
+		*p = stripWorkingFences(*p)
 	}
-	tp := probe.Profiles[self]
-	tp.Extends = extends
-	tp.Env = nil
-	probe.Profiles[self] = stripWorkingFences(tp)
-	r, err := probe.ResolveProfile(self)
-	if err != nil {
-		return map[string]string{}
+	if r, err := probeWith(cfg, self, func(p *config.Profile) {
+		p.Extends = extends
+		blankSelf(p)
+	}).ResolveProfile(self); err == nil {
+		return r.Env, nil
 	}
-	return r.Env
+	backdrop := map[string]string{}
+	var warns []string
+	for _, parent := range extends {
+		br, berr := probeWith(cfg, self, func(p *config.Profile) {
+			p.Extends = config.Extends{parent}
+			blankSelf(p)
+		}).ResolveProfile(self)
+		if berr != nil {
+			warns = append(warns, fmt.Sprintf("note: parent %q is unresolvable (%v) — its inherited keys are hidden", parent, berr))
+			continue
+		}
+		maps.Copy(backdrop, br.Env)
+	}
+	return backdrop, warns
 }
 
 func buildProfile(extends config.Extends, entries []ui.EnvEntry) (config.Profile, map[string]string) {
@@ -171,7 +185,10 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	parentEnv := parentEnvFor(pickerCfg, name, extends)
+	parentEnv, inheritedWarns := parentEnvFor(pickerCfg, name, extends)
+	for _, w := range inheritedWarns {
+		fmt.Println("  " + w)
+	}
 
 	var entries []ui.EnvEntry
 	for {
