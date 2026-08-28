@@ -25,7 +25,6 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "e2e: temp dir:", err)
 		os.Exit(2)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
 
 	enverBin = filepath.Join(dir, "enver")
 	if runtime.GOOS == "windows" {
@@ -35,7 +34,7 @@ func TestMain(m *testing.M) {
 	build.Dir = repoRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: build enver: %v\n%s", err, out)
-		os.Exit(2) //nolint:gocritic // TestMain may exit without defer
+		os.Exit(2)
 	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
