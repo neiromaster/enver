@@ -182,7 +182,7 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 			if crypto.IsEncrypted(valNode.Value) {
 				continue
 			}
-			if !all && !IsSensitive(keyNode.Value, valNode.Value) {
+			if !all && !ShouldEncrypt(keyNode.Value, valNode.Value) {
 				continue
 			}
 			enc, err := crypto.EncryptValueWithParams(valNode.Value, key, salt, params)

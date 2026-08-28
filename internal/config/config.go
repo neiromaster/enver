@@ -533,9 +533,17 @@ var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|cr
 // component (https://api.example.com) are not secrets.
 var urlCredRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.\-]*://(?:[^/@\s:]*:[^@\s]*|[^/@\s:]+)@`)
 
-// IsSensitive reports whether a key/value pair is a secret: a secret-looking key
-// name, or a value that carries credentials in a URL.
+// IsSensitive reports whether a key/value pair should be masked for display:
+// a secret-looking key name, or a value that carries credentials in a URL.
 func IsSensitive(k, v string) bool {
+	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
+}
+
+// ShouldEncrypt reports whether a key/value pair should be stored encrypted.
+// It shares the secret heuristic with display masking on purpose, but is a
+// separate predicate: the security-side selection may grow stricter than the
+// display-side one without rewriting every mask call site.
+func ShouldEncrypt(k, v string) bool {
 	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
 }
 

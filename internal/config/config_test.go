@@ -181,6 +181,24 @@ func TestMaskValueURLSecrets(t *testing.T) {
 	}
 }
 
+func TestShouldEncryptMatchesSecretSelection(t *testing.T) {
+	cases := []struct {
+		key, val string
+		want     bool
+	}{
+		{"API_KEY", "sk-123", true},
+		{"password", "hunter2", true},
+		{"db", "postgres://u:p@host/db", true}, // URL credentials
+		{"MODEL", "gpt-x", false},
+		{"BASE_URL", "https://api.example.com", false},
+	}
+	for _, c := range cases {
+		if got := ShouldEncrypt(c.key, c.val); got != c.want {
+			t.Errorf("ShouldEncrypt(%q, %q) = %v, want %v", c.key, c.val, got, c.want)
+		}
+	}
+}
+
 func TestGlobalPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if got, want := GlobalPath(""), filepath.Join("/xdg", "enver", "config.yaml"); got != want {
