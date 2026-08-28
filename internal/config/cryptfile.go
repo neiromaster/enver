@@ -9,24 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func loadNode(path string) (*yaml.Node, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("config file %s is empty", path)
-	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, err
-	}
-	if err := requireMappingRoot(path, &root); err != nil {
-		return nil, err
-	}
-	return &root, nil
-}
-
 func profilesMapping(body *yaml.Node) *yaml.Node {
 	idx := findIndex(body, "profiles")
 	if idx < 0 || body.Content[idx].Kind != yaml.MappingNode {
@@ -82,6 +64,10 @@ func envMapping(profileNode *yaml.Node) *yaml.Node {
 // forEachEnvValue calls fn for every scalar env value of every profile (only
 // profile when non-empty), in file order, stopping at the first error.
 func forEachEnvValue(pm *yaml.Node, profile string, fn func(v string) error) error {
+	// A nil profiles mapping holds no values.
+	if pm == nil {
+		return nil
+	}
 	for i := 0; i+1 < len(pm.Content); i += 2 {
 		if profile != "" && pm.Content[i].Value != profile {
 			continue
@@ -144,7 +130,7 @@ func sameSaltEra(pm *yaml.Node, salt []byte) (crypto.Argon2Params, bool, error) 
 // cannot read (foreign enc: prefixes, malformed enc:v3) fail loudly in every
 // profile, filtered or not. Returns the count of newly encrypted values.
 func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, error) {
-	root, err := loadNode(path)
+	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return 0, err
 	}
@@ -155,6 +141,9 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	}
 	if err := requireProfile(pm, profile); err != nil {
 		return 0, err
+	}
+	if pm == nil {
+		return 0, nil
 	}
 	if err := forEachEnvValue(pm, "", crypto.CheckReadable); err != nil {
 		return 0, err
@@ -217,7 +206,7 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 
 // DecryptFile reverses EncryptFile for the encrypted values it finds. The key is pre-verified against the first encrypted value in the target profiles, so a wrong key fails once with the recovery path instead of mid-run. Foreign enc: values fail loudly in every profile, filtered or not. Returns the count of decrypted values.
 func DecryptFile(path string, key []byte, profile string) (int, error) {
-	root, err := loadNode(path)
+	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return 0, err
 	}
@@ -228,6 +217,9 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	}
 	if err := requireProfile(pm, profile); err != nil {
 		return 0, err
+	}
+	if pm == nil {
+		return 0, nil
 	}
 	if err := forEachEnvValue(pm, "", func(v string) error {
 		if p := crypto.ForeignEncPrefix(v); p != "" {
@@ -295,7 +287,7 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 // and values disagreeing on salt or params are errors: recovery must not
 // silently pick from what it cannot fully read.
 func FirstSaltAndSample(path string) (salt []byte, p crypto.Argon2Params, sample string, err error) {
-	root, err := loadNode(path)
+	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return nil, crypto.Argon2Params{}, "", err
 	}

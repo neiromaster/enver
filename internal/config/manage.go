@@ -14,7 +14,7 @@ func RenameProfile(path, old, new string) error {
 	if old == new {
 		return nil
 	}
-	root, err := loadNode(path)
+	root, err := loadOrInitRoot(path)
 	if err != nil {
 		return err
 	}

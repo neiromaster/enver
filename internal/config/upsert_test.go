@@ -345,9 +345,10 @@ func TestFirstSaltAndSample(t *testing.T) {
 	if err != nil || string(gotSalt) != string(salt) || gotSample != enc {
 		t.Fatalf("v3 config: salt=%q sample=%q err=%v, want %q/%q", gotSalt, gotSample, err, salt, enc)
 	}
-	// Missing file → error.
-	if _, _, _, err := FirstSaltAndSample(filepath.Join(dir, "nope.yaml")); err == nil {
-		t.Fatal("missing file must error")
+	// Missing file reads as an empty config: no salt, no error.
+	gotSalt, _, gotSample, err = FirstSaltAndSample(filepath.Join(dir, "nope.yaml"))
+	if err != nil || gotSalt != nil || gotSample != "" {
+		t.Fatalf("missing file: salt=%v sample=%q err=%v, want none", gotSalt, gotSample, err)
 	}
 }
 

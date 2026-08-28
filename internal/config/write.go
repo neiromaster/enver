@@ -20,7 +20,7 @@ func requireMappingRoot(path string, root *yaml.Node) error {
 
 // loadOrInitRoot reads the YAML document at path into a node tree, synthesising an
 // empty mapping document when the file is missing or empty. It is the shared
-// entry point for every node-tree write.
+// entry point for every node-tree access.
 func loadOrInitRoot(path string) (*yaml.Node, error) {
 	data, err := os.ReadFile(path)
 	switch {
@@ -123,11 +123,8 @@ func writePath(path string, out []byte) error {
 // default key is cleared too — a dangling default is never valid, and a config
 // without a default is a legitimate state.
 func DeleteProfile(path, name string) error {
-	root, err := loadNode(path)
+	root, err := loadOrInitRoot(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
 	body := root.Content[0]

@@ -60,6 +60,14 @@ func TestRenameProfileAbsentSource(t *testing.T) {
 	}
 }
 
+func TestRenameProfileMissingFileReportsNotFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	err := RenameProfile(path, "a", "b")
+	if err == nil || !strings.Contains(err.Error(), `profile "a" not found`) {
+		t.Fatalf("RenameProfile on missing file = %v; want not-found error", err)
+	}
+}
+
 func TestSetAndClearDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

@@ -120,6 +120,9 @@ func TestDeleteProfileMissingIsNoOp(t *testing.T) {
 	if err := DeleteProfile(path, "anth"); err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("DeleteProfile must not create the file")
+	}
 }
 
 // TestDeleteProfileClearsDefault: removing the profile that is the file's

@@ -170,6 +170,40 @@ func TestCryptPathsRejectNonMappingProfiles(t *testing.T) {
 	}
 }
 
+func TestDecryptFileEmptyConfigYieldsZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := DecryptFile(path, []byte("irrelevant"), "")
+	if err != nil || n != 0 {
+		t.Fatalf("DecryptFile on empty config = %d, %v; want 0, nil", n, err)
+	}
+}
+
+func TestEncryptFileEmptyConfigYieldsZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	n, err := EncryptFile(path, key, make([]byte, 16), "", true)
+	if err != nil || n != 0 {
+		t.Fatalf("EncryptFile on empty config = %d, %v; want 0, nil", n, err)
+	}
+}
+
+func TestFirstSaltAndSampleEmptyConfigHasNoSalt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	salt, _, sample, err := FirstSaltAndSample(path)
+	if err != nil || salt != nil || sample != "" {
+		t.Fatalf("FirstSaltAndSample on empty config = %v, %q, %v; want no salt, no error", salt, sample, err)
+	}
+}
+
 func TestCryptPathsErrorOnMissingProfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := "profiles:\n  a:\n    env:\n      K: v\n"
