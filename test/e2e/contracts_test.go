@@ -1,0 +1,53 @@
+package e2e
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestAddWithoutTTYFails(t *testing.T) {
+	s := newSandbox(t)
+	r := s.run("add")
+	if r.ExitCode == 0 {
+		t.Fatal("add must refuse without a terminal")
+	}
+	if !strings.Contains(r.Stderr, "add is interactive") {
+		t.Fatalf("refusal should name the command, got: %q", r.Stderr)
+	}
+}
+
+func TestEditWithoutTTYFails(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n")
+	r := s.run("edit", "p")
+	if r.ExitCode == 0 {
+		t.Fatal("edit must refuse without a terminal")
+	}
+	if !strings.Contains(r.Stderr, "edit is interactive") {
+		t.Fatalf("refusal should name the command, got: %q", r.Stderr)
+	}
+}
+
+func TestImportWithoutProfileArgFailsWithoutTTY(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(s.project+"/incoming.env", "TOKEN=abc\n")
+	r := s.run("import", "incoming.env")
+	if r.ExitCode == 0 {
+		t.Fatal("import without a profile arg must refuse without a terminal")
+	}
+	if !strings.Contains(r.Stderr, "pass it as an argument") {
+		t.Fatalf("refusal should explain the fix, got: %q", r.Stderr)
+	}
+}
+
+func TestCompleteListsProfiles(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n  q:\n    env:\n      A: \"2\"\n")
+	r := s.run("__complete", "show", "")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "p") || !strings.Contains(r.Stdout, "q") {
+		t.Fatalf("completion must list the profiles, got: %q", r.Stdout)
+	}
+}
