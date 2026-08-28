@@ -158,3 +158,21 @@ func TestUpsertEntry(t *testing.T) {
 		t.Fatalf("upsert should append new key: %+v", entries)
 	}
 }
+
+// TestParentEnvForResolvesThroughMergedParents pins the view rule: the
+// backdrop resolves parents from the config it is given, and doAdd passes the
+// merged view — the same one the cycle check uses — so a parent the cycle
+// check resolved never comes back as hidden.
+func TestParentEnvForResolvesThroughMergedParents(t *testing.T) {
+	merged := config.Config{Profiles: map[string]config.Profile{
+		"child": {Extends: config.Extends{"base"}},
+		"base":  {Env: map[string]string{"B": "1"}},
+	}}
+	env, warns := parentEnvFor(merged, "newkid", config.Extends{"child"})
+	if len(warns) != 0 {
+		t.Fatalf("unexpected warns: %v", warns)
+	}
+	if env["B"] != "1" {
+		t.Fatalf("env=%v, want inherited B=1", env)
+	}
+}

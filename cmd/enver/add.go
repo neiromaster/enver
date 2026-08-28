@@ -175,21 +175,21 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		}
 		extends = picked
 	}
-	if len(extends) > 0 {
-		// Resolution spans both layers, so the cycle check does too: a global
-		// pick can loop through a local parent.
-		merged := pickerCfg
-		if globalFlags.global {
-			if merged, err = app.Load(appOpts()); err != nil {
-				return err
-			}
-		}
-		if extendsCycles(merged, name, extends) {
-			return fmt.Errorf("extends %s would create a cycle", strings.Join(extends, ", "))
+	// Resolution spans both layers, so every extends judgment uses the merged
+	// view: a global pick can loop through a local parent and vice versa, and
+	// the inherited backdrop must resolve through the same parents the cycle
+	// check just cleared.
+	merged := pickerCfg
+	if globalFlags.global {
+		if merged, err = app.Load(appOpts()); err != nil {
+			return err
 		}
 	}
+	if len(extends) > 0 && extendsCycles(merged, name, extends) {
+		return fmt.Errorf("extends %s would create a cycle", strings.Join(extends, ", "))
+	}
 
-	parentEnv, inheritedWarns := parentEnvFor(pickerCfg, name, extends)
+	parentEnv, inheritedWarns := parentEnvFor(merged, name, extends)
 	for _, w := range inheritedWarns {
 		fmt.Println("  " + w)
 	}
