@@ -145,6 +145,22 @@ func TestMenuOptionsContainsVarsInheritedAndActions(t *testing.T) {
 	}
 }
 
+// TestMenuOptionsMaskSecretValues pins the masking policy: the edit menu is a
+// display-only listing, so secret values mask there exactly as they do in
+// show. Selecting a row still opens the full-value card.
+func TestMenuOptionsMaskSecretValues(t *testing.T) {
+	s := newEditState("p", config.Profile{Env: map[string]string{
+		"API_SECRET": "hunter2", "PLAIN": "visible",
+	}}, nil, false)
+	labels := optionLabels(s.menuOptions(nil, nil))
+	if strings.Contains(labels, "hunter2") {
+		t.Fatalf("menu leaked a secret: %s", labels)
+	}
+	if !strings.Contains(labels, "visible") {
+		t.Fatalf("non-secret value missing: %s", labels)
+	}
+}
+
 func TestParseMenuChoice(t *testing.T) {
 	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	if kind, key := parseMenuChoice("OWN", s); kind != "own" || key != "OWN" {

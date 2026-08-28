@@ -198,7 +198,7 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
-		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
+		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Key, e.Value))}
 		// Fence state outranks the override mark and reads as a faded row: the
 		// variable stays listed so its suppression is visible where it happens.
 		switch {
@@ -210,7 +210,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
-		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, e.Value)}
+		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Key, e.Value))}
 		if config.UnsetsHasKey(s.unset, e.Key) {
 			opt.Dim = true
 		}
