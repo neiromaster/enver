@@ -123,12 +123,12 @@ func newCheckedMultiModel(title string, options []Option, checked []string) *sel
 	return m
 }
 
-// MultiSelectChecked is MultiSelect with pre-checked rows (matched by Value).
-// Confirming reports (values, true, nil) where values are the still-checked
-// Values in option order. Leaving without confirming — esc/ctrl+c or enter on
-// an Action row such as Back — reports (state, false, nil), state being the
-// checkbox layout at that moment, so callers can tell a bare exit from a
-// session that had toggles pending. Action rows never appear in values.
+// MultiSelectChecked is a checkbox multi-select with pre-checked rows (matched
+// by Value). Confirming reports (values, true, nil) where values are the
+// still-checked Values in option order. Leaving without confirming — esc/ctrl+c
+// or enter on an Action row such as Back — reports (state, false, nil), state
+// being the checkbox layout at that moment, so callers can tell a bare exit
+// from a session that had toggles pending. Action rows never appear in values.
 func MultiSelectChecked(title string, options []Option, checked []string) ([]string, bool, error) {
 	out, err := run(newCheckedMultiModel(title, options, checked))
 	if err != nil {
@@ -407,19 +407,6 @@ func (m *selectModel) singleResult() string {
 	return ""
 }
 
-func (m *selectModel) multiResult() []string {
-	if m.chosen >= 0 && m.chosen < len(m.options) && m.options[m.chosen].Action {
-		return []string{m.options[m.chosen].Value}
-	}
-	var out []string
-	for i, o := range m.options {
-		if m.selected[i] {
-			out = append(out, o.Value)
-		}
-	}
-	return out
-}
-
 func (m *selectModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.theme.title.Render(m.title))
@@ -535,12 +522,4 @@ func Select(title string, options []Option) (string, error) {
 		return "", err
 	}
 	return out.(*selectModel).singleResult(), nil
-}
-
-func MultiSelect(title string, options []Option) ([]string, error) {
-	out, err := run(newSelectModel(title, options, true))
-	if err != nil {
-		return nil, err
-	}
-	return out.(*selectModel).multiResult(), nil
 }

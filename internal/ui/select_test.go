@@ -91,10 +91,10 @@ func TestMultiSelectToggleAndSubmit(t *testing.T) {
 	if !m.submitted {
 		t.Fatal("not submitted")
 	}
-	got := m.multiResult()
+	got := m.checkedValues()
 	want := map[string]bool{"a": true, "b": true}
 	if len(got) != 2 || !want[got[0]] || !want[got[1]] {
-		t.Fatalf("multiResult = %v, want a,b", got)
+		t.Fatalf("checkedValues = %v, want a,b", got)
 	}
 }
 
@@ -198,24 +198,6 @@ func TestMultiSelectActionNotToggleable(t *testing.T) {
 	}
 }
 
-func TestMultiSelectEnterOnActionReturnsAction(t *testing.T) {
-	opts := []Option{
-		{Value: "a", Label: "A"},
-		{Value: "back", Label: "Back", Action: true},
-	}
-	m := newSelectModel("t", opts, true)
-	m = press(m, tea.KeyPressMsg{Code: tea.KeySpace}) // toggle A
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})  // cursor on Back
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.submitted {
-		t.Fatal("not submitted")
-	}
-	got := m.multiResult()
-	if len(got) != 1 || got[0] != "back" {
-		t.Fatalf("multiResult = %v, want [back] (action cancels the checked set)", got)
-	}
-}
-
 func TestSelectRendersColoredIcon(t *testing.T) {
 	m := newSelectModel("t", []Option{
 		{Value: "a", Label: "Add", Icon: IconAdd},
@@ -243,9 +225,9 @@ func TestMultiSelectCheckedSeedsSelection(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // cursor onto Beta
 	m = press(m, tea.KeyPressMsg{Text: "x"})         // uncheck b again
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := m.multiResult()
+	got := m.checkedValues()
 	if len(got) != 0 {
-		t.Fatalf("multiResult after unchecking = %v, want empty", got)
+		t.Fatalf("checkedValues after unchecking = %v, want empty", got)
 	}
 }
 

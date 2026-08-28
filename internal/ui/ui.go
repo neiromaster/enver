@@ -15,8 +15,8 @@ type Option struct {
 	Label string
 	Icon  string
 	// Action marks a command row (e.g. Back) rather than a selectable choice. In
-	// MultiSelect it renders without a checkbox, is never toggled (nor affected by
-	// select-all), and pressing Enter on it returns its Value alone, so a command
+	// a multi-select it renders without a checkbox, is never toggled (nor affected
+	// by select-all), and pressing Enter on it aborts the session, so a command
 	// such as Back can cancel without touching the checked set.
 	Action bool
 	// Dim renders the whole row faded (faint) while keeping it selectable: the

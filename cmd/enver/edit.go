@@ -544,15 +544,12 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					fmt.Println("  no variables to delete")
 					continue
 				}
-				picked, err := ui.MultiSelect("Variables to delete", deleteVarOptions(s, overrideKeySet(cfg, s)))
-				if err != nil {
+				picked, confirmed, err := ui.MultiSelectChecked("Variables to delete", deleteVarOptions(s, overrideKeySet(cfg, s)), nil)
+				if err != nil || !confirmed {
 					continue
 				}
 				var deleted []string
 				for _, key := range picked {
-					if key == actionCancel {
-						continue
-					}
 					if _, ok := s.find(key); ok {
 						deleted = append(deleted, key)
 					}
