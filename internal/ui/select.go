@@ -40,9 +40,6 @@ func newSelectModel(title string, options []Option, multi bool) *selectModel {
 	}
 }
 
-// newCheckedMultiModel is the MultiSelectChecked engine: the same multi model
-// with options whose Value appears in checked pre-marked. Unknown values and
-// action rows never seed a mark.
 // newOrderedMultiModel is the MultiSelectOrdered engine: the multi model with
 // ranks seeded from order. Values are ranked in the sequence given; unknown
 // values, action rows, and duplicates never seed a rank.
@@ -56,7 +53,6 @@ func newOrderedMultiModel(title string, options []Option, order []string) *selec
 			}
 			if _, seen := m.rankOf(i); !seen {
 				m.order = append(m.order, i)
-				m.selected[i] = true
 			}
 			break
 		}
@@ -96,17 +92,20 @@ func (m *selectModel) shiftRank(delta int) {
 	m.order[r], m.order[t] = m.order[t], m.order[r]
 }
 
-// orderedValues returns the selected Values in rank order.
+// orderedValues returns the selected Values in rank order. Only non-Action
+// rows can enter the order (seeding, toggleRanked, and toggleAllRanked all
+// refuse them), so no per-row re-check is needed here.
 func (m *selectModel) orderedValues() []string {
 	out := make([]string, 0, len(m.order))
 	for _, i := range m.order {
-		if !m.options[i].Action {
-			out = append(out, m.options[i].Value)
-		}
+		out = append(out, m.options[i].Value)
 	}
 	return out
 }
 
+// newCheckedMultiModel is the MultiSelectChecked engine: the same multi model
+// with options whose Value appears in checked pre-marked. Unknown values and
+// action rows never seed a mark.
 func newCheckedMultiModel(title string, options []Option, checked []string) *selectModel {
 	m := newSelectModel(title, options, true)
 	if len(checked) == 0 {
@@ -357,17 +356,15 @@ func (m *selectModel) applyMultiKey(k tea.KeyPressMsg) {
 	}
 }
 
-// toggleRanked flips option idx in ordered mode, keeping the rank slice and the
-// selected set in lockstep: picking appends to the end of the order, dropping
-// removes the rank and shifts later ones up.
+// toggleRanked flips option idx in ordered mode: picking appends to the end
+// of the order, dropping removes the rank and shifts later ones up. The rank
+// order is the single source of truth — the selected set stays untouched.
 func (m *selectModel) toggleRanked(idx int) {
 	if r, on := m.rankOf(idx); on {
 		m.order = append(m.order[:r], m.order[r+1:]...)
-		delete(m.selected, idx)
 		return
 	}
 	m.order = append(m.order, idx)
-	m.selected[idx] = true
 }
 
 // toggleAllRanked applies * in ordered mode: when every choice is ranked it
@@ -382,16 +379,12 @@ func (m *selectModel) toggleAllRanked(choices []int) {
 		}
 	}
 	if allOn {
-		for _, i := range choices {
-			delete(m.selected, i)
-		}
 		m.order = nil
 		return
 	}
 	for _, i := range choices {
 		if _, on := m.rankOf(i); !on {
 			m.order = append(m.order, i)
-			m.selected[i] = true
 		}
 	}
 }
