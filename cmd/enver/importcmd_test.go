@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -15,9 +16,9 @@ import (
 func TestImportMergeCreate(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	envBytes := []byte("# db\nDB_HOST=h\nDB_URL=$DB_HOST/x\nNEW=1\n")
-	summary, err := runImport(bytes.NewReader(envBytes), cfgPath, "prod", false, false, "", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader(envBytes), cfgPath, "prod", "", app.ImportOptions{})
 	if err != nil {
-		t.Fatalf("runImport: %v", err)
+		t.Fatalf("ImportEnv: %v", err)
 	}
 	if !strings.Contains(summary, "imported 3") || !strings.Contains(summary, "created") {
 		t.Errorf("summary: %q", summary)
@@ -34,7 +35,7 @@ func TestImportMergeCreate(t *testing.T) {
 func TestImportMergeKeepsExisting(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1", "SHARED": "old"}}, false, false)
-	summary, err := runImport(bytes.NewReader([]byte("SHARED=new\nNEW=2\n")), cfgPath, "p", false, false, "", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("SHARED=new\nNEW=2\n")), cfgPath, "p", "", app.ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestImportMergeKeepsExisting(t *testing.T) {
 func TestImportReplaceRemovesAbsent(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, false)
-	_, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", nil, nil)
+	_, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestImportReplaceRemovesAbsent(t *testing.T) {
 func TestImportReplaceClearsUnset(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"K": "old"}, Unset: config.Unsets{"A"}}, false, false)
-	if _, err := runImport(bytes.NewReader([]byte("A=1\n")), cfgPath, "p", true, true, "", nil, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("A=1\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(cfgPath)
@@ -98,7 +99,7 @@ func TestImportReplaceClearsUnset(t *testing.T) {
 func TestImportReplaceKeepsDefault(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, true, false)
-	_, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", nil, nil)
+	_, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +152,9 @@ func TestImportExtendsCreate(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"ROOT": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := runImport(bytes.NewReader([]byte("OWN=2\n")), cfgPath, "child", false, false, "base", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("OWN=2\n")), cfgPath, "child", "base", app.ImportOptions{})
 	if err != nil {
-		t.Fatalf("runImport: %v", err)
+		t.Fatalf("ImportEnv: %v", err)
 	}
 	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ base") {
 		t.Errorf("create with --extends should report the extends change: %q", summary)
@@ -168,7 +169,7 @@ func TestImportExtendsCreate(t *testing.T) {
 }
 
 // TestImportExtendsMissingParent runs at the command level: parents are
-// validated against the merged view in RunE, not inside runImport.
+// validated against the merged view in RunE, not inside app.ImportEnv.
 func TestImportExtendsMissingParent(t *testing.T) {
 	global := importFixtureLayers(t)
 	globalFlags.configPath = global
@@ -189,7 +190,7 @@ func TestImportExtendsMergePreserved(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"Y": "2"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runImport(bytes.NewReader([]byte("Z=3\n")), cfgPath, "p", false, false, "", nil, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("Z=3\n")), cfgPath, "p", "", app.ImportOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
@@ -206,7 +207,7 @@ func TestImportExtendsReplacePreserved(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OLD": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", nil, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
@@ -223,7 +224,7 @@ func TestImportExtendsReplacePreserved(t *testing.T) {
 
 func TestImportEmptyErrors(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	_, err := runImport(bytes.NewReader([]byte("")), cfgPath, "p", false, false, "", nil, nil)
+	_, err := app.ImportEnv(bytes.NewReader([]byte("")), cfgPath, "p", "", app.ImportOptions{})
 	if err == nil || !strings.Contains(err.Error(), "no variables to import") {
 		t.Fatalf("expected no-variables error, got: %v", err)
 	}
@@ -237,7 +238,7 @@ func TestImportEmptyWithExtendsOK(t *testing.T) {
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"X": "1"}}, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runImport(bytes.NewReader([]byte("")), cfgPath, "child", false, false, "base", nil, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("")), cfgPath, "child", "base", app.ImportOptions{}); err != nil {
 		t.Fatalf("empty import with --extends should succeed: %v", err)
 	}
 	prof, _, _, _ := config.ReadProfile(cfgPath, "child")
@@ -249,7 +250,7 @@ func TestImportEmptyWithExtendsOK(t *testing.T) {
 func TestImportDiffMerge(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1", "B": "old"}}, false, false)
-	summary, err := runImport(bytes.NewReader([]byte("B=new\nC=2\n")), cfgPath, "p", false, false, "", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("B=new\nC=2\n")), cfgPath, "p", "", app.ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +267,7 @@ func TestImportDiffMerge(t *testing.T) {
 // file, so masking would force an unmask dance just to verify what changed.
 func TestImportDiffCreateShowsValues(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	summary, err := runImport(bytes.NewReader([]byte("API_TOKEN=sk-live-secret\nA=1\n")), cfgPath, "p", false, false, "", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("API_TOKEN=sk-live-secret\nA=1\n")), cfgPath, "p", "", app.ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +282,7 @@ func TestImportDiffCreateShowsValues(t *testing.T) {
 func TestImportDiffReplaceRemoves(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, false, false)
-	summary, err := runImport(bytes.NewReader([]byte("C=3\n")), cfgPath, "p", true, true, "", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("C=3\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +297,7 @@ func TestImportReplaceConfirmDeclined(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, false)
 	refuse := func(string, bool) (bool, error) { return false, nil }
-	summary, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", refuse, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Confirm: refuse})
 	if err != nil {
 		t.Fatalf("declined confirm should not error: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestImportReplaceConfirmAccepted(t *testing.T) {
 		}
 		return true, nil
 	}
-	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", accept, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Confirm: accept}); err != nil {
 		t.Fatal(err)
 	}
 	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
@@ -337,7 +338,7 @@ func TestImportReplaceConfirmNonInteractive(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, false)
 	broken := func(string, bool) (bool, error) { return false, io.EOF }
-	_, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", broken, nil)
+	_, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Confirm: broken})
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("expected --force hint on failed confirm, got: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestImportReplaceForceSkipsConfirm(t *testing.T) {
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"OLD": "1"}}, false, false)
 	called := false
 	never := func(string, bool) (bool, error) { called = true; return false, nil }
-	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", never, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Force: true, Confirm: never}); err != nil {
 		t.Fatal(err)
 	}
 	if called {
@@ -374,9 +375,9 @@ func TestImportExtendsList(t *testing.T) {
 		t.Fatal(err)
 	}
 	envBytes := []byte("X=y\n")
-	summary, err := runImport(bytes.NewReader(envBytes), cfgPath, "p", false, false, "a,b", nil, nil)
+	summary, err := app.ImportEnv(bytes.NewReader(envBytes), cfgPath, "p", "a,b", app.ImportOptions{})
 	if err != nil {
-		t.Fatalf("runImport: %v", err)
+		t.Fatalf("ImportEnv: %v", err)
 	}
 	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ a, b") {
 		t.Errorf("create with --extends a,b should report multi-parent extends: %q", summary)
@@ -401,7 +402,7 @@ func TestImportReplaceConfirmsUnsetClearing(t *testing.T) {
 		}
 		return true, nil
 	}
-	if _, err := runImport(bytes.NewReader([]byte("FOO=1\n")), cfgPath, "p", true, false, "", accept, nil); err != nil {
+	if _, err := app.ImportEnv(bytes.NewReader([]byte("FOO=1\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Confirm: accept}); err != nil {
 		t.Fatal(err)
 	}
 	if !prompted {
@@ -417,7 +418,7 @@ func TestImportReplaceDeclinedUnsetConfirmPreservesFence(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	_ = config.UpsertProfile(cfgPath, "p", config.Profile{Env: map[string]string{"FOO": "1"}, Unset: []string{"SECRET"}}, false, false)
 	refuse := func(string, bool) (bool, error) { return false, nil }
-	summary, err := runImport(bytes.NewReader([]byte("FOO=1\n")), cfgPath, "p", true, false, "", refuse, nil)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("FOO=1\n")), cfgPath, "p", "", app.ImportOptions{Replace: true, Confirm: refuse})
 	if err != nil {
 		t.Fatalf("declined confirm should not error: %v", err)
 	}
@@ -443,7 +444,7 @@ func TestImportMergeReportsFencedKeys(t *testing.T) {
 		}
 		return cfg.ResolveProfile(name)
 	}
-	summary, err := runImport(bytes.NewReader([]byte("A=1\nB=2\n")), cfgPath, "p", false, false, "", nil, resolve)
+	summary, err := app.ImportEnv(bytes.NewReader([]byte("A=1\nB=2\n")), cfgPath, "p", "", app.ImportOptions{Resolve: resolve})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,9 +461,9 @@ func TestImportMergeReportsFencedKeys(t *testing.T) {
 func TestImportSummaryNotesSkippedLines(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	r := strings.NewReader("A=1\nbad-name=2\nnoeq\nB=3\n")
-	summary, err := runImport(r, cfgPath, "a", false, false, "", nil, nil)
+	summary, err := app.ImportEnv(r, cfgPath, "a", "", app.ImportOptions{})
 	if err != nil {
-		t.Fatalf("runImport: %v", err)
+		t.Fatalf("ImportEnv: %v", err)
 	}
 	for _, want := range []string{"skipped 2 lines", "line 2 (invalid key name)", "line 3 (missing =)"} {
 		if !strings.Contains(summary, want) {
