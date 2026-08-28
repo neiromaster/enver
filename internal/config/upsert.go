@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 
 	"gopkg.in/yaml.v3"
@@ -73,10 +71,10 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
 
-	switch {
-	case forceExtends:
-		writeExtendsNode(prof, p.Extends)
-	case len(p.Extends) > 0:
+	// forceExtends writes extends even when empty: the explicit (none) choice.
+	// Without it, an empty p.Extends preserves the existing extends (import
+	// contract).
+	if forceExtends || len(p.Extends) > 0 {
 		writeExtendsNode(prof, p.Extends)
 	}
 	// unset is additive like extends: written when non-empty, never cleared by
@@ -112,10 +110,5 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 	if err != nil {
 		return err
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(path, out, 0o644)
+	return writePath(path, out)
 }
