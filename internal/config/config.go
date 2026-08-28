@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/neiromaster/enver/internal/envname"
 	"gopkg.in/yaml.v3"
 )
 
@@ -145,12 +146,12 @@ func checkEnvNames(c Config) error {
 // invalid name is ever written, whatever authored the Profile struct.
 func checkProfileEnvNames(name string, p Profile) error {
 	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
-		if !ValidEnvKey(k) {
+		if !envname.Valid(k) {
 			return fmt.Errorf("profile %q defines invalid env key name %q (want [A-Za-z_][A-Za-z0-9_]*)", name, k)
 		}
 	}
 	for _, u := range p.Unset {
-		if !ValidEnvKey(u) {
+		if !envname.Valid(u) {
 			return fmt.Errorf("profile %q unsets invalid env key name %q (want [A-Za-z_][A-Za-z0-9_]*)", name, u)
 		}
 	}
@@ -220,7 +221,7 @@ func Merge(base, override Config) Config {
 		}
 		ownKeys := slices.Sorted(maps.Keys(p.Env))
 		for _, k := range ownKeys {
-			SetEnvKey(bp.Env, k, p.Env[k])
+			envname.Set(bp.Env, k, p.Env[k])
 			if out.Origins == nil {
 				out.Origins = map[string]map[string]string{}
 			}
@@ -229,14 +230,14 @@ func Merge(base, override Config) Config {
 				m = map[string]string{}
 				out.Origins[name] = m
 			}
-			setEnvKeyed(m, k, LayerLocal)
+			envname.Set(m, k, LayerLocal)
 		}
 		for _, k := range ownKeys {
 			if c := p.Comments[k]; c != "" {
 				if bp.Comments == nil {
 					bp.Comments = map[string]string{}
 				}
-				setEnvKeyed(bp.Comments, k, c)
+				envname.Set(bp.Comments, k, c)
 			}
 		}
 		out.Profiles[name] = bp
@@ -291,9 +292,9 @@ func cloneProvenance(in map[string]map[string]string) map[string]map[string]stri
 func splitUnsets(bp *Profile, fresh Unsets) {
 	for _, u := range bp.Unset {
 		bp.Carried = appendUniq(bp.Carried, u)
-		if hasEnvKey(bp.Env, u) {
-			deleteEnvKey(bp.Env, u)
-			deleteEnvKey(bp.Comments, u)
+		if envname.Has(bp.Env, u) {
+			envname.Delete(bp.Env, u)
+			envname.Delete(bp.Comments, u)
 		}
 	}
 	bp.Unset = slices.Clone(fresh)
@@ -409,13 +410,13 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 			return envFold{}, err
 		}
 		for k, v := range pf.env {
-			setEnvKeyed(out.env, k, v)
+			envname.Set(out.env, k, v)
 		}
 		for k, v := range pf.comments {
-			setEnvKeyed(out.comments, k, v)
+			envname.Set(out.comments, k, v)
 		}
 		for k, v := range pf.sources {
-			setEnvKeyed(out.sources, k, v)
+			envname.Set(out.sources, k, v)
 		}
 	}
 	delete(visiting, name)
@@ -423,24 +424,24 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// this profile's own entries: they strip what the earlier layer supplied,
 	// and go silent the moment a later-era mention owns the key.
 	for _, u := range p.Carried {
-		if s, ok := originLookup(out.sources, u); ok && s.Layer == LayerLocal {
+		if s, ok := envname.Get(out.sources, u); ok && s.Layer == LayerLocal {
 			continue
 		}
-		deleteEnvKey(out.env, u)
-		deleteEnvKey(out.comments, u)
-		deleteEnvKey(out.sources, u)
+		envname.Delete(out.env, u)
+		envname.Delete(out.comments, u)
+		envname.Delete(out.sources, u)
 	}
 	// Own entries apply last (child wins). Sorted so a hand-authored
 	// case-variant pair (PATH and path in one env block) resolves
 	// deterministically on Windows, where the later spelling wins; POSIX
 	// keeps both keys, as authored.
 	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
-		setEnvKeyed(out.env, k, p.Env[k])
-		setEnvKeyed(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
+		envname.Set(out.env, k, p.Env[k])
+		envname.Set(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
 	}
 	for _, k := range slices.Sorted(maps.Keys(p.Comments)) {
 		if cc := p.Comments[k]; cc != "" {
-			setEnvKeyed(out.comments, k, cc)
+			envname.Set(out.comments, k, cc)
 		}
 	}
 	// Own unsets apply last, stripping only this profile's own fence: a key
@@ -448,19 +449,19 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// mention wins), while a parent's unset does not survive a closer
 	// redefinition here.
 	for _, u := range p.Unset {
-		deleteEnvKey(out.env, u)
-		deleteEnvKey(out.comments, u)
-		deleteEnvKey(out.sources, u)
+		envname.Delete(out.env, u)
+		envname.Delete(out.comments, u)
+		envname.Delete(out.sources, u)
 	}
 	return out, nil
 }
 
-// appendUniq appends entries not already present by EnvKeyEqual semantics —
+// appendUniq appends entries not already present by envname.Equal semantics —
 // on Windows a case-variant counts as present, keeping one entry per real
 // variable.
 func appendUniq(dst []string, add ...string) []string {
 	for _, x := range add {
-		if !slices.ContainsFunc(dst, func(d string) bool { return EnvKeyEqual(d, x) }) {
+		if !slices.ContainsFunc(dst, func(d string) bool { return envname.Equal(d, x) }) {
 			dst = append(dst, x)
 		}
 	}
@@ -471,7 +472,7 @@ func appendUniq(dst []string, add ...string) []string {
 // own env. Merge records local for keys the local layer overrode; everything
 // else is global by default.
 func (c Config) layerOf(profile, key string) string {
-	if l, ok := originLookup(c.Origins[profile], key); ok {
+	if l, ok := envname.Get(c.Origins[profile], key); ok {
 		return l
 	}
 	return LayerGlobal
@@ -484,7 +485,7 @@ func (c Config) layerOf(profile, key string) string {
 // env origin is global). enver validate still surfaces it only because the CLI
 // adds an extra isolated-global pass on top of the merged one.
 func (c Config) unsetLayer(profile, key string) string {
-	if l, ok := originLookup(c.UnsetOrigins[profile], key); ok {
+	if l, ok := envname.Get(c.UnsetOrigins[profile], key); ok {
 		return l
 	}
 	return LayerGlobal

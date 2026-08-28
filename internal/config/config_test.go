@@ -871,20 +871,6 @@ func TestMergeExtendsKeepsCaseDistinctNames(t *testing.T) {
 	}
 }
 
-func TestOriginLookupPlatformSemantics(t *testing.T) {
-	m := map[string]string{"Token": "local"}
-	got, found := originLookup(m, "TOKEN")
-	if runtime.GOOS == "windows" {
-		if !found || got != "local" {
-			t.Fatalf("windows originLookup = %q, %v; want local, true", got, found)
-		}
-		return
-	}
-	if found {
-		t.Fatalf("posix originLookup = %q, %v; want zero, false", got, found)
-	}
-}
-
 // TestMergeDoesNotMutateInputs pins the purity contract: Merge writes into
 // clones, so callers may reuse base or override as the pre-merge view
 // afterwards, including provenance maps filled by earlier merges.

@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
-	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 )
 
 type envCardModel struct {
@@ -68,7 +68,7 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// caller needs a post-hoc check and a doomed session cannot
 				// accumulate. Blank still finishes via the name field above.
 				name := strings.TrimSpace(m.fields[0].Value())
-				if !config.ValidEnvKey(name) {
+				if !envname.Valid(name) {
 					m.keyErr = true
 					for i := range m.fields {
 						m.fields[i].Blur()

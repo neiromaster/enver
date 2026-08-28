@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+
+	"github.com/neiromaster/enver/internal/envname"
 )
 
 // IssueKind labels the class of a config-health finding.
@@ -73,7 +75,7 @@ func Validate(cfg Config) []Issue {
 			issues = append(issues, Issue{Profile: n, Kind: KindEmpty, Severity: SeverityWarning})
 		}
 		for _, u := range p.Unset {
-			if !hasEnvKey(p.Env, u) {
+			if !envname.Has(p.Env, u) {
 				continue
 			}
 			// A definition and an unset from different layers is the documented

@@ -8,6 +8,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/spf13/cobra"
 )
 
@@ -95,11 +96,11 @@ func doList(w io.Writer) error {
 // unset fence: a key the profile unsets never reaches the resolved env, and
 // len(p.Env) would overstate the profile. An inherited unset does not fence a
 // closer redefinition, so only the profile's own list matters. Matching goes
-// through config.UnsetsHasKey for the same case rules resolution applies.
+// through envname.MatchesAny for the same case rules resolution applies.
 func ownVars(p config.Profile) int {
 	n := 0
 	for k := range p.Env {
-		if !config.UnsetsHasKey(p.Unset, k) {
+		if !envname.MatchesAny(p.Unset, k) {
 			n++
 		}
 	}

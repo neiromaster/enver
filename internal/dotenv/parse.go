@@ -3,7 +3,7 @@ package dotenv
 import (
 	"strings"
 
-	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 )
 
 // Entry is one parsed KEY=VALUE pair with the comment block that immediately
@@ -14,7 +14,7 @@ type Entry struct {
 	Comment string
 }
 
-func validKey(k string) bool { return config.ValidEnvKey(k) }
+func validKey(k string) bool { return envname.Valid(k) }
 
 type parseError struct{ msg string }
 

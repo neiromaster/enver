@@ -10,6 +10,7 @@ import (
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/dotenv"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -255,7 +256,7 @@ func removedKeys(oldEnv, imported map[string]string) []diffEntry {
 // not fence a closer redefinition, so only the profile's own fence can drop
 // an imported key from the resolved env. A nil resolve (tests) or an
 // unresolvable profile (validate reports it) disables the reporting. Matching
-// follows EnvKeyEqual, as resolution does.
+// follows envname.Equal, as resolution does.
 func fencedImportedKeys(resolve func(string) (config.Resolved, error), name string, imported map[string]string) map[string]bool {
 	if resolve == nil {
 		return nil
@@ -266,7 +267,7 @@ func fencedImportedKeys(resolve func(string) (config.Resolved, error), name stri
 	}
 	var out map[string]bool
 	for k := range imported {
-		if !config.HasEnvKey(r.Env, k) {
+		if !envname.Has(r.Env, k) {
 			if out == nil {
 				out = map[string]bool{}
 			}

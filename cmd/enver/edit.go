@@ -9,6 +9,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -171,7 +172,7 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 	}
 	out := make(map[string]bool, len(s.entries))
 	for _, e := range s.entries {
-		if config.HasEnvKey(pr.Env, e.Key) {
+		if envname.Has(pr.Env, e.Key) {
 			out[e.Key] = true
 		}
 	}
@@ -202,7 +203,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		// Fence state outranks the override mark and reads as a faded row: the
 		// variable stays listed so its suppression is visible where it happens.
 		switch {
-		case config.UnsetsHasKey(s.unset, e.Key):
+		case envname.MatchesAny(s.unset, e.Key):
 			opt.Dim = true
 		case overrideKeys[e.Key]:
 			opt.Icon = ui.IconOverride
@@ -211,7 +212,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 	}
 	for _, e := range inherited {
 		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Key, e.Value))}
-		if config.UnsetsHasKey(s.unset, e.Key) {
+		if envname.MatchesAny(s.unset, e.Key) {
 			opt.Dim = true
 		}
 		opts = append(opts, opt)
@@ -254,13 +255,13 @@ func manageUnsetOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 		opts = append(opts, ui.Option{Value: k, Icon: ui.IconUnset, Label: k + " (declared here)"})
 	}
 	for _, e := range s.entries {
-		if config.UnsetsHasKey(s.unset, e.Key) {
+		if envname.MatchesAny(s.unset, e.Key) {
 			continue
 		}
 		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (own)"})
 	}
 	for _, e := range inherited {
-		if config.UnsetsHasKey(s.unset, e.Key) {
+		if envname.MatchesAny(s.unset, e.Key) {
 			continue
 		}
 		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (inherited)"})
@@ -269,22 +270,22 @@ func manageUnsetOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 }
 
 // definesKey reports whether key is among the profile's own entries by
-// EnvKeyEqual semantics, so conflict detection folds case where resolution does.
+// envname.Equal semantics, so conflict detection folds case where resolution does.
 func (s *editState) definesKey(key string) bool {
 	for _, e := range s.entries {
-		if config.EnvKeyEqual(e.Key, key) {
+		if envname.Equal(e.Key, key) {
 			return true
 		}
 	}
 	return false
 }
 
-// dropUnsetKey strips every fence matching key (EnvKeyEqual semantics) and
+// dropUnsetKey strips every fence matching key (envname.Equal semantics) and
 // preserves the order of the survivors.
 func dropUnsetKey(unsets config.Unsets, key string) config.Unsets {
 	out := make(config.Unsets, 0, len(unsets))
 	for _, u := range unsets {
-		if !config.EnvKeyEqual(u, key) {
+		if !envname.Equal(u, key) {
 			out = append(out, u)
 		}
 	}
@@ -293,20 +294,20 @@ func dropUnsetKey(unsets config.Unsets, key string) config.Unsets {
 
 // planUnsets computes the next unset list from confirmed picker values without
 // touching state: fences surviving this pass keep their file order, newly
-// picked keys append in pick order with EnvKeyEqual-aware dedupe. Additions
+// picked keys append in pick order with envname.Equal-aware dedupe. Additions
 // whose key is also an own env entry here are reported as conflicts — the
 // same-layer pair validate warns about; the caller decides whether to keep or
 // strip them.
 func planUnsets(cur config.Unsets, picked []string, own func(string) bool) (config.Unsets, []string) {
 	var next config.Unsets
 	for _, k := range cur {
-		if config.UnsetsHasKey(picked, k) {
+		if envname.MatchesAny(picked, k) {
 			next = append(next, k)
 		}
 	}
 	var conflicts []string
 	for _, k := range picked {
-		if config.UnsetsHasKey(cur, k) || config.UnsetsHasKey(next, k) {
+		if envname.MatchesAny(cur, k) || envname.MatchesAny(next, k) {
 			continue
 		}
 		next = append(next, k)
@@ -369,7 +370,7 @@ func manageUnsets(s *editState, name string, inherited []ui.EnvEntry) {
 // offered, declining lifts every matching fence so the definition takes
 // effect. Mirrors the picker-side conflict guard.
 func settleDefineFence(s *editState, key string) {
-	if !config.UnsetsHasKey(s.unset, key) {
+	if !envname.MatchesAny(s.unset, key) {
 		return
 	}
 	q := fmt.Sprintf("Profile declares unset %s while defining it — a same-layer define+unset pair enver validate warns about. Keep the fence?", key)
@@ -389,7 +390,7 @@ func deleteVarOptions(s editState, overrideKeys map[string]bool) []ui.Option {
 	for _, e := range s.entries {
 		opt := ui.Option{Value: e.Key, Label: e.Key}
 		switch {
-		case config.UnsetsHasKey(s.unset, e.Key):
+		case envname.MatchesAny(s.unset, e.Key):
 			opt.Icon = ui.IconUnset
 			opt.Label += " · unset"
 		case overrideKeys[e.Key]:
@@ -571,7 +572,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					}
 					var stillFenced []string
 					for _, k := range deleted {
-						if config.UnsetsHasKey(s.unset, k) {
+						if envname.MatchesAny(s.unset, k) {
 							stillFenced = append(stillFenced, k)
 						}
 					}
@@ -669,7 +670,7 @@ func editTitle(s editState) string {
 func inheritedEntries(resolved map[string]string, own map[string]string) []ui.EnvEntry {
 	var out []ui.EnvEntry
 	for k, v := range resolved {
-		if !config.HasEnvKey(own, k) {
+		if !envname.Has(own, k) {
 			out = append(out, ui.EnvEntry{Key: k, Value: v})
 		}
 	}

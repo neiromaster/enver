@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"slices"
 
-	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 	"golang.org/x/term"
 )
 
@@ -22,7 +22,7 @@ func MergedEnv(osEnv, profileEnv map[string]string) []string {
 		curMap[k] = v
 	}
 	for k, v := range profileEnv {
-		config.SetEnvKey(curMap, k, v)
+		envname.Set(curMap, k, v)
 	}
 	keys := make([]string, 0, len(curMap))
 	for k := range curMap {
