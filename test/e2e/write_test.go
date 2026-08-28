@@ -1,13 +1,14 @@
 package e2e
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestImportWritesLocalLayer(t *testing.T) {
 	s := newSandbox(t)
-	s.writeFile(s.project+"/incoming.env", "TOKEN=abc\nMODE=fast\n")
+	s.writeFile(filepath.Join(s.project, "incoming.env"), "TOKEN=abc\nMODE=fast\n")
 	r := s.run("import", "incoming.env", "p")
 	if r.ExitCode != 0 {
 		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)

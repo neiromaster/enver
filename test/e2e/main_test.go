@@ -37,7 +37,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "e2e: build enver: %v\n%s", err, out)
 		os.Exit(2) //nolint:gocritic // TestMain may exit without defer
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // repoRoot returns the module root, two levels above this package directory.
@@ -84,29 +86,29 @@ func newSandbox(t *testing.T) *sandbox {
 	return &sandbox{t: t, home: home, project: project, env: env}
 }
 
-func (s *sandbox) configPath() string { //nolint:unused // harness API for later tasks
+func (s *sandbox) configPath() string {
 	return filepath.Join(s.home, ".config", "enver", "config.yaml")
 }
 
-func (s *sandbox) keyPath() string { //nolint:unused // harness API for later tasks
+func (s *sandbox) keyPath() string {
 	return filepath.Join(s.home, ".config", "enver", "key")
 }
 
-func (s *sandbox) localPath() string { //nolint:unused // harness API for later tasks
+func (s *sandbox) localPath() string {
 	return filepath.Join(s.project, ".enver.yaml")
 }
 
-func (s *sandbox) writeLocal(content string) { //nolint:unused // harness API for later tasks
+func (s *sandbox) writeLocal(content string) {
 	s.t.Helper()
 	s.writeFile(s.localPath(), content)
 }
 
-func (s *sandbox) writeGlobal(content string) { //nolint:unused // harness API for later tasks
+func (s *sandbox) writeGlobal(content string) {
 	s.t.Helper()
 	s.writeFile(s.configPath(), content)
 }
 
-func (s *sandbox) writeFile(path, content string) { //nolint:unused // harness API for later tasks
+func (s *sandbox) writeFile(path, content string) {
 	s.t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		s.t.Fatal(err)
@@ -116,7 +118,7 @@ func (s *sandbox) writeFile(path, content string) { //nolint:unused // harness A
 	}
 }
 
-func (s *sandbox) readFile(path string) string { //nolint:unused // harness API for later tasks
+func (s *sandbox) readFile(path string) string {
 	s.t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -125,11 +127,11 @@ func (s *sandbox) readFile(path string) string { //nolint:unused // harness API 
 	return string(data)
 }
 
-func (s *sandbox) readLocal() string { //nolint:unused // harness API for later tasks
+func (s *sandbox) readLocal() string {
 	return s.readFile(s.localPath())
 }
 
-func (s *sandbox) setEnv(k, v string) { //nolint:unused // harness API for later tasks
+func (s *sandbox) setEnv(k, v string) {
 	s.env = append(s.env, k+"="+v)
 }
 

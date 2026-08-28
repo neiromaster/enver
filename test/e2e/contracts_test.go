@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -30,7 +32,7 @@ func TestEditWithoutTTYFails(t *testing.T) {
 
 func TestImportWithoutProfileArgFailsWithoutTTY(t *testing.T) {
 	s := newSandbox(t)
-	s.writeFile(s.project+"/incoming.env", "TOKEN=abc\n")
+	s.writeFile(filepath.Join(s.project, "incoming.env"), "TOKEN=abc\n")
 	r := s.run("import", "incoming.env")
 	if r.ExitCode == 0 {
 		t.Fatal("import without a profile arg must refuse without a terminal")
@@ -47,7 +49,15 @@ func TestCompleteListsProfiles(t *testing.T) {
 	if r.ExitCode != 0 {
 		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
-	if !strings.Contains(r.Stdout, "p") || !strings.Contains(r.Stdout, "q") {
-		t.Fatalf("completion must list the profiles, got: %q", r.Stdout)
+	var tokens []string
+	for _, line := range strings.Split(strings.TrimRight(r.Stdout, "\n"), "\n") {
+		token, _, _ := strings.Cut(line, "\t")
+		if token == "" || strings.HasPrefix(token, ":") {
+			continue // the ":<directive>" tail line is cobra plumbing, not a candidate
+		}
+		tokens = append(tokens, token)
+	}
+	if !slices.Contains(tokens, "p") || !slices.Contains(tokens, "q") {
+		t.Fatalf("completion must offer the profile tokens, got: %q", r.Stdout)
 	}
 }
