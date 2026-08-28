@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -59,6 +60,15 @@ var renameCmd = &cobra.Command{
 		if newName == oldName {
 			fmt.Printf("%q is already named that; nothing to rename\n", newName)
 			return nil
+		}
+		// RenameProfile rewrites extends refs in the target file only, so a
+		// profile extended from the other layer would dangle its children.
+		merged, err := app.Load(appOpts())
+		if err != nil {
+			return err
+		}
+		if err := guardRemovable(merged, oldName, "rename"); err != nil {
+			return err
 		}
 		if err := config.RenameProfile(path, oldName, newName); err != nil {
 			return err

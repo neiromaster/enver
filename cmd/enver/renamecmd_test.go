@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,5 +50,49 @@ func TestRenameToExistingNameErrors(t *testing.T) {
 	err := renameCmd.RunE(&cobra.Command{}, []string{"prod", "stage"})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected an already-exists error, got: %v", err)
+	}
+}
+
+// TestRenameRefusesWhenExtendedFromOtherLayer pins the merged-view guard:
+// renaming a global profile that a local profile extends must refuse the
+// same way remove does, because RenameProfile rewrites extends refs in the
+// target file only and would dangle the cross-layer child.
+func TestRenameRefusesWhenExtendedFromOtherLayer(t *testing.T) {
+	saved := globalFlags
+	t.Cleanup(func() { globalFlags = saved })
+
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	global := filepath.Join(dir, "global.yaml")
+	local := config.LocalPath()
+	if err := config.UpsertProfile(global, "base", config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertProfile(local, "child", config.Profile{Extends: config.Extends{"base"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	globalFlags.configPath = global
+	globalFlags.global = true
+	globalFlags.noLocal = false
+
+	err = renameCmd.RunE(&cobra.Command{}, []string{"base", "base-v2"})
+	if err == nil || !strings.Contains(err.Error(), `refusing to rename "base"`) {
+		t.Fatalf("err=%v, want extended-by refusal for rename", err)
+	}
+	data, rerr := os.ReadFile(global)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(string(data), "base") || strings.Contains(string(data), "base-v2") {
+		t.Fatalf("global file was modified despite refusal: %s", data)
 	}
 }

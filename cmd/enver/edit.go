@@ -572,7 +572,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			case actionManageUnsets:
 				manageUnsets(&s, name, inherited)
 			case actionDeleteProfile:
-				if err := guardRemovable(cfg, name); err != nil {
+				if err := guardRemovable(cfg, name, "remove"); err != nil {
 					fmt.Println(" ", err)
 					continue
 				}

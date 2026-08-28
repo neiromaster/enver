@@ -18,16 +18,16 @@ func TestGuardRemovable(t *testing.T) {
 		},
 	}
 	// "anth" is extended by local -> refused.
-	if err := guardRemovable(cfg, "anth"); err == nil || !strings.Contains(err.Error(), "extended by") {
+	if err := guardRemovable(cfg, "anth", "remove"); err == nil || !strings.Contains(err.Error(), "extended by") {
 		t.Fatalf("extended profile should be refused with dependents: %v", err)
 	}
 	// "local" is not extended (default status no longer blocks) -> removable.
-	if err := guardRemovable(cfg, "local"); err != nil {
+	if err := guardRemovable(cfg, "local", "remove"); err != nil {
 		t.Fatalf("removable profile refused: %v", err)
 	}
 	// A profile that is the default but has no dependents is removable too.
 	solo := config.Config{Default: "solo", Profiles: map[string]config.Profile{"solo": {}}}
-	if err := guardRemovable(solo, "solo"); err != nil {
+	if err := guardRemovable(solo, "solo", "remove"); err != nil {
 		t.Fatalf("default profile without dependents refused: %v", err)
 	}
 }

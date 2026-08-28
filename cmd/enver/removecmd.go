@@ -45,7 +45,7 @@ var removeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := guardRemovable(merged, name); err != nil {
+		if err := guardRemovable(merged, name, "remove"); err != nil {
 			return err
 		}
 		if !removeYes {
@@ -75,10 +75,10 @@ var removeCmd = &cobra.Command{
 // a local child can depend on a global parent). Deleting the file's default is
 // allowed: DeleteProfile clears the default key along with the profile. Callers
 // pre-check existence so DeleteProfile's missing-file no-op cannot mask a wrong
-// scope.
-func guardRemovable(merged config.Config, name string) error {
+// scope. verb names the refused action ("remove", "rename") in the error.
+func guardRemovable(merged config.Config, name, verb string) error {
 	if extendedBy := merged.ExtendedBy(name); len(extendedBy) > 0 {
-		return fmt.Errorf("refusing to remove %q: extended by %v; repoint or remove those first", name, extendedBy)
+		return fmt.Errorf("refusing to %s %q: extended by %v; repoint or remove those first", verb, name, extendedBy)
 	}
 	return nil
 }
