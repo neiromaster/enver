@@ -6,6 +6,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 func TestValidateProfileName(t *testing.T) {
@@ -174,5 +175,36 @@ func TestParentEnvForResolvesThroughMergedParents(t *testing.T) {
 	}
 	if env["B"] != "1" {
 		t.Fatalf("env=%v, want inherited B=1", env)
+	}
+}
+
+// TestAddCompletesExistingProfiles pins that add offers existing profile
+// names like every other profile-argument mutator: an existing name is a
+// valid re-seed for the extends/env flow.
+func TestAddCompletesExistingProfiles(t *testing.T) {
+	path := writeTempConfig(t, "dev", map[string]string{"A": "1"}, nil, true)
+	withGlobalConfig(t, path)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().Bool("global", false, "")
+	_ = cmd.Flags().Set("config", path)
+	_ = cmd.Flags().Set("global", "true")
+
+	if addCmd.ValidArgsFunction == nil {
+		t.Fatal("add has no profile completion")
+	}
+	got, dir := addCmd.ValidArgsFunction(cmd, nil, "")
+	if dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("dir=%v, want NoFileComp", dir)
+	}
+	found := false
+	for _, c := range got {
+		if c == "dev" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("completions = %v, want dev", got)
 	}
 }

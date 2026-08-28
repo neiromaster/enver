@@ -130,10 +130,11 @@ func upsertEntry(entries []ui.EnvEntry, e ui.EnvEntry) []ui.EnvEntry {
 }
 
 var addCmd = &cobra.Command{
-	Use:   "add [name]",
-	Short: "Interactively add a profile",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  doAdd,
+	Use:               "add [name]",
+	Short:             "Interactively add a profile",
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeProfileInTarget,
+	RunE:              doAdd,
 }
 
 func doAdd(cmd *cobra.Command, args []string) error {
