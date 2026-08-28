@@ -135,8 +135,21 @@ func TestMaskValue(t *testing.T) {
 	if got := MaskValue("ANTHROPIC_MODEL", "claude-sonnet-5"); got != "claude-sonnet-5" {
 		t.Fatalf("non-secret masked: got %q", got)
 	}
-	if got := MaskValue("API_KEY", "short"); got != "short" {
-		t.Fatalf("short secret should pass through, got %q", got)
+}
+
+// TestMaskValueShortSecretRedacted pins the length floor: a prefix shows only
+// when it stays under a third of the value, so a short secret never leaks.
+func TestMaskValueShortSecretRedacted(t *testing.T) {
+	cases := []struct{ v, want string }{
+		{"", ""},
+		{"hunter2", "(len=7)"},
+		{"password1", "(len=9)"},
+		{"0123456789ab", "0123…" + "(len=12)"},
+	}
+	for _, c := range cases {
+		if got := MaskValue("API_KEY", c.v); got != c.want {
+			t.Errorf("MaskValue(API_KEY, %q) = %q, want %q", c.v, got, c.want)
+		}
 	}
 }
 

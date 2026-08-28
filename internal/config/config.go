@@ -513,10 +513,15 @@ func IsSensitive(k, v string) bool {
 	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
 }
 
-// MaskValue redacts secret-looking values for display.
+// MaskValue redacts secret-looking values for display. A secret shows its
+// first four characters only when the value is long enough to keep the prefix
+// under a third of it; shorter values reveal just their length.
 func MaskValue(k, v string) string {
-	if IsSensitive(k, v) && len(v) > 6 {
+	if !IsSensitive(k, v) || v == "" {
+		return v
+	}
+	if len(v) >= 12 {
 		return v[:4] + "…" + fmt.Sprintf("(len=%d)", len(v))
 	}
-	return v
+	return fmt.Sprintf("(len=%d)", len(v))
 }
