@@ -56,11 +56,6 @@ var renameCmd = &cobra.Command{
 		if _, ok := targetCfg.Profiles[oldName]; !ok {
 			return notFoundInTarget(oldName, path)
 		}
-		if newName != oldName {
-			if _, ok := targetCfg.Profiles[newName]; ok {
-				return fmt.Errorf("profile %q already exists", newName)
-			}
-		}
 		if newName == oldName {
 			fmt.Printf("%q is already named that; nothing to rename\n", newName)
 			return nil
