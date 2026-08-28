@@ -99,6 +99,40 @@ func TestKeygenForceRejectsForeignEnc(t *testing.T) {
 	}
 }
 
+func TestKeygenForceRejectsCorruptConfig(t *testing.T) {
+	// An unreadable config is as bad as a foreign one for the stranding
+	// judgment: the forced overwrite cannot know what it would strand, so the
+	// risk-gating scan fails loudly instead of clearing the way.
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	globalFlags.configPath = filepath.Join(dir, "global.yaml")
+	globalFlags.keyPath = filepath.Join(dir, "key")
+	prev := keygenRandom
+	keygenRandom = true
+	t.Cleanup(func() { keygenRandom = prev })
+
+	if err := crypto.GenerateKey(globalFlags.keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := keygenCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = keygenCmd.Flags().Set("force", "false") })
+
+	global := config.GlobalPath(globalFlags.configPath)
+	if err := os.WriteFile(global, []byte("profiles: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := keygenCmd.RunE(keygenCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot scan configs for encrypted values") {
+		t.Fatalf("forced keygen must fail loudly on a corrupt config, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("scan error should carry the underlying parse failure, got: %v", err)
+	}
+}
+
 func TestKeygenReusesParamsFromConfig(t *testing.T) {
 	dir := chdirTemp(t)
 	saveGlobalFlags(t)
