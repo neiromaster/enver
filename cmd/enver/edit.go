@@ -524,8 +524,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				settleDefineFence(&s, entry.Key)
 				s.upsert(entry)
 			case actionExtends:
-				picked, confirmed, err := ui.MultiSelectOrdered("Edit extends for "+name,
-					append(profileOptions(pickerCfg, name), pickerTail()...), s.extends)
+				opts := append(seedOptions(s.extends, profileOptions(pickerCfg, name)), pickerTail()...)
+				picked, confirmed, err := ui.MultiSelectOrdered("Edit extends for "+name, opts, s.extends)
 				if err != nil || !confirmed {
 					continue
 				}

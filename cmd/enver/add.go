@@ -165,7 +165,8 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	var extends config.Extends
 	if len(names) > 0 {
 		seed := targetCfg.Profiles[name].Extends
-		picked, confirmed, err := ui.MultiSelectOrdered("Extends", profileOptions(pickerCfg, name), seed)
+		opts := seedOptions(seed, profileOptions(pickerCfg, name))
+		picked, confirmed, err := ui.MultiSelectOrdered("Extends", opts, seed)
 		if err != nil || !confirmed {
 			return nil
 		}
