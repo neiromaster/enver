@@ -481,8 +481,8 @@ func (c Config) layerOf(profile, key string) string {
 // unset list; everything the merge did not record is global by default.
 // Merged-layer Validate suppresses a same-file global contradiction when both
 // layers unset a key the global layer defines (UnsetOrigins attributes local,
-// env origin is global). enver validate still surfaces it only because
-// validatecmd.go runs an extra ValidateGlobal pass.
+// env origin is global). enver validate still surfaces it only because the CLI
+// adds an extra isolated-global pass on top of the merged one.
 func (c Config) unsetLayer(profile, key string) string {
 	if l, ok := originLookup(c.UnsetOrigins[profile], key); ok {
 		return l

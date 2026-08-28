@@ -1,6 +1,6 @@
-// Package dotenv renders enver profiles as .env documents and (in a future
-// iteration) parses them back. The format aims for broad compatibility with
-// common dotenv consumers while round-tripping cleanly through enver itself.
+// Package dotenv renders enver profiles as .env documents and parses such
+// documents back. The format aims for broad compatibility with common dotenv
+// consumers while round-tripping cleanly through enver itself.
 package dotenv
 
 import (
@@ -67,7 +67,8 @@ type Options struct {
 // When opts.Header is set, a 2-line header precedes the variables. For each key
 // present in comments, the comment is emitted as "# "-prefixed line(s) above the
 // variable; keys without a comment produce no comment line. Values are bare when
-// safe and single-quoted otherwise. Format performs no I/O.
+// safe, single-quoted when unsafe, and double-quoted dotenvx-style when they
+// carry $ references the consumer should expand. Format performs no I/O.
 func Format(env map[string]string, comments map[string]string, opts Options) []byte {
 	var b strings.Builder
 	if opts.Header {

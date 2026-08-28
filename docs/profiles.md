@@ -5,8 +5,9 @@ commands. Config format rules live in [`config.md`](./config.md).
 
 ## Creating profiles interactively
 
-`enver add` walks you through a new profile and writes it into the global
-config, preserving any existing structure and comments:
+`enver add` walks you through a new profile and writes it into the write
+target — `./.enver.yaml` by default, the global config under `--global` —
+preserving any existing structure and comments:
 
 - **Profile name** — letters, digits, `-`, `_`; must start with a letter or
   digit. Pass it as an argument (`enver add glm`) to skip this prompt.
