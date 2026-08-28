@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -42,8 +43,8 @@ func promptProfileName() (string, bool) {
 // the collecting summary: parents merge left-to-right, while the target
 // profile's own env and working fences are stripped, so its own keys never
 // read as inherited and a declared unset cannot hide a parent key from the
-// summary. A pending cycle resolves to nothing; commit-time validation
-// reports it.
+// summary. A pending cycle resolves to nothing; extendsCycles rejects the
+// pick before the summary is ever built.
 func parentEnvFor(cfg config.Config, self string, extends config.Extends) map[string]string {
 	if len(extends) == 0 {
 		return map[string]string{}
@@ -155,6 +156,19 @@ func doAdd(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		extends = picked
+	}
+	if len(extends) > 0 {
+		// Resolution spans both layers, so the cycle check does too: a global
+		// pick can loop through a local parent.
+		merged := pickerCfg
+		if globalFlags.global {
+			if merged, err = app.Load(appOpts()); err != nil {
+				return err
+			}
+		}
+		if extendsCycles(merged, name, extends) {
+			return fmt.Errorf("extends %s would create a cycle", strings.Join(extends, ", "))
+		}
 	}
 
 	parentEnv := parentEnvFor(pickerCfg, name, extends)

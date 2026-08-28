@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// ErrExtendsCycle marks an extends chain that loops back on itself; callers
+// detect it with errors.Is to tell a cycle apart from a dangling parent.
+var ErrExtendsCycle = errors.New("extends cycle")
 
 // Profile is one named environment profile.
 type Profile struct {
@@ -356,7 +361,7 @@ type envFold struct {
 // up so a diamond is not mistaken for a cycle.
 func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
-		return envFold{}, fmt.Errorf("extends cycle at %q", name)
+		return envFold{}, fmt.Errorf("%w at %q", ErrExtendsCycle, name)
 	}
 	p, ok := c.Profiles[name]
 	if !ok {

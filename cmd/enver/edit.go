@@ -153,15 +153,6 @@ func nameSetsEqual(a, b []string) bool {
 	return slices.Equal(x, y)
 }
 
-// stripWorkingFences clears the copy's declared unsets and the era-carried
-// ones Merge parked beside them — a load-built config holds its fences across
-// both fields, so a probe that ignores only Unset still strips through Carried.
-func stripWorkingFences(p config.Profile) config.Profile {
-	p.Unset = nil
-	p.Carried = nil
-	return p
-}
-
 // overrideKeySet returns the own keys that shadow a key contributed by the
 // extends chain (parents only), so menuOptions and deleteVarOptions can mark
 // actual overrides. The parent resolution blanks the profile's own env and its
@@ -644,17 +635,8 @@ func commitValidate(cfg config.Config, s editState) error {
 	if err := s.canCommit(); err != nil {
 		return err
 	}
-	if len(s.extends) > 0 {
-		probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
-		for k, v := range cfg.Profiles {
-			probe.Profiles[k] = v
-		}
-		tp := probe.Profiles[s.name]
-		tp.Extends = s.extends
-		probe.Profiles[s.name] = tp
-		if _, err := probe.ResolveProfile(s.name); err != nil {
-			return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
-		}
+	if len(s.extends) > 0 && extendsCycles(cfg, s.name, s.extends) {
+		return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
 	}
 	return nil
 }
@@ -684,16 +666,11 @@ func inheritedEntries(resolved map[string]string, own map[string]string) []ui.En
 // inheritedForState (values) and the override path (comments) so both track the
 // same working extends.
 func probeConfig(cfg config.Config, s editState) config.Config {
-	probe := config.Config{Default: cfg.Default, Profiles: make(map[string]config.Profile, len(cfg.Profiles))}
-	for k, v := range cfg.Profiles {
-		probe.Profiles[k] = v
-	}
-	tp := probe.Profiles[s.name]
-	tp.Extends = s.extends
-	tp.Env = s.envMap()
-	tp.Unset = s.unset
-	probe.Profiles[s.name] = tp
-	return probe
+	return probeWith(cfg, s.name, func(p *config.Profile) {
+		p.Extends = s.extends
+		p.Env = s.envMap()
+		p.Unset = s.unset
+	})
 }
 
 // inheritedForState resolves the profile as it would exist if the working copy

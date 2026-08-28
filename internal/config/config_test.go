@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,8 +107,8 @@ func TestResolveProfileCycle(t *testing.T) {
 		"b": {Extends: Extends{"a"}},
 	}}
 	_, err := cfg.ResolveProfile("a")
-	if err == nil {
-		t.Fatal("cycle not detected")
+	if !errors.Is(err, ErrExtendsCycle) {
+		t.Fatalf("cycle not detected as ErrExtendsCycle: %v", err)
 	}
 }
 
