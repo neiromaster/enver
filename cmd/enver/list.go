@@ -63,9 +63,14 @@ func doList(w io.Writer) error {
 		}
 		own := ownVars(p)
 		varsCell := fmt.Sprintf("%d", own)
-		if r, err := cfg.ResolveProfile(n); err == nil {
-			if len(p.Extends) > 0 {
+		if len(p.Extends) > 0 {
+			// Text degrades honestly: an unresolvable chain shows a marker
+			// instead of blending in with parentless profiles. The JSON path
+			// stays strict and errors instead.
+			if r, err := cfg.ResolveProfile(n); err == nil {
 				varsCell = fmt.Sprintf("%d (→%d)", own, len(r.Env))
+			} else {
+				varsCell = fmt.Sprintf("%d (→?)", own)
 			}
 		}
 		rows = append(rows, listRow{marker, n, extends, varsCell})

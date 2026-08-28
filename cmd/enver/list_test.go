@@ -22,7 +22,8 @@ func TestDoListVarsColumn(t *testing.T) {
 	if err := config.UpsertProfile(path, "mix", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"A": "1", "B": "2"}}, false, false); err != nil {
 		t.Fatalf("upsert mix: %v", err)
 	}
-	// broken extends ghost (undefined) → resolve error, must fall back to own count.
+	// broken extends ghost (undefined) → resolve error, cell must say so instead
+	// of blending in with parentless profiles.
 	if err := config.UpsertProfile(path, "broken", config.Profile{Extends: config.Extends{"ghost"}}, false, false); err != nil {
 		t.Fatalf("upsert broken: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestDoListVarsColumn(t *testing.T) {
 		{"base", "1"},
 		{"child", "0 (→1)"},
 		{"mix", "2 (→3)"},
-		{"broken", "0"},
+		{"broken", "0 (→?)"},
 		{"basedata", "1 (→2)"},
 	}
 	for _, c := range cases {
