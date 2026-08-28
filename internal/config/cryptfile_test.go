@@ -217,6 +217,7 @@ func TestDecryptFileEmptyConfigYieldsZero(t *testing.T) {
 	if err != nil || n != 0 {
 		t.Fatalf("DecryptFile on empty config = %d, %v; want 0, nil", n, err)
 	}
+	assertFileUnwritten(t, path)
 }
 
 func TestEncryptFileEmptyConfigYieldsZero(t *testing.T) {
@@ -228,6 +229,67 @@ func TestEncryptFileEmptyConfigYieldsZero(t *testing.T) {
 	n, err := EncryptFile(path, key, make([]byte, 16), "", true)
 	if err != nil || n != 0 {
 		t.Fatalf("EncryptFile on empty config = %d, %v; want 0, nil", n, err)
+	}
+	assertFileUnwritten(t, path)
+}
+
+// TestCryptPathsAbsentConfigYieldsZero pins the read-only no-op: crypt paths
+// treat a missing config as empty and leave it missing rather than materialize
+// an empty file as a side effect.
+func TestCryptPathsAbsentConfigYieldsZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	key := make([]byte, 32)
+	salt := make([]byte, 16)
+	n, err := EncryptFile(path, key, salt, "", true)
+	if err != nil || n != 0 {
+		t.Fatalf("EncryptFile on absent config = %d, %v; want 0, nil", n, err)
+	}
+	n, err = DecryptFile(path, key, "")
+	if err != nil || n != 0 {
+		t.Fatalf("DecryptFile on absent config = %d, %v; want 0, nil", n, err)
+	}
+	if _, serr := os.Stat(path); !os.IsNotExist(serr) {
+		t.Fatalf("absent config must stay absent, stat err = %v", serr)
+	}
+}
+
+// TestCryptPathsNamedProfileOnProfilelessConfigErrors pins the loud typo
+// guard on sources with no profiles at all: an absent or empty config cannot
+// satisfy a named filter, so both crypt paths report it instead of returning
+// a silent zero-value success.
+func TestCryptPathsNamedProfileOnProfilelessConfigErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []byte
+	}{
+		{"absent", nil},
+		{"empty", []byte("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if tc.content != nil {
+				if err := os.WriteFile(path, tc.content, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			key := make([]byte, 32)
+			n, err := EncryptFile(path, key, make([]byte, 16), "a", false)
+			if err == nil || !strings.Contains(err.Error(), `profile "a" not found`) {
+				t.Fatalf("encrypt: n=%d err=%v, want not found", n, err)
+			}
+			n, err = DecryptFile(path, key, "a")
+			if err == nil || !strings.Contains(err.Error(), `profile "a" not found`) {
+				t.Fatalf("decrypt: n=%d err=%v, want not found", n, err)
+			}
+		})
+	}
+}
+
+func assertFileUnwritten(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) != 0 {
+		t.Fatalf("config must stay empty after a zero-value pass, got %d bytes (read err %v)", len(data), err)
 	}
 }
 
