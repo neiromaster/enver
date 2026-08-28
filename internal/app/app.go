@@ -149,11 +149,10 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 	return profile, nil
 }
 
-// SaltSource locates the salt, KDF parameters, and a full sample value of an
-// enc:v3: value the map iteration reaches, for passphrase recovery when no
-// key is configured. A nil salt means the source holds no encrypted value.
-// Called only on the no-key path, so expensive sources stay idle when a key
-// resolves.
+// SaltSource locates the salt, KDF parameters, and a full sample value of
+// some enc:v3: value, for passphrase recovery when no key is configured. A
+// nil salt means the source holds no encrypted value. Called only on the
+// no-key path, so expensive sources stay idle when a key resolves.
 type SaltSource func() (salt []byte, params crypto.Argon2Params, sample string, err error)
 
 // ResolveKeyOrPrompt resolves the decryption key from --key, the ENVER_KEY env
