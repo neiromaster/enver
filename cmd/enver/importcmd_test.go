@@ -22,7 +22,7 @@ func TestImportMergeCreate(t *testing.T) {
 	if !strings.Contains(summary, "imported 3") || !strings.Contains(summary, "created") {
 		t.Errorf("summary: %q", summary)
 	}
-	prof, _, _, ok, err := config.ReadProfile(cfgPath, "prod")
+	prof, _, ok, err := config.ReadProfile(cfgPath, "prod")
 	if err != nil || !ok {
 		t.Fatalf("profile not written: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestImportMergeKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if prof.Env["OLD"] != "1" {
 		t.Errorf("merge should keep OLD: %+v", prof.Env)
 	}
@@ -57,7 +57,7 @@ func TestImportReplaceRemovesAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if _, ok := prof.Env["OLD"]; ok {
 		t.Errorf("replace should remove OLD: %+v", prof.Env)
 	}
@@ -102,7 +102,7 @@ func TestImportReplaceKeepsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prof, _, isDefault, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, isDefault, _, _ := config.ReadProfile(cfgPath, "p")
 	if !isDefault {
 		t.Errorf("replace should keep default pointer; isDefault=%v", isDefault)
 	}
@@ -158,7 +158,7 @@ func TestImportExtendsCreate(t *testing.T) {
 	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ base") {
 		t.Errorf("create with --extends should report the extends change: %q", summary)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "child")
 	if !prof.Extends.Has("base") {
 		t.Errorf("child.Extends = %q, want base", prof.Extends)
 	}
@@ -192,7 +192,7 @@ func TestImportExtendsMergePreserved(t *testing.T) {
 	if _, err := runImport(bytes.NewReader([]byte("Z=3\n")), cfgPath, "p", false, false, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if !prof.Extends.Has("base") {
 		t.Errorf("merge without --extends should preserve base; got %q", prof.Extends)
 	}
@@ -209,7 +209,7 @@ func TestImportExtendsReplacePreserved(t *testing.T) {
 	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, true, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if !prof.Extends.Has("base") {
 		t.Errorf("replace without --extends should preserve base; got %q", prof.Extends)
 	}
@@ -227,7 +227,7 @@ func TestImportEmptyErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no variables to import") {
 		t.Fatalf("expected no-variables error, got: %v", err)
 	}
-	if _, _, _, ok, _ := config.ReadProfile(cfgPath, "p"); ok {
+	if _, _, ok, _ := config.ReadProfile(cfgPath, "p"); ok {
 		t.Error("empty import must not create a profile")
 	}
 }
@@ -240,7 +240,7 @@ func TestImportEmptyWithExtendsOK(t *testing.T) {
 	if _, err := runImport(bytes.NewReader([]byte("")), cfgPath, "child", false, false, "base", nil, nil); err != nil {
 		t.Fatalf("empty import with --extends should succeed: %v", err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "child")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "child")
 	if !prof.Extends.Has("base") {
 		t.Errorf("child.Extends = %q, want base", prof.Extends)
 	}
@@ -303,7 +303,7 @@ func TestImportReplaceConfirmDeclined(t *testing.T) {
 	if summary != "" {
 		t.Errorf("declined confirm should print nothing, got: %q", summary)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if _, ok := prof.Env["OLD"]; !ok {
 		t.Error("declined confirm must not remove OLD")
 	}
@@ -324,7 +324,7 @@ func TestImportReplaceConfirmAccepted(t *testing.T) {
 	if _, err := runImport(bytes.NewReader([]byte("NEW=2\n")), cfgPath, "p", true, false, "", accept, nil); err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if _, ok := prof.Env["OLD"]; ok {
 		t.Error("accepted confirm should remove OLD")
 	}
@@ -341,7 +341,7 @@ func TestImportReplaceConfirmNonInteractive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("expected --force hint on failed confirm, got: %v", err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if _, ok := prof.Env["OLD"]; !ok {
 		t.Error("failed confirm must not remove OLD")
 	}
@@ -358,7 +358,7 @@ func TestImportReplaceForceSkipsConfirm(t *testing.T) {
 	if called {
 		t.Error("confirm must not be called under --force")
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if _, ok := prof.Env["OLD"]; ok {
 		t.Error("--force should still remove OLD")
 	}
@@ -381,7 +381,7 @@ func TestImportExtendsList(t *testing.T) {
 	if !strings.Contains(summary, "extends:") || !strings.Contains(summary, "→ a, b") {
 		t.Errorf("create with --extends a,b should report multi-parent extends: %q", summary)
 	}
-	prof, _, _, ok, err := config.ReadProfile(cfgPath, "p")
+	prof, _, ok, err := config.ReadProfile(cfgPath, "p")
 	if err != nil || !ok {
 		t.Fatalf("ReadProfile p: ok=%v err=%v", ok, err)
 	}
@@ -407,7 +407,7 @@ func TestImportReplaceConfirmsUnsetClearing(t *testing.T) {
 	if !prompted {
 		t.Fatal("identical env keys must still confirm when the unset list would be cleared")
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if len(prof.Unset) != 0 {
 		t.Fatalf("unset = %v, want cleared after an accepted confirm", prof.Unset)
 	}
@@ -424,7 +424,7 @@ func TestImportReplaceDeclinedUnsetConfirmPreservesFence(t *testing.T) {
 	if summary != "" {
 		t.Errorf("declined confirm should print nothing, got: %q", summary)
 	}
-	prof, _, _, _, _ := config.ReadProfile(cfgPath, "p")
+	prof, _, _, _ := config.ReadProfile(cfgPath, "p")
 	if len(prof.Unset) != 1 {
 		t.Fatal("declined confirm must keep the fence intact")
 	}
@@ -500,7 +500,7 @@ func TestImportExtendsSelfCycleRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "would create a cycle") {
 		t.Fatalf("err=%v, want cycle refusal", err)
 	}
-	prof, _, _, _, _ := config.ReadProfile(global, "a")
+	prof, _, _, _ := config.ReadProfile(global, "a")
 	if prof.Env["OWN"] != "" {
 		t.Fatalf("profile was written despite cycle refusal: %+v", prof)
 	}
@@ -522,7 +522,7 @@ func TestImportExtendsParentFromOtherLayerAccepted(t *testing.T) {
 		t.Fatalf("merged-view parent rejected: %v", err)
 	}
 	local := config.LocalPath()
-	prof, _, _, _, _ := config.ReadProfile(local, "child")
+	prof, _, _, _ := config.ReadProfile(local, "child")
 	if !prof.Extends.Has("gparent") {
 		t.Fatalf("child.Extends = %q, want gparent", prof.Extends)
 	}

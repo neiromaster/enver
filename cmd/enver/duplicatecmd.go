@@ -56,14 +56,13 @@ var duplicateCmd = &cobra.Command{
 		if _, ok := targetCfg.Profiles[newName]; ok {
 			return fmt.Errorf("profile %q already exists", newName)
 		}
-		prof, comments, _, ok, err := config.ReadProfile(path, src)
+		prof, _, ok, err := config.ReadProfile(path, src)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return notFoundInTarget(src, path)
 		}
-		prof.Comments = comments
 		if err := config.UpsertProfile(path, newName, prof, false, true); err != nil {
 			return err
 		}

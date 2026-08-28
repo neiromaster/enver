@@ -108,7 +108,7 @@ func TestEncryptFileJoinsFileWideSameSaltEra(t *testing.T) {
 	if n, err := EncryptFile(path, key, salt, "p", false); err != nil || n != 1 {
 		t.Fatalf("encrypt p: n=%d err=%v, want 1/nil", n, err)
 	}
-	prof, _, _, _, err := ReadProfile(path, "p")
+	prof, _, _, err := ReadProfile(path, "p")
 	if err != nil {
 		t.Fatal(err)
 	}

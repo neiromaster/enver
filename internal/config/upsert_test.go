@@ -278,7 +278,7 @@ func TestUpsertForceExtendsClearsExisting(t *testing.T) {
 	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, true); err != nil {
 		t.Fatalf("forceExtends clear: %v", err)
 	}
-	prof, _, _, _, err := ReadProfile(path, "p")
+	prof, _, _, err := ReadProfile(path, "p")
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestUpsertPreserveExtendsKeepsExisting(t *testing.T) {
 	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"B": "2"}}, false, false); err != nil {
 		t.Fatalf("preserve: %v", err)
 	}
-	prof, _, _, _, err := ReadProfile(path, "p")
+	prof, _, _, err := ReadProfile(path, "p")
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}

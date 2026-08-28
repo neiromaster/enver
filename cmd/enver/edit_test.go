@@ -260,12 +260,12 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 		true, false); err != nil {
 		t.Fatal(err)
 	}
-	prof, comments, isDefault, _, err := config.ReadProfile(path, "p")
+	prof, isDefault, _, err := config.ReadProfile(path, "p")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Default: "p", Profiles: map[string]config.Profile{"p": prof}}
-	s := newEditState("p", prof, comments, isDefault)
+	s := newEditState("p", prof, prof.Comments, isDefault)
 	// Edit A (keep comment), delete B, add C with a comment.
 	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new", Comment: "a-hint"})
 	s.deleteKey("B")
@@ -273,10 +273,11 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 	if err := commitEdit(path, cfg, s, true); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
-	_, got, isDef, _, err := config.ReadProfile(path, "p")
+	p, isDef, _, err := config.ReadProfile(path, "p")
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := p.Comments
 	if got["A"] != "a-hint" || got["C"] != "c-hint" {
 		t.Fatalf("comments not preserved on surviving vars: %v", got)
 	}
@@ -671,17 +672,17 @@ func TestCommitEditRoundTripsUnset(t *testing.T) {
 		false, false); err != nil {
 		t.Fatal(err)
 	}
-	prof, comments, isDefault, _, err := config.ReadProfile(path, "p")
+	prof, isDefault, _, err := config.ReadProfile(path, "p")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Profiles: map[string]config.Profile{"p": prof}}
-	s := newEditState("p", prof, comments, isDefault)
+	s := newEditState("p", prof, prof.Comments, isDefault)
 	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new"})
 	if err := commitEdit(path, cfg, s, false); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
-	gotProf, _, _, _, err := config.ReadProfile(path, "p")
+	gotProf, _, _, err := config.ReadProfile(path, "p")
 	if err != nil {
 		t.Fatal(err)
 	}

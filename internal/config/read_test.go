@@ -21,7 +21,7 @@ profiles:
 	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p, comments, isDefault, ok, err := ReadProfile(path, "anth")
+	p, isDefault, ok, err := ReadProfile(path, "anth")
 	if err != nil {
 		t.Fatalf("ReadProfile: %v", err)
 	}
@@ -37,10 +37,10 @@ profiles:
 	if p.Env["API_KEY"] != "sk-xxx" || p.Env["MODEL"] != "claude-sonnet-5" {
 		t.Fatalf("env = %v", p.Env)
 	}
-	if comments["API_KEY"] != "token from the vault" {
-		t.Fatalf("comment = %q, want the vault hint", comments["API_KEY"])
+	if p.Comments["API_KEY"] != "token from the vault" {
+		t.Fatalf("comment = %q, want the vault hint", p.Comments["API_KEY"])
 	}
-	if _, has := comments["MODEL"]; has {
+	if _, has := p.Comments["MODEL"]; has {
 		t.Fatal("empty comment should not be recorded")
 	}
 }
@@ -51,7 +51,7 @@ func TestReadProfileMissing(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  anth:\n    env:\n      K: v\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, ok, err := ReadProfile(path, "nope")
+	_, _, ok, err := ReadProfile(path, "nope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestReadProfileMissing(t *testing.T) {
 }
 
 func TestReadProfileMissingFile(t *testing.T) {
-	_, _, _, ok, err := ReadProfile(filepath.Join(t.TempDir(), "absent.yaml"), "anth")
+	_, _, ok, err := ReadProfile(filepath.Join(t.TempDir(), "absent.yaml"), "anth")
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestReadProfileEmptyFileYieldsNotFound(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, ok, err := ReadProfile(path, "p")
+	_, _, ok, err := ReadProfile(path, "p")
 	if err != nil {
 		t.Fatalf("empty file must not error, got %v", err)
 	}
@@ -96,7 +96,7 @@ func TestReadProfileMalformedYamlErrors(t *testing.T) {
 		if err := os.WriteFile(path, []byte("profiles:\n  - a\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, _, _, _, err := ReadProfile(path, "a")
+		_, _, _, err := ReadProfile(path, "a")
 		if err == nil {
 			t.Fatal("expected error for profiles mapping as sequence, got nil")
 		}
@@ -107,7 +107,7 @@ func TestReadProfileMalformedYamlErrors(t *testing.T) {
 		if err := os.WriteFile(path, []byte("profiles:\n  p: foo\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, _, _, _, err := ReadProfile(path, "p")
+		_, _, _, err := ReadProfile(path, "p")
 		if err == nil {
 			t.Fatal("expected error for scalar profile value, got nil")
 		}

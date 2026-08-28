@@ -320,7 +320,7 @@ func TestUpsertPreservesUnsetOnDuplicate(t *testing.T) {
 	if err := os.WriteFile(path, []byte("profiles:\n  src:\n    unset: [A, B]\n    env:\n      K: v\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prof, _, _, ok, err := ReadProfile(path, "src")
+	prof, _, ok, err := ReadProfile(path, "src")
 	if err != nil || !ok {
 		t.Fatalf("read: ok=%v err=%v", ok, err)
 	}

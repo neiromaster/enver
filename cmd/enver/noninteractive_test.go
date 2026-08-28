@@ -88,7 +88,7 @@ func TestRemoveNonInteractiveWithYesWorks(t *testing.T) {
 	if err := removeCmd.RunE(&cobra.Command{}, []string{"p"}); err != nil {
 		t.Fatalf("non-interactive remove with --yes should work: %v", err)
 	}
-	if _, _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "p"); ok {
+	if _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "p"); ok {
 		t.Fatal("profile should have been removed")
 	}
 }
@@ -109,7 +109,7 @@ func TestImportNonInteractiveWithProfileWorks(t *testing.T) {
 	if err := importCmd.RunE(&cobra.Command{}, []string{writeEnvFile(t), "newprof"}); err != nil {
 		t.Fatalf("non-interactive import with profile should work: %v", err)
 	}
-	prof, _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "newprof")
+	prof, _, ok, _ := config.ReadProfile(globalFlags.configPath, "newprof")
 	if !ok || prof.Env["X"] != "1" {
 		t.Fatalf("profile not imported: %+v ok=%v", prof, ok)
 	}
@@ -145,7 +145,7 @@ func TestRenameNonInteractiveWorks(t *testing.T) {
 	if err := renameCmd.RunE(&cobra.Command{}, []string{"p", "q"}); err != nil {
 		t.Fatalf("non-interactive rename should work: %v", err)
 	}
-	if _, _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "q"); !ok {
+	if _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "q"); !ok {
 		t.Fatal("profile should have been renamed to q")
 	}
 }
@@ -169,7 +169,7 @@ func TestDuplicateNonInteractiveWorks(t *testing.T) {
 	if err := duplicateCmd.RunE(&cobra.Command{}, []string{"p", "q"}); err != nil {
 		t.Fatalf("non-interactive duplicate should work: %v", err)
 	}
-	if _, _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "q"); !ok {
+	if _, _, ok, _ := config.ReadProfile(globalFlags.configPath, "q"); !ok {
 		t.Fatal("profile q should exist after duplicate")
 	}
 }
@@ -189,7 +189,7 @@ func TestDuplicateNonInteractiveCopiesExtends(t *testing.T) {
 	if err := duplicateCmd.RunE(&cobra.Command{}, []string{"dev", "dev-copy"}); err != nil {
 		t.Fatalf("duplicate dev: %v", err)
 	}
-	prof, _, _, ok, _ := config.ReadProfile(path, "dev-copy")
+	prof, _, ok, _ := config.ReadProfile(path, "dev-copy")
 	if !ok {
 		t.Fatal("dev-copy should exist after duplicate")
 	}

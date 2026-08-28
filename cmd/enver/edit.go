@@ -477,7 +477,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		}
 		name = picked
 	}
-	prof, comments, isDefault, ok, err := config.ReadProfile(path, name)
+	prof, isDefault, ok, err := config.ReadProfile(path, name)
 	if err != nil {
 		return err
 	}
@@ -486,7 +486,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	}
 	wasDefault := isDefault
 
-	s := newEditState(name, prof, comments, isDefault)
+	s := newEditState(name, prof, prof.Comments, isDefault)
 	for {
 		inherited := listedInheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))

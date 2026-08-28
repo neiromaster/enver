@@ -61,17 +61,17 @@ func twoLayers(t *testing.T) (globalPath, localPath string) {
 }
 
 func profileExists(path, name string) bool {
-	_, _, _, ok, _ := config.ReadProfile(path, name)
+	_, _, ok, _ := config.ReadProfile(path, name)
 	return ok
 }
 
 func profileDefault(path, name string) bool {
-	_, _, isDefault, _, _ := config.ReadProfile(path, name)
+	_, isDefault, _, _ := config.ReadProfile(path, name)
 	return isDefault
 }
 
 func profileEnv(path, name, key string) string {
-	prof, _, _, _, _ := config.ReadProfile(path, name)
+	prof, _, _, _ := config.ReadProfile(path, name)
 	return prof.Env[key]
 }
 

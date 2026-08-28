@@ -52,7 +52,7 @@ func TestRenameSameNameNoOp(t *testing.T) {
 	if !strings.Contains(out, "nothing to rename") {
 		t.Errorf("no-op rename should report nothing to rename:\n%s", out)
 	}
-	prof, _, _, ok, err := config.ReadProfile(cfgPath, "p")
+	prof, _, ok, err := config.ReadProfile(cfgPath, "p")
 	if err != nil || !ok {
 		t.Fatalf("profile p missing after no-op: %v", err)
 	}
