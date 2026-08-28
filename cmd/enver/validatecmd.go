@@ -56,7 +56,11 @@ var validateCmd = &cobra.Command{
 // dedupIssues collapses findings both passes report, preferring the file-scoped
 // variant; sorted by file then profile.
 func dedupIssues(issues []config.Issue) []config.Issue {
-	type key struct{ profile, kind, target string }
+	type key struct {
+		profile string
+		kind    config.IssueKind
+		target  string
+	}
 	best := map[key]config.Issue{}
 	for _, is := range issues {
 		k := key{is.Profile, is.Kind, is.Target}

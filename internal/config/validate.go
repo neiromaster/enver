@@ -6,11 +6,29 @@ import (
 	"sort"
 )
 
+// IssueKind labels the class of a config-health finding.
+type IssueKind string
+
+const (
+	KindDanglingExtends    IssueKind = "dangling-extends"
+	KindCycle              IssueKind = "cycle"
+	KindEmpty              IssueKind = "empty"
+	KindContradictoryUnset IssueKind = "contradictory-unset"
+)
+
+// Severity grades how loudly an Issue surfaces.
+type Severity string
+
+const (
+	SeverityError   Severity = "error"
+	SeverityWarning Severity = "warning"
+)
+
 // Issue is one config-health finding.
 type Issue struct {
 	Profile  string
-	Kind     string // "dangling-extends" | "cycle" | "empty" | "contradictory-unset"
-	Severity string // "error" | "warning"
+	Kind     IssueKind
+	Severity Severity
 	Target   string // dangling target, unset key
 	Detail   string // cycle detail (chain path)
 	File     string // source scope when known (e.g. "global"); "" means the merged view
@@ -18,13 +36,13 @@ type Issue struct {
 
 func (i Issue) String() string {
 	switch i.Kind {
-	case "dangling-extends":
+	case KindDanglingExtends:
 		return fmt.Sprintf("%s: extends %q which does not exist", i.Profile, i.Target)
-	case "cycle":
+	case KindCycle:
 		return fmt.Sprintf("%s: extends cycle (%s)", i.Profile, i.Detail)
-	case "empty":
+	case KindEmpty:
 		return fmt.Sprintf("%s: no env vars, no extends, and no unset", i.Profile)
-	case "contradictory-unset":
+	case KindContradictoryUnset:
 		return fmt.Sprintf("%s: unsets %q which it also defines in env", i.Profile, i.Target)
 	}
 	return fmt.Sprintf("%s: %s", i.Profile, i.Kind)
@@ -42,18 +60,18 @@ func Validate(cfg Config) []Issue {
 		p := cfg.Profiles[n]
 		for _, parent := range p.Extends {
 			if !exists[parent] {
-				issues = append(issues, Issue{Profile: n, Kind: "dangling-extends", Severity: "error", Target: parent})
+				issues = append(issues, Issue{Profile: n, Kind: KindDanglingExtends, Severity: SeverityError, Target: parent})
 			}
 		}
 		if len(p.Extends) > 0 {
 			if _, err := cfg.ResolveProfile(n); err != nil {
 				if errors.Is(err, ErrExtendsCycle) {
-					issues = append(issues, Issue{Profile: n, Kind: "cycle", Severity: "error", Detail: err.Error()})
+					issues = append(issues, Issue{Profile: n, Kind: KindCycle, Severity: SeverityError, Detail: err.Error()})
 				}
 			}
 		}
 		if len(p.Env) == 0 && len(p.Extends) == 0 && len(p.Unset) == 0 {
-			issues = append(issues, Issue{Profile: n, Kind: "empty", Severity: "warning"})
+			issues = append(issues, Issue{Profile: n, Kind: KindEmpty, Severity: SeverityWarning})
 		}
 		for _, u := range p.Unset {
 			if !hasEnvKey(p.Env, u) {
@@ -65,7 +83,7 @@ func Validate(cfg Config) []Issue {
 			if cfg.unsetLayer(n, u) != cfg.layerOf(n, u) {
 				continue
 			}
-			issues = append(issues, Issue{Profile: n, Kind: "contradictory-unset", Severity: "warning", Target: u})
+			issues = append(issues, Issue{Profile: n, Kind: KindContradictoryUnset, Severity: SeverityWarning, Target: u})
 		}
 	}
 	return issues

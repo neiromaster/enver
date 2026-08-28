@@ -16,7 +16,7 @@ func TestValidateFindsDanglingAndCycle(t *testing.T) {
 		"b":      {Extends: Extends{"a"}},
 		"empty":  {},
 	}}
-	kinds := map[string]string{}
+	kinds := map[string]IssueKind{}
 	for _, is := range Validate(cfg) {
 		kinds[is.Profile] = is.Kind
 	}
@@ -53,7 +53,7 @@ func TestValidateDeepDanglingNotLabeledCycle(t *testing.T) {
 		"a": {Extends: Extends{"b"}},
 		"b": {Extends: Extends{"ghost"}},
 	}}
-	got := map[string]string{}
+	got := map[string]IssueKind{}
 	for _, is := range Validate(cfg) {
 		got[is.Profile] = is.Kind
 	}
@@ -128,7 +128,7 @@ func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
 	}
 }
 
-func hasIssue(issues []Issue, kind string) bool {
+func hasIssue(issues []Issue, kind IssueKind) bool {
 	for _, is := range issues {
 		if is.Kind == kind {
 			return true
@@ -183,7 +183,7 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 			collect := func(cfg Config) []string {
 				var got []string
 				for _, is := range Validate(cfg) {
-					got = append(got, is.Kind+":"+is.Target)
+					got = append(got, string(is.Kind)+":"+is.Target)
 				}
 				return got
 			}
