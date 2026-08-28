@@ -18,6 +18,9 @@ var defaultCmd = &cobra.Command{
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfileInTarget,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if defaultClear && len(args) > 0 {
+			return fmt.Errorf("--clear takes no profile, got %q", args[0])
+		}
 		path := writeTarget()
 		if defaultClear {
 			targetCfg, err := config.LoadFile(path)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -35,5 +36,25 @@ func TestDefaultCorruptTargetFileErrorsLoudly(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "not found") {
 		t.Fatalf("corrupt target file misreported as missing profile: %v", err)
+	}
+}
+
+// TestDefaultClearWithPositionalArgErrors pins that --clear cannot be paired
+// with a profile name: the clear branch ignores the positional entirely, so
+// accepting both would silently clear a default the user meant to change.
+func TestDefaultClearWithPositionalArgErrors(t *testing.T) {
+	path := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, true)
+	withGlobalConfig(t, path)
+
+	err := defaultCmd.RunE(&cobra.Command{}, []string{"staging"})
+	if err == nil || !strings.Contains(err.Error(), "--clear takes no profile") {
+		t.Fatalf("err=%v, want clear-arg conflict", err)
+	}
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Default != "prod" {
+		t.Fatalf("default = %q, want prod untouched", cfg.Default)
 	}
 }
