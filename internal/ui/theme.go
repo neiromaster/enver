@@ -21,8 +21,7 @@ const (
 type theme struct {
 	title       lipgloss.Style
 	cursor      string
-	rowActive   lipgloss.Style
-	selected    lipgloss.Style
+	active      lipgloss.Style
 	normal      lipgloss.Style
 	dim         lipgloss.Style
 	separator   lipgloss.Style
@@ -48,8 +47,7 @@ func defaultTheme() *theme {
 	return &theme{
 		title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Cyan),
 		cursor:      cyan.Render("▸"),
-		rowActive:   cyan.Bold(true),
-		selected:    cyan.Bold(true),
+		active:      cyan.Bold(true),
 		normal:      lipgloss.NewStyle(),
 		dim:         faint,
 		separator:   faint,

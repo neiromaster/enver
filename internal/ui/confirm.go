@@ -49,9 +49,9 @@ func (m *confirmModel) View() tea.View {
 	yes := "  Yes"
 	no := "    No"
 	if m.value {
-		yes = m.theme.selected.Render("▸ Yes")
+		yes = m.theme.active.Render("▸ Yes")
 	} else {
-		no = m.theme.selected.Render("▸   No")
+		no = m.theme.active.Render("▸   No")
 	}
 	b.WriteString(yes + "  " + no + "\n")
 	b.WriteString(m.theme.help.Render("y/n · ←→ toggle · enter confirm · esc cancel"))

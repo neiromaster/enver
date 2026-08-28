@@ -461,7 +461,7 @@ func (m *selectModel) rowString(i, curOpt int) string {
 	label := m.options[i].Label
 	switch {
 	case i == curOpt:
-		label = m.theme.rowActive.Render(label)
+		label = m.theme.active.Render(label)
 	case m.options[i].Dim:
 		label = m.theme.dim.Render(label)
 	}

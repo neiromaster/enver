@@ -54,21 +54,21 @@ func TestThemeStaticGlyphColors(t *testing.T) {
 	}
 }
 
-func TestThemeTitleAndSelectedAreCyanBold(t *testing.T) {
+func TestThemeTitleAndActiveAreCyanBold(t *testing.T) {
 	th := defaultTheme()
-	for _, out := range []string{th.title.Render("X"), th.selected.Render("Y")} {
+	for _, out := range []string{th.title.Render("X"), th.active.Render("Y")} {
 		if !strings.Contains(out, "36m") {
 			t.Errorf("want cyan foreground, got %q", out)
 		}
 	}
 }
 
-// rowActive must NOT set a background: a fixed background (e.g. the old
+// active must NOT set a background: a fixed background (e.g. the old
 // Color("237") grey) ignores the terminal theme and breaks on some themes.
-func TestThemeRowActiveHasNoBackground(t *testing.T) {
+func TestThemeActiveHasNoBackground(t *testing.T) {
 	th := defaultTheme()
-	out := th.rowActive.Render("row")
+	out := th.active.Render("row")
 	if strings.Contains(out, "\x1b[48") { // 48 = set background color (256/truecolor)
-		t.Errorf("rowActive must not set a background (cross-theme safe): %q", out)
+		t.Errorf("active must not set a background (cross-theme safe): %q", out)
 	}
 }
