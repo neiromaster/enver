@@ -280,26 +280,33 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	return count, os.WriteFile(path, out, 0o644)
 }
 
+// ScanCrypt walks every env value in the config at path through salts.Add.
+// Foreign enc: values and enc:v3 values disagreeing on salt or KDF parameters
+// are errors, so a scan that returns nil saw values from a single key era.
+func ScanCrypt(path string, salts *crypto.SaltScan) error {
+	c, err := load(path)
+	if err != nil {
+		return err
+	}
+	for _, prof := range c.Profiles {
+		for _, v := range prof.Env {
+			if err := salts.Add(v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // FirstSaltAndSample returns the salt, KDF parameters, and full value of the
-// first enc:v3: value in the config at path, or (nil, crypto.Argon2Params{},
-// "", nil) when none exists. Used to recover the salt and params for
-// passphrase key derivation. Foreign enc: values, malformed enc:v3 values,
-// and values disagreeing on salt or params are errors: recovery must not
-// silently pick from what it cannot fully read.
+// first enc:v3: value in the config at path, or a nil salt when none exists.
+// Used to recover the salt and params for passphrase key derivation. Foreign
+// enc: values, malformed enc:v3 values, and values disagreeing on salt or
+// params are errors: recovery must not silently pick from what it cannot
+// fully read.
 func FirstSaltAndSample(path string) (salt []byte, p crypto.Argon2Params, sample string, err error) {
-	root, err := loadOrInitRoot(path)
-	if err != nil {
-		return nil, crypto.Argon2Params{}, "", err
-	}
-	pm, err := profilesMappingOrError(root.Content[0], path)
-	if err != nil {
-		return nil, crypto.Argon2Params{}, "", err
-	}
-	if pm == nil {
-		return nil, crypto.Argon2Params{}, "", nil
-	}
 	var scan crypto.SaltScan
-	if err := forEachEnvValue(pm, "", scan.Add); err != nil {
+	if err := ScanCrypt(path, &scan); err != nil {
 		return nil, crypto.Argon2Params{}, "", err
 	}
 	salt, p, sample = scan.Result()

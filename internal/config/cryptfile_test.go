@@ -27,6 +27,44 @@ func writeMixedSaltConfig(t *testing.T, keyT, saltT []byte) (path, encT string) 
 	return path, encT
 }
 
+// writeEncryptedFixture writes a config whose profiles p and q each hold one
+// enc:v3 value under the same salt: the single-era layout a salt scan reads.
+func writeEncryptedFixture(t *testing.T) string {
+	t.Helper()
+	key := make([]byte, 32)
+	salt := []byte("0123456789abcdef")
+	encP, err := crypto.EncryptValueWithParams("one", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encQ, err := crypto.EncryptValueWithParams("two", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := "profiles:\n  p:\n    env:\n      ONE: " + encP + "\n  q:\n    env:\n      TWO: " + encQ + "\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestScanCryptCollectsFirstSaltAndRejectsMixedEras(t *testing.T) {
+	path := writeEncryptedFixture(t) // two enc:v3 values, one salt
+
+	var salts crypto.SaltScan
+	if err := ScanCrypt(path, &salts); err != nil {
+		t.Fatalf("ScanCrypt: %v", err)
+	}
+	if !salts.Found() {
+		t.Fatal("ScanCrypt found no salt in an encrypted fixture")
+	}
+	salt, params, sample := salts.Result()
+	if len(salt) == 0 || sample == "" || params.Time == 0 || params.Memory == 0 || params.Threads == 0 {
+		t.Fatalf("Result = %v, %v, %q", salt, params, sample)
+	}
+}
+
 func TestEncryptFileSaltGuardScopedToWrittenProfiles(t *testing.T) {
 	keyT := make([]byte, 32)
 	keyA := make([]byte, 32)
@@ -165,8 +203,8 @@ func TestCryptPathsRejectNonMappingProfiles(t *testing.T) {
 	if _, err := DecryptFile(path, key, ""); err == nil || !strings.Contains(err.Error(), "profiles is not a mapping") {
 		t.Fatalf("decrypt: err=%v, want profiles-not-mapping", err)
 	}
-	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "profiles is not a mapping") {
-		t.Fatalf("salt scan: err=%v, want profiles-not-mapping", err)
+	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("salt scan: err=%v, want the load-based unmarshal error", err)
 	}
 }
 

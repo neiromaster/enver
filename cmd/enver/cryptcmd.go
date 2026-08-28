@@ -180,24 +180,12 @@ func scanConfigCrypt() (configCryptScan, error) {
 	var scan configCryptScan
 	var salts crypto.SaltScan
 	for _, p := range []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()} {
-		c, err := config.LoadFile(p)
-		if err != nil {
+		if err := config.ScanCrypt(p, &salts); err != nil {
 			return scan, fmt.Errorf("cannot scan configs for encrypted values: %w", err)
 		}
-		for _, prof := range c.Profiles {
-			for _, v := range prof.Env {
-				if crypto.IsEncrypted(v) {
-					scan.hasEncrypted = true
-				}
-				if err := salts.Add(v); err != nil {
-					return scan, err
-				}
-			}
-		}
 	}
-	if salts.Found() {
-		scan.salt, scan.params, scan.sample = salts.Result()
-	}
+	scan.hasEncrypted = salts.Found()
+	scan.salt, scan.params, scan.sample = salts.Result()
 	return scan, nil
 }
 
