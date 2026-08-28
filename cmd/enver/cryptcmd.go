@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
-	"crypto/rand"
+	"errors"
 	"fmt"
-	"os"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -23,98 +21,25 @@ var keygenCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
-		path := keygenPath()
+		err := app.Keygen(app.KeygenOptions{
+			Path:    keygenPath(),
+			Random:  keygenRandom,
+			Force:   force,
+			Scan:    scanCryptForApp,
+			Confirm: uiConfirm,
+		})
+		if errors.Is(err, app.ErrAborted) {
+			return aborted(cmd.OutOrStdout())
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ key cache written to %s (mode 0600)\n", keygenPath())
 		if keygenRandom {
-			risk, err := keygenRisk(force, path, nil, func() (bool, error) {
-				scan, err := scanConfigCrypt()
-				if err != nil {
-					return false, err
-				}
-				return scan.hasEncrypted, nil
-			})
-			if err != nil {
-				return err
-			}
-			if risk {
-				fmt.Fprintln(os.Stderr, "warning: overwriting the key makes existing encrypted values unreadable; run `enver decrypt` with the old key first to migrate")
-			}
-			if err := crypto.GenerateKey(path, force); err != nil {
-				return err
-			}
-			fmt.Printf("✓ key cache written to %s (mode 0600)\n", path)
 			fmt.Println("Keep this file private. Commit encrypted configs, never the key.")
-			return nil
+		} else {
+			fmt.Println("Recovery: on a new machine, run `enver x <profile> -- <command>` and enter your passphrase when prompted.")
 		}
-		if !app.Interactive() {
-			return fmt.Errorf("keygen requires a terminal; use --random for a non-interactive key")
-		}
-		if !force {
-			if _, err := os.Stat(path); err == nil {
-				return fmt.Errorf("key already exists at %s (use --force to overwrite)", path)
-			}
-		}
-		scan, err := scanConfigCrypt()
-		if err != nil {
-			return err
-		}
-		pass, err := app.PromptPassphrase("Enter passphrase:")
-		if err != nil {
-			return err
-		}
-		confirm, err := app.PromptPassphrase("Confirm passphrase:")
-		if err != nil {
-			return err
-		}
-		if pass != confirm {
-			return fmt.Errorf("passphrases do not match")
-		}
-		salt := scan.salt
-		params := scan.params
-		if salt == nil {
-			salt = make([]byte, crypto.SaltSize)
-			if _, err := rand.Read(salt); err != nil {
-				return err
-			}
-			params = crypto.CurrentParams
-		}
-		key, err := crypto.DeriveKey(pass, salt, params)
-		if err != nil {
-			return err
-		}
-		// The key reuses the configs' salt, so a passphrase that cannot decrypt
-		// the sample is not the one the existing values were encrypted with.
-		// Verified before the risk gate: a passphrase that decrypts the sample
-		// strands nothing, so it is never warned about as stranding — it is the
-		// recovery path for a lost or rotated key cache. Every non-force path
-		// must refuse rather than cache a key no value in the configs opens with.
-		matches := false
-		if scan.hasEncrypted {
-			_, derr := crypto.DecryptValue(scan.sample, key)
-			matches = derr == nil
-		}
-		risk, err := keygenRisk(force, path, key, func() (bool, error) { return scan.hasEncrypted && !matches, nil })
-		if err != nil {
-			return err
-		}
-		if scan.hasEncrypted && !matches && !risk {
-			return fmt.Errorf("passphrase does not match the encrypted values in the configs; they stay tied to the passphrase that encrypted them — use it, or remove those values first")
-		}
-		if risk {
-			ok, cerr := uiConfirm(
-				"This passphrase derives a key different from the current one. Overwriting strands existing encrypted values (recover them first with the key that encrypted them). Overwrite anyway?",
-				false)
-			if cerr != nil {
-				return cerr
-			}
-			if !ok {
-				return aborted(cmd.OutOrStdout())
-			}
-		}
-		if err := crypto.WriteKeyCache(path, crypto.NewKeyCache(salt, key)); err != nil {
-			return err
-		}
-		fmt.Printf("✓ key cache written to %s (mode 0600)\n", path)
-		fmt.Println("Recovery: on a new machine, run `enver x <profile> -- <command>` and enter your passphrase when prompted.")
 		return nil
 	},
 }
@@ -129,64 +54,17 @@ func keygenPath() string {
 	return crypto.KeyFilePath()
 }
 
-// keygenRisk reports whether force-overwriting the key at path with newKey
-// would strand encrypted values: an existing key that differs plus values the
-// replacement cannot read. newKey is nil when the key is not yet known
-// (--random), in which case any existing key counts as different and any
-// encrypted value counts as stranded. wouldStrand is called only when the
-// overwrite is real, so paths that can strand nothing (--random or
-// interactive keygen without --force) never read the configs: --random is the
-// bootstrap path and must work beside unreadable or foreign-enc configs. A
-// corrupt key file is an error: overwriting it cannot be judged safe.
-func keygenRisk(force bool, path string, newKey []byte, wouldStrand func() (bool, error)) (bool, error) {
-	if !force {
-		return false, nil
-	}
-	old, _, err := crypto.LoadKey(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil // no existing key file: nothing to strand
-		}
-		return false, fmt.Errorf("existing key at %s is unreadable: %w; fix or remove it before forcing a new key", path, err)
-	}
-	if len(old) == 0 {
-		return false, nil
-	}
-	if newKey != nil && bytes.Equal(old, newKey) {
-		return false, nil // same key: safe to rewrite
-	}
-	return wouldStrand()
-}
-
-// configCryptScan is the single-pass result of scanning both config layers:
-// whether any encrypted value exists and the first enc:v3 salt, KDF params,
-// and sample value.
-type configCryptScan struct {
-	hasEncrypted bool
-	salt         []byte
-	params       crypto.Argon2Params
-	sample       string
-}
-
-// scanConfigCrypt parses each config layer once, reporting whether any value
-// is encrypted (a new key would strand it) and the first enc:v3 salt, KDF
-// params, and sample value (the salt and params are reused so a re-run with
-// the same passphrase derives the same key; the sample verifies the
-// passphrase against the values it must decrypt). Values from different eras
-// — disagreeing salt or KDF params — are an error: one passphrase cannot
-// recover both. A corrupt layer is an error rather than a silent skip: keygen
-// must not overwrite a key while it cannot tell what the configs hold.
-func scanConfigCrypt() (configCryptScan, error) {
-	var scan configCryptScan
+// scanCryptForApp adapts the two-layer salt scan to the app.Keygen seam.
+// A scan error already names the configs; the wrap here would only repeat it.
+func scanCryptForApp() (app.CryptScan, error) {
 	var salts crypto.SaltScan
 	for _, p := range []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()} {
 		if err := config.ScanCrypt(p, &salts); err != nil {
-			return scan, fmt.Errorf("cannot scan configs for encrypted values: %w", err)
+			return app.CryptScan{}, err
 		}
 	}
-	scan.hasEncrypted = salts.Found()
-	scan.salt, scan.params, scan.sample = salts.Result()
-	return scan, nil
+	salt, params, sample := salts.Result()
+	return app.CryptScan{Salt: salt, Params: params, Sample: sample}, nil
 }
 
 var encryptCmd = &cobra.Command{
