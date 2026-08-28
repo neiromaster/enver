@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/neiromaster/enver/internal/envname"
+	"github.com/neiromaster/enver/internal/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -95,14 +96,7 @@ func GlobalPath(override string) string {
 	if override != "" {
 		return override
 	}
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "enver", "config.yaml")
-	}
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/"
-	}
-	return filepath.Join(home, ".config", "enver", "config.yaml")
+	return filepath.Join(xdg.ConfigHome(), "enver", "config.yaml")
 }
 
 // load reads a single YAML file. A missing file yields an empty Config, no error.

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/neiromaster/enver/internal/xdg"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -57,14 +58,7 @@ var CurrentParams = Argon2Params{kdfTime, kdfMemory, kdfThreads}
 // KeyFilePath is the default location for the enver key file. A var so tests
 // can redirect it.
 var KeyFilePath = func() string {
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "enver", "key")
-	}
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/"
-	}
-	return filepath.Join(home, ".config", "enver", "key")
+	return filepath.Join(xdg.ConfigHome(), "enver", "key")
 }
 
 // GenerateKey writes a fresh key cache (random key and salt) to path as JSON
