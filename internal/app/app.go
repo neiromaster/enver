@@ -149,10 +149,11 @@ func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []st
 	return profile, nil
 }
 
-// SaltSource locates the salt, KDF parameters, and a full sample value of the
-// first enc:v3: value, for passphrase recovery when no key is configured. A
-// nil salt means the source holds no encrypted value. Called only on the
-// no-key path, so expensive sources stay idle when a key resolves.
+// SaltSource locates the salt, KDF parameters, and a full sample value of an
+// enc:v3: value the map iteration reaches, for passphrase recovery when no
+// key is configured. A nil salt means the source holds no encrypted value.
+// Called only on the no-key path, so expensive sources stay idle when a key
+// resolves.
 type SaltSource func() (salt []byte, params crypto.Argon2Params, sample string, err error)
 
 // ResolveKeyOrPrompt resolves the decryption key from --key, the ENVER_KEY env
@@ -275,11 +276,12 @@ func osEnvMap() map[string]string {
 	return m
 }
 
-// firstSaltAndSample returns the salt, KDF parameters, and full value of the
-// first enc:v3: value in env, or (nil, crypto.Argon2Params{}, "", nil) when
-// there is none. Values disagreeing on salt or KDF parameters are an error:
-// one passphrase cannot recover two eras, and picking one by map order would
-// make recovery flip between working and failing per run.
+// firstSaltAndSample returns the salt, KDF parameters, and full value of an
+// enc:v3: value the map iteration reaches in env, or
+// (nil, crypto.Argon2Params{}, "", nil) when there is none. Values
+// disagreeing on salt or KDF parameters are an error: one passphrase cannot
+// recover two eras, and picking one by map order would make recovery flip
+// between working and failing per run.
 func firstSaltAndSample(env map[string]string) ([]byte, crypto.Argon2Params, string, error) {
 	var scan crypto.SaltScan
 	for _, v := range env {

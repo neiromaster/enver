@@ -15,9 +15,9 @@ import (
 var ErrAborted = errors.New("aborted")
 
 // CryptScan is what keygen needs to know about the configs' encrypted values:
-// the first enc:v3 salt, its KDF parameters, and the full sample value it
-// came from. Salt is nil when the configs hold no encrypted value; a
-// mixed-era config errors at the source instead.
+// an enc:v3 salt, its KDF parameters, and the full sample value it came from.
+// Salt is nil when the configs hold no encrypted value; a mixed-era config
+// errors at the source instead.
 type CryptScan struct {
 	Salt   []byte
 	Params crypto.Argon2Params
