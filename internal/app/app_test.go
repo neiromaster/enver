@@ -91,7 +91,7 @@ func TestResolveLazyKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enc, err := crypto.EncryptValue("secret-value", key, salt)
+	enc, err := crypto.EncryptValueWithParams("secret-value", key, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestResolveRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	enc, err := crypto.EncryptValue("secret", key, salt)
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestResolveRecoveryWrongPassphrase(t *testing.T) {
 
 	salt := []byte("0123456789abcdef")
 	key, _ := crypto.DeriveKey("right", salt, crypto.CurrentParams)
-	enc, _ := crypto.EncryptValue("secret", key, salt)
+	enc, _ := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},
 	}}
@@ -319,7 +319,7 @@ func TestResolveRecoveryNonInteractive(t *testing.T) {
 
 	salt := []byte("0123456789abcdef")
 	key, _ := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
-	enc, _ := crypto.EncryptValue("secret", key, salt)
+	enc, _ := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},
 	}}
@@ -412,8 +412,8 @@ func TestResolveRecoveryConflictingEras(t *testing.T) {
 	saltB := []byte("fedcba9876543210")
 	keyA, _ := crypto.DeriveKey("hunter2", saltA, crypto.CurrentParams)
 	keyB, _ := crypto.DeriveKey("hunter2", saltB, crypto.CurrentParams)
-	encA, _ := crypto.EncryptValue("a", keyA, saltA)
-	encB, _ := crypto.EncryptValue("b", keyB, saltB)
+	encA, _ := crypto.EncryptValueWithParams("a", keyA, saltA, crypto.CurrentParams)
+	encB, _ := crypto.EncryptValueWithParams("b", keyB, saltB, crypto.CurrentParams)
 	oldPrompt := PromptPassphrase
 	oldInteractive := Interactive
 	PromptPassphrase = func(prompt string) (string, error) { return "hunter2", nil }
