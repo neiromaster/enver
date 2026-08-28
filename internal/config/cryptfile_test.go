@@ -151,3 +151,39 @@ func TestDecryptFileWrongKeyActionableError(t *testing.T) {
 		t.Fatal("a refused decrypt must not rewrite the file")
 	}
 }
+
+func TestCryptPathsRejectNonMappingProfiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles: [a]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := make([]byte, 16)
+	if _, err := EncryptFile(path, key, salt, "", true); err == nil || !strings.Contains(err.Error(), "profiles is not a mapping") {
+		t.Fatalf("encrypt: err=%v, want profiles-not-mapping", err)
+	}
+	if _, err := DecryptFile(path, key, ""); err == nil || !strings.Contains(err.Error(), "profiles is not a mapping") {
+		t.Fatalf("decrypt: err=%v, want profiles-not-mapping", err)
+	}
+	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "profiles is not a mapping") {
+		t.Fatalf("salt scan: err=%v, want profiles-not-mapping", err)
+	}
+}
+
+func TestCryptPathsErrorOnMissingProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := "profiles:\n  a:\n    env:\n      K: v\n"
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	salt := make([]byte, 16)
+	n, err := EncryptFile(path, key, salt, "nosuch", false)
+	if err == nil || !strings.Contains(err.Error(), `profile "nosuch" not found`) {
+		t.Fatalf("encrypt: n=%d err=%v, want not found", n, err)
+	}
+	n, err = DecryptFile(path, key, "nosuch")
+	if err == nil || !strings.Contains(err.Error(), `profile "nosuch" not found`) {
+		t.Fatalf("decrypt: n=%d err=%v, want not found", n, err)
+	}
+}

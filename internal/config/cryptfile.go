@@ -35,6 +35,42 @@ func profilesMapping(body *yaml.Node) *yaml.Node {
 	return body.Content[idx]
 }
 
+// profilesMappingOrError distinguishes an absent profiles key (nil, nil) from
+// a structurally broken one (error), so the crypt paths fail the way readers
+// fail on the same input.
+func profilesMappingOrError(body *yaml.Node, path string) (*yaml.Node, error) {
+	if pm := profilesMapping(body); pm != nil {
+		return pm, nil
+	}
+	if findIndex(body, "profiles") >= 0 {
+		return nil, fmt.Errorf("profiles is not a mapping in %s", path)
+	}
+	return nil, nil
+}
+
+// profileInMapping reports whether pm holds a profile named name.
+func profileInMapping(pm *yaml.Node, name string) bool {
+	for i := 0; i+1 < len(pm.Content); i += 2 {
+		if pm.Content[i].Value == name {
+			return true
+		}
+	}
+	return false
+}
+
+// requireProfile checks the profile filter names an existing profile, so a
+// typo cannot turn into a silent zero-value success. A nil pm (no profiles
+// key at all) fails for any named profile.
+func requireProfile(pm *yaml.Node, profile string) error {
+	if profile == "" {
+		return nil
+	}
+	if pm == nil || !profileInMapping(pm, profile) {
+		return fmt.Errorf("profile %q not found", profile)
+	}
+	return nil
+}
+
 func envMapping(profileNode *yaml.Node) *yaml.Node {
 	idx := findIndex(profileNode, "env")
 	if idx < 0 || profileNode.Content[idx].Kind != yaml.MappingNode {
@@ -113,9 +149,12 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 		return 0, err
 	}
 	body := root.Content[0]
-	pm := profilesMapping(body)
-	if pm == nil {
-		return 0, nil
+	pm, err := profilesMappingOrError(body, path)
+	if err != nil {
+		return 0, err
+	}
+	if err := requireProfile(pm, profile); err != nil {
+		return 0, err
 	}
 	if err := forEachEnvValue(pm, "", crypto.CheckReadable); err != nil {
 		return 0, err
@@ -183,9 +222,12 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 		return 0, err
 	}
 	body := root.Content[0]
-	pm := profilesMapping(body)
-	if pm == nil {
-		return 0, nil
+	pm, err := profilesMappingOrError(body, path)
+	if err != nil {
+		return 0, err
+	}
+	if err := requireProfile(pm, profile); err != nil {
+		return 0, err
 	}
 	if err := forEachEnvValue(pm, "", func(v string) error {
 		if p := crypto.ForeignEncPrefix(v); p != "" {
@@ -257,7 +299,10 @@ func FirstSaltAndSample(path string) (salt []byte, p crypto.Argon2Params, sample
 	if err != nil {
 		return nil, crypto.Argon2Params{}, "", err
 	}
-	pm := profilesMapping(root.Content[0])
+	pm, err := profilesMappingOrError(root.Content[0], path)
+	if err != nil {
+		return nil, crypto.Argon2Params{}, "", err
+	}
 	if pm == nil {
 		return nil, crypto.Argon2Params{}, "", nil
 	}
