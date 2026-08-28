@@ -299,7 +299,8 @@ func ScanCrypt(path string, salts *crypto.SaltScan) error {
 }
 
 // FirstSaltAndSample returns the salt, KDF parameters, and full value of the
-// first enc:v3: value in the config at path, or a nil salt when none exists.
+// first enc:v3: value the map iteration reaches in the config at path, or a
+// nil salt when none exists.
 // Used to recover the salt and params for passphrase key derivation. Foreign
 // enc: values, malformed enc:v3 values, and values disagreeing on salt or
 // params are errors: recovery must not silently pick from what it cannot
