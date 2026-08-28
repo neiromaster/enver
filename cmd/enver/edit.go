@@ -455,10 +455,16 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	path := writeTarget()
-	targetCfg, _ := config.LoadFile(path)
+	targetCfg, err := config.LoadFile(path)
+	if err != nil {
+		return err
+	}
 	pickerCfg := cfg
 	if globalFlags.global {
-		pickerCfg, _ = config.LoadFile(config.GlobalPath(globalFlags.configPath))
+		pickerCfg, err = config.LoadFile(config.GlobalPath(globalFlags.configPath))
+		if err != nil {
+			return err
+		}
 	}
 	name := ""
 	if len(args) > 0 {

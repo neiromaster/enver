@@ -49,7 +49,10 @@ var defaultCmd = &cobra.Command{
 		if err := validateProfileName(name); err != nil {
 			return err
 		}
-		targetCfg, _ := config.LoadFile(path)
+		targetCfg, err := config.LoadFile(path)
+		if err != nil {
+			return err
+		}
 		if _, ok := targetCfg.Profiles[name]; !ok {
 			return notFoundInTarget(name, path)
 		}

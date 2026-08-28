@@ -141,7 +141,10 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	cfgPath := writeTarget()
-	targetCfg, _ := config.LoadFile(cfgPath)
+	targetCfg, err := config.LoadFile(cfgPath)
+	if err != nil {
+		return err
+	}
 	pickerCfg, err := pickerConfig()
 	if err != nil {
 		return err
