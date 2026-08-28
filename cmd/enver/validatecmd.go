@@ -1,8 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -77,14 +78,12 @@ func dedupIssues(issues []config.Issue) []config.Issue {
 	for _, is := range best {
 		out = append(out, is)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		if out[i].Profile != out[j].Profile {
-			return out[i].Profile < out[j].Profile
-		}
-		return out[i].Kind < out[j].Kind
+	slices.SortFunc(out, func(a, b config.Issue) int {
+		return cmp.Or(
+			cmp.Compare(a.File, b.File),
+			cmp.Compare(a.Profile, b.Profile),
+			cmp.Compare(a.Kind, b.Kind),
+		)
 	})
 	return out
 }

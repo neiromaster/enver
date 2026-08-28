@@ -1,10 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -673,7 +673,7 @@ func inheritedEntries(resolved map[string]string, own map[string]string) []ui.En
 			out = append(out, ui.EnvEntry{Key: k, Value: v})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	slices.SortFunc(out, func(a, b ui.EnvEntry) int { return cmp.Compare(a.Key, b.Key) })
 	return out
 }
 
