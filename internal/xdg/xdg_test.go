@@ -1,6 +1,9 @@
 package xdg
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestConfigHomeLadder(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
@@ -9,11 +12,11 @@ func TestConfigHomeLadder(t *testing.T) {
 		t.Fatalf("ConfigHome with XDG set = %q, want /xdg", got)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
-	if got := ConfigHome(); got != "/home/u/.config" {
-		t.Fatalf("ConfigHome fallback = %q, want /home/u/.config", got)
+	if got := ConfigHome(); got != filepath.Join("/home/u", ".config") {
+		t.Fatalf("ConfigHome fallback = %q, want %q", got, filepath.Join("/home/u", ".config"))
 	}
 	t.Setenv("HOME", "")
-	if got := ConfigHome(); got != "/.config" {
-		t.Fatalf("ConfigHome without HOME = %q, want /.config", got)
+	if got := ConfigHome(); got != filepath.Join("/", ".config") {
+		t.Fatalf("ConfigHome without HOME = %q, want %q", got, filepath.Join("/", ".config"))
 	}
 }
