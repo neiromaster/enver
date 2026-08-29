@@ -103,7 +103,7 @@ func TestRunDotenvUnknownProfileError(t *testing.T) {
 func TestWriteDotenvFileCreatesWith0600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.env")
 	var out bytes.Buffer
-	if err := writeDotenvFile(&out, path, []byte("FOO=bar\n"), false, nil, 1); err != nil {
+	if err := writeDotenvFile(&out, path, []byte("FOO=bar\n"), false, nil, 1, 0); err != nil {
 		t.Fatalf("writeDotenvFile: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -139,7 +139,7 @@ func TestWriteDotenvFileOverwriteConfirmed(t *testing.T) {
 		}
 		return true, nil
 	}
-	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, confirm, 1); err != nil {
+	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, confirm, 1, 0); err != nil {
 		t.Fatalf("writeDotenvFile: %v", err)
 	}
 	if !called {
@@ -158,7 +158,7 @@ func TestWriteDotenvFileOverwriteRefused(t *testing.T) {
 	}
 	var out bytes.Buffer
 	refuse := func(string, bool) (bool, error) { return false, nil }
-	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, refuse, 1); err != nil {
+	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, refuse, 1, 0); err != nil {
 		t.Fatalf("refuse should not error: %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -180,7 +180,7 @@ func TestWriteDotenvFileOverwriteNonInteractive(t *testing.T) {
 	}
 	var out bytes.Buffer
 	broken := func(string, bool) (bool, error) { return false, io.EOF }
-	err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, broken, 1)
+	err := writeDotenvFile(&out, path, []byte("NEW=2\n"), false, broken, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "force") {
 		t.Fatalf("non-interactive refusal should error with --force hint, got: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestWriteDotenvFileForceSkipsConfirm(t *testing.T) {
 	var out bytes.Buffer
 	called := false
 	never := func(string, bool) (bool, error) { called = true; return false, nil }
-	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), true, never, 1); err != nil {
+	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), true, never, 1, 0); err != nil {
 		t.Fatalf("writeDotenvFile: %v", err)
 	}
 	if called {
@@ -219,7 +219,7 @@ func TestWriteDotenvFileEnforces0600OnOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), true, nil, 1); err != nil {
+	if err := writeDotenvFile(&out, path, []byte("NEW=2\n"), true, nil, 1, 0); err != nil {
 		t.Fatalf("writeDotenvFile: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -273,5 +273,27 @@ func TestRunDotenvIncludesUnsets(t *testing.T) {
 	}
 	if !strings.Contains(s, "PORT=8080") {
 		t.Errorf("dotenv output lost the live key:\n%s", s)
+	}
+}
+
+// TestWriteDotenvFileCountsUnsetRows pins that the confirmation counts what
+// the document carries: the ", N unset" suffix appears only when tombstone
+// rows were written, so the reported numbers match the file.
+func TestWriteDotenvFileCountsUnsetRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "leaf.env")
+	var out bytes.Buffer
+	if err := writeDotenvFile(&out, path, []byte("B=2\n# A=  # unset by \"mid\"\n"), false, nil, 1, 1); err != nil {
+		t.Fatalf("writeDotenvFile: %v", err)
+	}
+	if !strings.Contains(out.String(), "✓ wrote leaf.env (1 vars, 1 unset)") {
+		t.Errorf("confirmation must count unset rows:\n%s", out.String())
+	}
+
+	var plain bytes.Buffer
+	if err := writeDotenvFile(&plain, filepath.Join(t.TempDir(), "p.env"), []byte("A=1\n"), false, nil, 1, 0); err != nil {
+		t.Fatalf("writeDotenvFile: %v", err)
+	}
+	if s := plain.String(); strings.Contains(s, "unset") {
+		t.Errorf("plain profile confirmation must stay unchanged:\n%s", s)
 	}
 }

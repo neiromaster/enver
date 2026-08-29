@@ -65,15 +65,16 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 		_, err = stdout.Write(out)
 		return err
 	}
-	return writeDotenvFile(stdout, outPath, out, force, confirm, len(r.Env))
+	return writeDotenvFile(stdout, outPath, out, force, confirm, len(r.Env), len(r.Unsets))
 }
 
 // writeDotenvFile writes content to path with mode 0600 (it holds decrypted
 // secrets). If path already exists and force is false, the caller is prompted via
 // confirm; a declined prompt prints "aborted" and returns nil, while a failed
 // prompt (e.g. non-interactive shell) errors with a --force hint. On success, a
-// one-line plaintext confirmation is written to stdout.
-func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, confirm confirmFunc, n int) error {
+// one-line plaintext confirmation is written to stdout, counting the live vars
+// plus the unset rows the document carries.
+func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, confirm confirmFunc, n, nUnset int) error {
 	if !force {
 		if _, err := os.Stat(path); err == nil {
 			ok, cerr := confirm(fmt.Sprintf("Overwrite %s?", path), false)
@@ -91,7 +92,11 @@ func writeDotenvFile(stdout io.Writer, path string, content []byte, force bool, 
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stdout, "✓ wrote %s (%d vars) — secrets stored in plaintext.\n", filepath.Base(path), n); err != nil {
+	count := fmt.Sprintf("%d vars", n)
+	if nUnset > 0 {
+		count += fmt.Sprintf(", %d unset", nUnset)
+	}
+	if _, err := fmt.Fprintf(stdout, "✓ wrote %s (%s) — secrets stored in plaintext.\n", filepath.Base(path), count); err != nil {
 		return err
 	}
 	return nil
