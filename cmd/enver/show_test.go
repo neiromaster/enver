@@ -19,7 +19,7 @@ func TestPrintEnvMasking(t *testing.T) {
 
 	// masked: API_KEY redacted, MODEL shown.
 	var masked bytes.Buffer
-	if err := printEnv(&masked, env, chain, nil, nil, false); err != nil {
+	if err := printEnv(&masked, env, chain, nil, nil, false, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	if !strings.Contains(masked.String(), "len=24") {
@@ -79,7 +79,7 @@ func TestPrintEnvProvenance(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := printEnv(&out, env, chain, sources, nil, false); err != nil {
+	if err := printEnv(&out, env, chain, sources, nil, false, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
@@ -200,7 +200,7 @@ func TestPrintEnvUnsets(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := printEnv(&out, env, chain, sources, unsets, false); err != nil {
+	if err := printEnv(&out, env, chain, sources, unsets, false, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
@@ -250,7 +250,7 @@ func TestPrintEnvLiveBeatsTombstone(t *testing.T) {
 	env := map[string]string{"SECRET": "real-value"}
 	unsets := map[string]config.Source{"SECRET": {Profile: "prod", Layer: "global"}}
 	var out bytes.Buffer
-	if err := printEnv(&out, env, []string{"p"}, nil, unsets, true); err != nil {
+	if err := printEnv(&out, env, []string{"p"}, nil, unsets, true, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
@@ -262,5 +262,59 @@ func TestPrintEnvLiveBeatsTombstone(t *testing.T) {
 	}
 	if strings.Contains(s, "unset by") {
 		t.Errorf("tombstone survived a live key:\n%s", s)
+	}
+}
+
+// TestPrintEnvColor pins the styling contract of the colored text output:
+// keys are bold, every comment (header, provenance suffix, tombstone rows)
+// is dim, and values stay plain so they read and copy cleanly.
+func TestPrintEnvColor(t *testing.T) {
+	const (
+		ansiBold  = "\x1b[1m"
+		ansiDim   = "\x1b[2m"
+		ansiReset = "\x1b[m"
+	)
+	env := map[string]string{"API_KEY": "sk-ant-secret"}
+	chain := []string{"dev", "anth"}
+	sources := map[string]config.Source{"API_KEY": {Profile: "dev", Layer: "local"}}
+	unsets := map[string]config.Source{"LEGACY_URL": {Profile: "anth", Layer: "local"}}
+
+	var out bytes.Buffer
+	if err := printEnv(&out, env, chain, sources, unsets, true, true); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	s := out.String()
+	for name, want := range map[string]string{
+		"header":    ansiDim + "# profile: dev → anth" + ansiReset,
+		"live row":  ansiBold + "API_KEY" + ansiReset + "=sk-ant-secret  " + ansiDim + "# from dev (local)" + ansiReset,
+		"tombstone": ansiDim + `# LEGACY_URL — unset by "anth"` + ansiReset,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("colored output missing %s row:\nwant %q\ngot  %q", name, want, s)
+		}
+	}
+}
+
+// TestColorEnabled pins the color gate: styling is emitted only onto a
+// terminal, and never under NO_COLOR (https://no-color.org, empty string
+// counts as absent).
+func TestColorEnabled(t *testing.T) {
+	orig := stdoutIsTTY
+	t.Cleanup(func() { stdoutIsTTY = orig })
+
+	t.Setenv("NO_COLOR", "")
+	stdoutIsTTY = func() bool { return true }
+	if !colorEnabled() {
+		t.Error("empty NO_COLOR on a TTY must keep color enabled")
+	}
+
+	t.Setenv("NO_COLOR", "1")
+	if colorEnabled() {
+		t.Error("NO_COLOR set but colorEnabled() = true")
+	}
+
+	stdoutIsTTY = func() bool { return false }
+	if colorEnabled() {
+		t.Error("stdout is not a TTY but colorEnabled() = true")
 	}
 }

@@ -5,14 +5,37 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"strings"
+
+	"charm.land/lipgloss/v2"
+	"golang.org/x/term"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/envname"
 	"github.com/spf13/cobra"
 )
+
+// showStyles mirror the internal/ui theme: comments fade back, keys carry the
+// emphasis. Values stay plain so they read and copy cleanly.
+var (
+	dimStyle  = lipgloss.NewStyle().Faint(true)
+	boldStyle = lipgloss.NewStyle().Bold(true)
+)
+
+// stdoutIsTTY is a var so tests can force the colored path without a pty.
+var stdoutIsTTY = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// colorEnabled reports whether printEnv may emit ANSI styling: only onto a
+// terminal, and never under NO_COLOR (https://no-color.org, empty counts as
+// absent).
+func colorEnabled() bool {
+	return stdoutIsTTY() && os.Getenv("NO_COLOR") == ""
+}
 
 var showCmd = &cobra.Command{
 	Use:               "show [profile]",
@@ -30,7 +53,7 @@ var showCmd = &cobra.Command{
 		}
 		switch showFormat {
 		case "text":
-			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, r.Unsets, showNoMask)
+			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, r.Unsets, showNoMask, colorEnabled())
 		case "json":
 			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
 		default:
@@ -85,15 +108,22 @@ func init() {
 // comment rows (`# KEY — unset by "anth"`), mirroring the dotenv export: the
 // deliberately absent variables stay visible next to the live ones. A live
 // key wins its row — Resolved keeps env and unsets disjoint, and the sorted
-// union collapses any violation rather than rendering it.
-func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, unmasked bool) error {
-	if _, err := fmt.Fprintf(w, "# profile: %s\n", strings.Join(chain, " → ")); err != nil {
+// union collapses any violation rather than rendering it. With color set,
+// keys render bold and every comment (header, provenance suffix, tombstones)
+// renders dim; the caller gates on TTY and NO_COLOR so pipes stay clean.
+func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, unmasked, color bool) error {
+	dim, bold := plain, plain
+	if color {
+		dim = func(s string) string { return dimStyle.Render(s) }
+		bold = func(s string) string { return boldStyle.Render(s) }
+	}
+	if _, err := fmt.Fprintln(w, dim("# profile: "+strings.Join(chain, " → "))); err != nil {
 		return err
 	}
 	for _, k := range envname.SortedUnion(env, unsets) {
 		v, live := env[k]
 		if !live {
-			if _, err := fmt.Fprintf(w, "# %s — unset by %q\n", k, unsets[k].Profile); err != nil {
+			if _, err := fmt.Fprintln(w, dim(fmt.Sprintf("# %s — unset by %q", k, unsets[k].Profile))); err != nil {
 				return err
 			}
 			continue
@@ -102,17 +132,20 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 			v = config.MaskValue(k, v)
 		}
 		if s, ok := sources[k]; ok {
-			if _, err := fmt.Fprintf(w, "%s=%s  # from %s (%s)\n", k, v, s.Profile, s.Layer); err != nil {
+			line := bold(k) + "=" + v + "  " + dim(fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer))
+			if _, err := fmt.Fprintln(w, line); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(w, "%s=%s\n", k, v); err != nil {
+		if _, err := fmt.Fprintf(w, "%s=%s\n", bold(k), v); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+func plain(s string) string { return s }
 
 // showJSON is the machine-readable shape of `enver show --format json`.
 type showJSON struct {
