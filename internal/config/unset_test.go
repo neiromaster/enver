@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/neiromaster/enver/internal/envname"
 )
 
 func TestResolveUnsetRemovesInheritedKey(t *testing.T) {
@@ -449,5 +451,130 @@ unset: [K2, K1, K2]
 	want := Unsets{"K2", "K1"}
 	if !slices.Equal(p.Unset, want) {
 		t.Fatalf("unset after load = %v, want %v (first occurrence kept, repeats dropped)", p.Unset, want)
+	}
+}
+
+func TestResolveUnsetsReportOwnUnset(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"API_KEY": "base", "MODEL": "m"}},
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"API_KEY"}},
+	}}
+	r, err := cfg.ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := r.Unsets["API_KEY"]; s != (Source{Profile: "bare", Layer: LayerGlobal}) {
+		t.Fatalf("API_KEY unset source = %+v, want {bare global}", s)
+	}
+	if envname.Has(r.Unsets, "MODEL") {
+		t.Fatalf("MODEL reported unset: %v", r.Unsets)
+	}
+}
+
+func TestResolveUnsetsDeclaredRidesWithoutVictim(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{"p": {Unset: Unsets{"GHOST"}}}}
+	r, err := cfg.ResolveProfile("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := r.Unsets["GHOST"]; s != (Source{Profile: "p", Layer: LayerGlobal}) {
+		t.Fatalf("GHOST unset source = %+v, want {p global} — declared intent rides without a victim", s)
+	}
+}
+
+func TestResolveUnsetsCloserRedefinitionClears(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"A": "base"}},
+		"mid":  {Extends: Extends{"base"}, Unset: Unsets{"A"}},
+		"leaf": {Extends: Extends{"mid"}, Env: map[string]string{"A": "child"}},
+	}}
+	r, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envname.Has(r.Unsets, "A") {
+		t.Fatalf("A reported unset after closer redefinition: %v", r.Unsets)
+	}
+}
+
+func TestResolveUnsetsSiblingDefineLeavesNoTombstone(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"a": {Env: map[string]string{"K": "v"}},
+		"b": {Extends: Extends{"a"}, Unset: Unsets{"K"}},
+	}}
+	solo, err := cfg.ResolveProfile("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := solo.Unsets["K"]; s != (Source{Profile: "b", Layer: LayerGlobal}) {
+		t.Fatalf("solo b Unsets[K] = %+v, want {b global}", s)
+	}
+	for _, parents := range []Extends{{"a", "b"}, {"b", "a"}} {
+		child := Config{Profiles: map[string]Profile{"c": {Extends: parents}}}
+		for name, p := range cfg.Profiles {
+			child.Profiles[name] = p
+		}
+		r, err := child.ResolveProfile("c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if envname.Has(r.Unsets, "K") {
+			t.Fatalf("extends %v: K reported unset while defined: %v", parents, r.Unsets)
+		}
+	}
+}
+
+func TestResolveUnsetsAncestorAttribution(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"root": {Env: map[string]string{"A": "1", "B": "1"}},
+		"mid":  {Extends: Extends{"root"}, Unset: Unsets{"A"}},
+		"leaf": {Extends: Extends{"mid"}},
+	}}
+	r, err := cfg.ResolveProfile("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := r.Unsets["A"]; s != (Source{Profile: "mid", Layer: LayerGlobal}) {
+		t.Fatalf("A unset source = %+v, want {mid global} — the unsetting ancestor is named", s)
+	}
+}
+
+func TestResolveUnsetsCarriedFenceReportsAndSilences(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"ANTHROPIC_API_KEY": "k", "MODEL": "m"}},
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"ANTHROPIC_API_KEY"}},
+	}}
+	stripped, err := Merge(global, Config{Profiles: map[string]Profile{
+		"bare": {Env: map[string]string{"MODEL": "lm"}},
+	}}).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := stripped.Unsets["ANTHROPIC_API_KEY"]; s != (Source{Profile: "bare", Layer: LayerGlobal}) {
+		t.Fatalf("carried strip source = %+v, want {bare global}", s)
+	}
+	silenced, err := Merge(global, Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"ANTHROPIC_API_KEY": "l"}},
+	}}).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envname.Has(silenced.Unsets, "ANTHROPIC_API_KEY") {
+		t.Fatalf("later-era refill reported unset: %v", silenced.Unsets)
+	}
+}
+
+func TestResolveUnsetsLayerAttribution(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"A"}}}}
+	local := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"B"}}}}
+	r, err := Merge(global, local).ResolveProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := r.Unsets["A"]; s != (Source{Profile: "dev", Layer: LayerGlobal}) {
+		t.Fatalf("A unset source = %+v, want {dev global}", s)
+	}
+	if s := r.Unsets["B"]; s != (Source{Profile: "dev", Layer: LayerLocal}) {
+		t.Fatalf("B unset source = %+v, want {dev local}", s)
 	}
 }

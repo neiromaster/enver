@@ -5,6 +5,20 @@ and unmasked, per-key comments preserved — and `enver import` reads one back
 into a profile. They round-trip: hand a profile to any tool that expects
 `.env`, then bring the result back.
 
+Keys the chain deliberately excludes render as commented-out assignments,
+interleaved in the same sort as the live keys, each naming the profile that
+unset it:
+
+```dotenv
+API_URL=https://api.example.com
+# DEBUG=  # unset by "prod"
+PORT=8080
+```
+
+Consumers ignore the comments; curators see the variable is absent on
+purpose. The same tombstones appear in `show` (`# DEBUG — unset by "prod"`,
+and an `unsets` map in `--format json`).
+
 ```sh
 enver dotenv prod -o prod.env          # export profile prod to prod.env
 enver import prod.env staging          # import into a new profile (merged)

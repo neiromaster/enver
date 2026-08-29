@@ -245,3 +245,33 @@ func TestRunDotenvDoesNotExpand(t *testing.T) {
 		t.Errorf("dotenv should not expand $HOST; got:\n%s", out.String())
 	}
 }
+
+// TestRunDotenvIncludesUnsets pins the wiring end to end: the command feeds
+// the resolved tombstones into Format, so the produced document carries the
+// commented unset rows with their attribution.
+func TestRunDotenvIncludesUnsets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.WriteProfile(path, "base", config.Profile{Env: map[string]string{"DEBUG": "0", "PORT": "9000"}}, false, false); err != nil {
+		t.Fatalf("WriteProfile base: %v", err)
+	}
+	if err := config.WriteProfile(path, "prod", config.Profile{
+		Extends: config.Extends{"base"},
+		Unset:   config.Unsets{"DEBUG"},
+		Env:     map[string]string{"PORT": "8080"},
+	}, true, false); err != nil {
+		t.Fatalf("WriteProfile prod: %v", err)
+	}
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := runDotenv(&out, "prod", "", false, false, nil); err != nil {
+		t.Fatalf("runDotenv: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "# DEBUG=  # unset by \"prod\"") {
+		t.Errorf("dotenv output missing commented unset:\n%s", s)
+	}
+	if !strings.Contains(s, "PORT=8080") {
+		t.Errorf("dotenv output lost the live key:\n%s", s)
+	}
+}

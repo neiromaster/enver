@@ -337,12 +337,18 @@ type Source struct {
 
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
-// per-key source provenance, and the self-first lineage chain.
+// per-key source provenance, the unset tombstones, and the self-first lineage
+// chain.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
 	Sources  map[string]Source
-	Chain    []string
+	// Unsets reports the keys deliberately absent from Env, each attributed to
+	// the profile whose unset last removed (or declared) it. A closer
+	// redefinition clears the tombstone; a tombstone never coexists with a
+	// live key.
+	Unsets map[string]Source
+	Chain  []string
 }
 
 // ResolveProfile resolves name: each parent is resolved transitively and
@@ -355,7 +361,9 @@ type Resolved struct {
 // keys are dropped from the env (and comments) after the profile's own fold,
 // so the closest mention of a key wins: a profile's own unset strips a
 // parent's definition, and a closer redefinition overrides an ancestor's
-// unset.
+// unset. Every key the chain deliberately absent — declared unsets with or
+// without a victim, carried fences — is reported in Unsets with the
+// unsetting profile and layer; a key back in play holds no tombstone.
 func (c Config) ResolveProfile(name string) (Resolved, error) {
 	f, err := c.resolveEnv(name, map[string]bool{})
 	if err != nil {
@@ -365,6 +373,7 @@ func (c Config) ResolveProfile(name string) (Resolved, error) {
 		Env:      f.env,
 		Comments: f.comments,
 		Sources:  f.sources,
+		Unsets:   f.unsets,
 		Chain:    c.chainOf(name, map[string]bool{}),
 	}, nil
 }
@@ -374,17 +383,22 @@ type envFold struct {
 	env      map[string]string
 	comments map[string]string
 	sources  map[string]Source
+	unsets   map[string]Source
 }
 
-// resolveEnv returns the fully merged env, comments, and sources for name:
-// each parent is resolved transitively and merged left-to-right, then name's
-// own entries are applied last (child wins; comments only when the definer
-// carries one). Name's own unsets are applied after its own env, so the
-// closest mention of a key wins: a profile's own unset strips a parent's
-// definition, and a closer redefinition overrides an ancestor's unset. The
-// visiting set tracks the active path so a cycle (self, mutual, or across
-// multiple parents) is detected; a name is removed from it on the way back
-// up so a diamond is not mistaken for a cycle.
+// resolveEnv returns the fully merged env, comments, sources, and unset
+// tombstones for name: each parent is resolved transitively and merged
+// left-to-right, then name's own entries are applied last (child wins;
+// comments only when the definer carries one). Name's own unsets are applied
+// after its own env, so the closest mention of a key wins: a profile's own
+// unset strips a parent's definition, and a closer redefinition overrides an
+// ancestor's unset. Tombstones follow the env: setting a key clears its
+// tombstone, an unset (declared or carried) records one attributed to the
+// unsetting profile, and the final sweep drops any tombstone whose key a
+// sibling parent's define kept alive. The visiting set tracks the active
+// path so a cycle (self, mutual, or across multiple parents) is detected; a
+// name is removed from it on the way back up so a diamond is not mistaken
+// for a cycle.
 func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
 		return envFold{}, fmt.Errorf("%w at %q", ErrExtendsCycle, name)
@@ -398,6 +412,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	out.env = map[string]string{}
 	out.comments = map[string]string{}
 	out.sources = map[string]Source{}
+	out.unsets = map[string]Source{}
 	for _, parent := range p.Extends {
 		pf, err := c.resolveEnv(parent, visiting)
 		if err != nil {
@@ -405,6 +420,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		}
 		for k, v := range pf.env {
 			envname.Set(out.env, k, v)
+			envname.Delete(out.unsets, k)
 		}
 		for k, v := range pf.comments {
 			envname.Set(out.comments, k, v)
@@ -412,11 +428,17 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		for k, v := range pf.sources {
 			envname.Set(out.sources, k, v)
 		}
+		for k, v := range pf.unsets {
+			envname.Set(out.unsets, k, v)
+		}
 	}
 	delete(visiting, name)
 	// Carried earlier-era fences act between the inherited contributions and
 	// this profile's own entries: they strip what the earlier layer supplied,
-	// and go silent the moment a later-era mention owns the key.
+	// and go silent the moment a later-era mention owns the key. Every
+	// unsilenced fence reports a tombstone attributed to this profile at the
+	// earlier layer: a fence with no victim alive still carries that layer's
+	// declared intent.
 	for _, u := range p.Carried {
 		if s, ok := envname.Get(out.sources, u); ok && s.Layer == LayerLocal {
 			continue
@@ -424,6 +446,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		envname.Delete(out.env, u)
 		envname.Delete(out.comments, u)
 		envname.Delete(out.sources, u)
+		envname.Set(out.unsets, u, Source{Profile: name, Layer: LayerGlobal})
 	}
 	// Own entries apply last (child wins). Sorted so a hand-authored
 	// case-variant pair (PATH and path in one env block) resolves
@@ -432,6 +455,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
 		envname.Set(out.env, k, p.Env[k])
 		envname.Set(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
+		envname.Delete(out.unsets, k)
 	}
 	for _, k := range slices.Sorted(maps.Keys(p.Comments)) {
 		if cc := p.Comments[k]; cc != "" {
@@ -441,11 +465,21 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// Own unsets apply last, stripping only this profile's own fence: a key
 	// this profile unsets is removed even if a parent defined it (closest
 	// mention wins), while a parent's unset does not survive a closer
-	// redefinition here.
+	// redefinition here. Every declared entry reports a tombstone, with or
+	// without a victim: the list is the profile's stated intent.
 	for _, u := range p.Unset {
 		envname.Delete(out.env, u)
 		envname.Delete(out.comments, u)
 		envname.Delete(out.sources, u)
+		envname.Set(out.unsets, u, Source{Profile: name, Layer: c.unsetLayer(name, u)})
+	}
+	// A tombstone never coexists with a live key: a sibling parent's define
+	// can land after the sibling unset it stripped nothing against, so the
+	// final sweep drops stale entries.
+	for k := range out.unsets {
+		if envname.Has(out.env, k) {
+			envname.Delete(out.unsets, k)
+		}
 	}
 	return out, nil
 }

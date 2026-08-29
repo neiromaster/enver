@@ -19,7 +19,7 @@ func TestPrintEnvMasking(t *testing.T) {
 
 	// masked: API_KEY redacted, MODEL shown.
 	var masked bytes.Buffer
-	if err := printEnv(&masked, env, chain, nil, false); err != nil {
+	if err := printEnv(&masked, env, chain, nil, nil, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	if !strings.Contains(masked.String(), "len=24") {
@@ -41,7 +41,7 @@ func TestPrintEnvJSON(t *testing.T) {
 	chain := []string{"anth"}
 
 	var out bytes.Buffer
-	if err := printEnvJSON(&out, "anth", chain, env, nil); err != nil {
+	if err := printEnvJSON(&out, "anth", chain, env, nil, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -79,7 +79,7 @@ func TestPrintEnvProvenance(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := printEnv(&out, env, chain, sources, false); err != nil {
+	if err := printEnv(&out, env, chain, sources, nil, false); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
@@ -94,7 +94,7 @@ func TestPrintEnvProvenance(t *testing.T) {
 	}
 
 	var jout bytes.Buffer
-	if err := printEnvJSON(&jout, "dev", chain, env, sources); err != nil {
+	if err := printEnvJSON(&jout, "dev", chain, env, sources, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -185,5 +185,64 @@ func TestPrintExportOmitsUnsetKeys(t *testing.T) {
 	}
 	if !strings.Contains(s, "export API_KEY='sk-ant-secret'") {
 		t.Errorf("bash export lost the assignment:\n%s", s)
+	}
+}
+
+// TestPrintEnvUnsets pins the tombstone rows: text output interleaves a
+// comment line naming the unsetting profile, and JSON carries a structured
+// unsets map mirroring sources.
+func TestPrintEnvUnsets(t *testing.T) {
+	env := map[string]string{"API_KEY": "sk-ant-secret", "PORT": "8080"}
+	chain := []string{"prod", "base"}
+	sources := map[string]config.Source{"PORT": {Profile: "base", Layer: "global"}}
+	unsets := map[string]config.Source{
+		"API_KEY": {Profile: "base", Layer: "global"},
+		"TRACE":   {Profile: "prod", Layer: "local"},
+	}
+
+	var out bytes.Buffer
+	if err := printEnv(&out, env, chain, sources, unsets, false); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "# API_KEY — unset by \"base\"") {
+		t.Errorf("text output missing API_KEY tombstone row:\n%s", s)
+	}
+	if !strings.Contains(s, "# TRACE — unset by \"prod\"") {
+		t.Errorf("text output missing TRACE tombstone row:\n%s", s)
+	}
+	if !strings.Contains(s, "PORT=8080") {
+		t.Errorf("text output lost the live key:\n%s", s)
+	}
+	if strings.Contains(s, "API_KEY=") && !strings.Contains(s, "sk-ant-secret") {
+		t.Errorf("tombstone row must carry no value:\n%s", s)
+	}
+
+	var jout bytes.Buffer
+	if err := printEnvJSON(&jout, "prod", chain, env, sources, unsets); err != nil {
+		t.Fatalf("printEnvJSON: %v", err)
+	}
+	var got showJSON
+	if err := json.Unmarshal(jout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, jout.String())
+	}
+	if got.Unsets["API_KEY"] != unsets["API_KEY"] {
+		t.Errorf("JSON unsets API_KEY = %+v, want %+v", got.Unsets["API_KEY"], unsets["API_KEY"])
+	}
+	if got.Unsets["TRACE"].Profile != "prod" {
+		t.Errorf("JSON unsets TRACE = %+v, want prod", got.Unsets["TRACE"])
+	}
+}
+
+// TestPrintEnvJSONOmitsEmptyUnsets pins the additive contract: a profile with
+// no unsets produces no "unsets" key at all, so existing JSON consumers see
+// byte-identical output.
+func TestPrintEnvJSONOmitsEmptyUnsets(t *testing.T) {
+	var out bytes.Buffer
+	if err := printEnvJSON(&out, "p", []string{"p"}, map[string]string{"A": "1"}, nil, nil); err != nil {
+		t.Fatalf("printEnvJSON: %v", err)
+	}
+	if strings.Contains(out.String(), "unsets") {
+		t.Errorf("empty unsets must not appear in JSON:\n%s", out.String())
 	}
 }

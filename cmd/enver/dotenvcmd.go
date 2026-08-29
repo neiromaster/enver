@@ -55,7 +55,11 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 		return err
 	}
 
-	out := dotenv.Format(r.Env, r.Comments, dotenv.Options{Header: !noHeader, Profile: profile, Chain: r.Chain})
+	attribution := make(map[string]string, len(r.Unsets))
+	for k, s := range r.Unsets {
+		attribution[k] = s.Profile
+	}
+	out := dotenv.Format(r.Env, r.Comments, attribution, dotenv.Options{Header: !noHeader, Profile: profile, Chain: r.Chain})
 
 	if outPath == "" {
 		_, err = stdout.Write(out)

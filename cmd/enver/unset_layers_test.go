@@ -83,7 +83,11 @@ func TestUnsetLayersShowMatrix(t *testing.T) {
 			global:  fencedGlobal,
 			local:   "profiles:\n  bare:\n    env:\n      THEME: sunset\n",
 			profile: "bare",
-			want:    []string{"# profile: bare → anth", "THEME=sunset  # from bare (local)"},
+			want: []string{
+				"# profile: bare → anth",
+				"# EDITOR — unset by \"bare\"",
+				"THEME=sunset  # from bare (local)",
+			},
 		},
 		{
 			name:    "later-era refill through the ancestor outruns the earlier fence",
@@ -101,14 +105,20 @@ func TestUnsetLayersShowMatrix(t *testing.T) {
 			global:  selfFenceGlobal,
 			local:   "profiles:\n  foo:\n    env:\n      X: '1'\n",
 			profile: "bare",
-			want:    []string{"# profile: bare → anth"},
+			want: []string{
+				"# profile: bare → anth",
+				"# THEME — unset by \"bare\"",
+			},
 		},
 		{
 			name:    "unmerged single-file self-fence matches the merged view",
 			global:  selfFenceGlobal,
 			local:   "",
 			profile: "bare",
-			want:    []string{"# profile: bare → anth"},
+			want: []string{
+				"# profile: bare → anth",
+				"# THEME — unset by \"bare\"",
+			},
 		},
 		{
 			name: "sibling parent supplies fresh values past the other branch fence",

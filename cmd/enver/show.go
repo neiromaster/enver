@@ -29,9 +29,9 @@ var showCmd = &cobra.Command{
 		}
 		switch showFormat {
 		case "text":
-			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, showNoMask)
+			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, r.Unsets, showNoMask)
 		case "json":
-			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources)
+			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
 		default:
 			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
 		}
@@ -80,12 +80,28 @@ func init() {
 // printEnv writes the resolved env to w as `K=V`, masked unless unmasked. When
 // provenance is present, each line is annotated with the defining profile and
 // layer (`# from anth (global)`) so the chain header stays a summary and the
-// per-key winner is debuggable.
-func printEnv(w io.Writer, env map[string]string, chain []string, sources map[string]config.Source, unmasked bool) error {
+// per-key winner is debuggable. Unset keys interleave in the same sort as
+// comment rows (`# KEY — unset by "anth"`), mirroring the dotenv export: the
+// deliberately absent variables stay visible next to the live ones.
+func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, unmasked bool) error {
 	if _, err := fmt.Fprintf(w, "# profile: %s\n", strings.Join(chain, " → ")); err != nil {
 		return err
 	}
-	for _, k := range slices.Sorted(maps.Keys(env)) {
+	keys := make([]string, 0, len(env)+len(unsets))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	for k := range unsets {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if u, ok := unsets[k]; ok {
+			if _, err := fmt.Fprintf(w, "# %s — unset by %q\n", k, u.Profile); err != nil {
+				return err
+			}
+			continue
+		}
 		v := env[k]
 		if !unmasked {
 			v = config.MaskValue(k, v)
@@ -109,15 +125,18 @@ type showJSON struct {
 	Chain   []string                 `json:"chain"`
 	Env     map[string]string        `json:"env"`
 	Sources map[string]config.Source `json:"sources,omitempty"`
+	Unsets  map[string]config.Source `json:"unsets,omitempty"`
 }
 
 // printEnvJSON writes the resolved env as JSON, always unmasked: JSON is a
 // machine contract (export, piping to tools), so masking would corrupt the
-// values a consumer reads back. Provenance rides along per key.
-func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, sources map[string]config.Source) error {
+// values a consumer reads back. Provenance rides along per key, as do the
+// unset tombstones — omitted entirely when there are none, so profiles
+// without unsets keep their previous shape.
+func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, sources, unsets map[string]config.Source) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: env, Sources: sources})
+	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: env, Sources: sources, Unsets: unsets})
 }
 
 // printExport writes the resolved env as shell assignments for eval. Unset
