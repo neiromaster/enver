@@ -47,6 +47,13 @@ func (u *Unsets) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// CarriedFence is one inherited unset riding in Profile.Carried: the env key
+// the fence removes and the layer whose copy of the profile declared it.
+type CarriedFence struct {
+	Key   string
+	Layer string
+}
+
 // decodeNameList normalizes a YAML scalar or sequence into a name slice; any
 // other node shape is an error naming the field. A mapping (unset: {FOO:
 // reason}) must not silently disable the field it was meant to configure.

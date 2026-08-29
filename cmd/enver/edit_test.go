@@ -539,7 +539,7 @@ func TestListedInheritedSurvivesCarriedFence(t *testing.T) {
 	// clears only Unset still strips through Carried and the row never appears.
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"a": {Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
-			Carried: config.Unsets{"FROM_BASE"}},
+			Carried: []config.CarriedFence{{Key: "FROM_BASE", Layer: config.LayerGlobal}}},
 		"base": {Env: map[string]string{"FROM_BASE": "b", "LIVE": "l"}},
 	}}
 	s := newEditState("a", cfg.Profiles["a"], nil, false)
@@ -554,7 +554,7 @@ func TestListedInheritedSurvivesCarriedFence(t *testing.T) {
 func TestOverrideKeySetSurvivesCarriedFence(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"a": {Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine"},
-			Carried: config.Unsets{"SHADOW"}},
+			Carried: []config.CarriedFence{{Key: "SHADOW", Layer: config.LayerGlobal}}},
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
 	s := newEditState("a", cfg.Profiles["a"], nil, false)

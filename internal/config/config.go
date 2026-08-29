@@ -24,11 +24,13 @@ type Profile struct {
 	Extends Extends `yaml:"extends"`
 	Unset   Unsets  `yaml:"unset"` // env keys enver must not set in the resolved env
 	// Carried holds earlier-layer fences whose targets arrive only through
-	// extends ancestors, so Merge could not consume them in place. resolveEnv
-	// applies them between the inherited fold and the profile's own entries,
-	// going silent when the winning mention already belongs to the later
-	// layer. Never serialized; always empty for load-built profiles.
-	Carried  Unsets            `yaml:"-"`
+	// extends ancestors, so Merge could not consume them in place. Each fence
+	// records the layer whose copy declared it, so resolveEnv can attribute
+	// the tombstone it reports. resolveEnv applies the fences between the
+	// inherited fold and the profile's own entries, going silent when the
+	// winning mention already belongs to the later layer. Never serialized;
+	// always empty for load-built profiles.
+	Carried  []CarriedFence    `yaml:"-"`
 	Env      map[string]string `yaml:"env"`
 	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
 }
@@ -198,7 +200,7 @@ func Merge(base, override Config) Config {
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
-		splitUnsets(&bp, p.Unset)
+		splitUnsets(&bp, p.Unset, base.UnsetOrigins[name])
 		for _, u := range p.Unset {
 			if out.UnsetOrigins == nil {
 				out.UnsetOrigins = map[string]map[string]string{}
@@ -243,7 +245,7 @@ func Merge(base, override Config) Config {
 			continue
 		}
 		bp := out.Profiles[name]
-		splitUnsets(&bp, nil)
+		splitUnsets(&bp, nil, base.UnsetOrigins[name])
 		out.Profiles[name] = bp
 	}
 	return out
@@ -280,18 +282,37 @@ func cloneProvenance(in map[string]map[string]string) map[string]map[string]stri
 // splitUnsets sheds the inherited copy's era in favor of the overriding one:
 // every inherited declared fence rides forward in Carried for era-gated
 // application at resolve time (so an ancestor's value cannot resurface just
-// because a local file exists), and a fence whose target sits in this copy's
-// own env additionally drops that entry right at the fold — leaving it would
+// because a local file exists), stamped with the layer that declared it — the
+// unset provenance of the config whose copy the fences leave, global where
+// nothing is recorded — and a fence whose target sits in this copy's own env
+// additionally drops that entry right at the fold — leaving it would
 // resurrect the value through the own-env overlay.
-func splitUnsets(bp *Profile, fresh Unsets) {
+func splitUnsets(bp *Profile, fresh Unsets, inheritedOrigins map[string]string) {
 	for _, u := range bp.Unset {
-		bp.Carried = appendUniq(bp.Carried, u)
+		layer := LayerGlobal
+		if l, ok := envname.Get(inheritedOrigins, u); ok {
+			layer = l
+		}
+		bp.Carried = carryFence(bp.Carried, CarriedFence{Key: u, Layer: layer})
 		if envname.Has(bp.Env, u) {
 			envname.Delete(bp.Env, u)
 			envname.Delete(bp.Comments, u)
 		}
 	}
 	bp.Unset = slices.Clone(fresh)
+}
+
+// carryFence records a moved unset in Carried, replacing any existing fence
+// for the same key (case-variants too on Windows): a later layer's
+// re-declaration supersedes the earlier one's attribution.
+func carryFence(dst []CarriedFence, f CarriedFence) []CarriedFence {
+	for i := range dst {
+		if envname.Equal(dst[i].Key, f.Key) {
+			dst[i] = f
+			return dst
+		}
+	}
+	return append(dst, f)
 }
 
 // mergeExtends concatenates base and add, deduplicated byte-exactly: profile
@@ -437,16 +458,16 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// this profile's own entries: they strip what the earlier layer supplied,
 	// and go silent the moment a later-era mention owns the key. Every
 	// unsilenced fence reports a tombstone attributed to this profile at the
-	// earlier layer: a fence with no victim alive still carries that layer's
-	// declared intent.
+	// layer whose copy declared the fence: a fence with no victim alive still
+	// carries that declaration's intent.
 	for _, u := range p.Carried {
-		if s, ok := envname.Get(out.sources, u); ok && s.Layer == LayerLocal {
+		if s, ok := envname.Get(out.sources, u.Key); ok && s.Layer == LayerLocal {
 			continue
 		}
-		envname.Delete(out.env, u)
-		envname.Delete(out.comments, u)
-		envname.Delete(out.sources, u)
-		envname.Set(out.unsets, u, Source{Profile: name, Layer: LayerGlobal})
+		envname.Delete(out.env, u.Key)
+		envname.Delete(out.comments, u.Key)
+		envname.Delete(out.sources, u.Key)
+		envname.Set(out.unsets, u.Key, Source{Profile: name, Layer: u.Layer})
 	}
 	// Own entries apply last (child wins). Sorted so a hand-authored
 	// case-variant pair (PATH and path in one env block) resolves

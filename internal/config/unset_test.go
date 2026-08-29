@@ -578,3 +578,30 @@ func TestResolveUnsetsLayerAttribution(t *testing.T) {
 		t.Fatalf("B unset source = %+v, want {dev local}", s)
 	}
 }
+
+// TestMergeChainedCarriedFenceAttribution pins fence layer stamping across
+// chained merges: a fence the middle layer declared moves to Carried with
+// that layer recorded, so resolution attributes the tombstone to local —
+// not to the single-merge global default.
+func TestMergeChainedCarriedFenceAttribution(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"anth": {Env: map[string]string{"KEY": "g", "MODEL": "m"}},
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"KEY"}},
+	}}
+	mid := Config{Profiles: map[string]Profile{
+		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"KEY"}, Env: map[string]string{"MODEL": "l1"}},
+	}}
+	tail := Config{Profiles: map[string]Profile{
+		"bare": {Env: map[string]string{"OTHER": "l2"}},
+	}}
+	r, err := Merge(Merge(global, mid), tail).ResolveProfile("bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env["KEY"]; ok {
+		t.Fatalf("fenced key survived the chained merge: %v", r.Env)
+	}
+	if s := r.Unsets["KEY"]; s != (Source{Profile: "bare", Layer: LayerLocal}) {
+		t.Fatalf("KEY unset source = %+v, want {bare local} — the middle layer declared the fence", s)
+	}
+}
