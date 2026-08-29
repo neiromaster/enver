@@ -6,6 +6,7 @@ package envname
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -93,6 +94,25 @@ func MatchesAny(list []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// SortedUnion returns the keys present in either map, sorted, each exact
+// spelling once. The display renderers union their live and unset key sets
+// with it; Resolved keeps those maps Equal-disjoint, so a duplicated spelling
+// can only appear if that invariant is broken — collapsed here instead of
+// rendered twice.
+func SortedUnion[V, W any](a map[string]V, b map[string]W) []string {
+	out := make([]string, 0, len(a)+len(b))
+	for k := range a {
+		out = append(out, k)
+	}
+	for k := range b {
+		if _, dup := a[k]; !dup {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Valid reports whether k is a name enver accepts for an env key or an unset

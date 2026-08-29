@@ -1,6 +1,7 @@
 package envname
 
 import (
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -131,3 +132,17 @@ func TestSetAndDeleteAreShapeGeneric(t *testing.T) {
 }
 
 type source struct{ Layer string }
+
+func TestSortedUnion(t *testing.T) {
+	got := SortedUnion(
+		map[string]string{"B": "2", "A": "1"},
+		map[string]int{"C": 3, "A": 9},
+	)
+	want := []string{"A", "B", "C"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SortedUnion = %v, want %v", got, want)
+	}
+	if got := SortedUnion[string, string](nil, nil); got == nil || len(got) != 0 {
+		t.Errorf("SortedUnion(nil, nil) = %v, want empty non-nil", got)
+	}
+}
