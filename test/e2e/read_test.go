@@ -190,17 +190,46 @@ func TestShowClosestWinsAlongChain(t *testing.T) {
 	}
 }
 
-func TestShowHidesFencedVar(t *testing.T) {
+// TestShowFencesVarButReportsTheTombstone pins the fenced-var contract end to
+// end: the key never reaches the resolved env as a live assignment, yet show
+// names it as deliberately absent instead of going silent.
+func TestShowFencesVarButReportsTheTombstone(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    unset: [SECRET]\n    env:\n      SECRET: s\n      A: \"1\"\n")
 	r := s.run("show", "p")
 	if r.ExitCode != 0 {
 		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
-	if strings.Contains(r.Stdout, "SECRET") {
+	if strings.Contains(r.Stdout, "SECRET=") {
 		t.Fatalf("a fenced var must not reach the resolved env, got: %q", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "# SECRET — unset by \"p\"") {
+		t.Fatalf("the tombstone row must name the fenced var, got: %q", r.Stdout)
 	}
 	if !strings.Contains(r.Stdout, "A=1") {
 		t.Fatalf("unfenced vars survive, got: %q", r.Stdout)
+	}
+}
+
+// TestShowJSONCarriesUnsets pins the additive JSON contract through the
+// binary: tombstones ride as a structured unsets map naming the unsetting
+// profile.
+func TestShowJSONCarriesUnsets(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    unset: [SECRET]\n")
+	r := s.run("show", "--format", "json", "p")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	var got struct {
+		Unsets map[string]struct {
+			Profile string `json:"profile"`
+		} `json:"unsets"`
+	}
+	if err := json.Unmarshal([]byte(r.Stdout), &got); err != nil {
+		t.Fatalf("show json is not valid JSON: %v\n%s", err, r.Stdout)
+	}
+	if got.Unsets["SECRET"].Profile != "p" {
+		t.Fatalf("unsets must name the unsetting profile, got: %q", r.Stdout)
 	}
 }
