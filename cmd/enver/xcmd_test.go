@@ -49,7 +49,7 @@ func TestXNonInteractiveNoKeyFailsLoudly(t *testing.T) {
 	app.PromptPassphrase = func(string) (string, error) { return "", errors.New("should not prompt in non-interactive mode") }
 	t.Cleanup(func() { app.PromptPassphrase = prevPrompt })
 
-	rootCmd.SetArgs([]string{"x", "anth", "--", "sh", "-c", "true"})
+	rootCmd.SetArgs([]string{"x", "anth", "--", "sh", "-c", "exit 9"})
 	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
 	}

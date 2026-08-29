@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -146,6 +147,12 @@ func TestUnsetLayersShowMatrix(t *testing.T) {
 	}
 }
 
+// xHelperDir marks a test-binary re-execution that runs the x command in
+// place of the parent: unix x delivers the child via syscall.Exec, which
+// replaces the calling process, so the command must run in a sacrificial
+// process or it would take the test binary with it.
+const xHelperDir = "ENVER_TEST_X_HELPER_DIR"
+
 // TestXRealChildPassesShellThroughFence is the only member that forks an
 // actual child: the fenced key rides in nowhere from the overlay, so the
 // shell's live value reaches the process untouched, while the overlay
@@ -154,6 +161,11 @@ func TestXRealChildPassesShellThroughFence(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("spawns /bin/sh; Windows delivery is pinned at MergedEnv level")
 	}
+	if dir := os.Getenv(xHelperDir); dir != "" {
+		xHelperExec(t, dir)
+		return
+	}
+
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "wd")
 	if err := os.Mkdir(workDir, 0o755); err != nil {
@@ -168,11 +180,15 @@ func TestXRealChildPassesShellThroughFence(t *testing.T) {
 		"    unset: [EDITOR]\n")
 
 	childEnv := filepath.Join(dir, "child-env.txt")
-	script := fmt.Sprintf("printf 'EDITOR=%%s\\nTHEME=%%s\\n' \"$EDITOR\" \"$THEME\" > %q", childEnv)
-	t.Setenv("EDITOR", "shell-live")
 
-	if _, err := runCommand(t, "--config", globalPath, "--chdir", workDir, "x", "bare", "--", "/bin/sh", "-c", script); err != nil {
-		t.Fatalf("x bare: %v", err)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := exec.Command(exe, "-test.run=^"+t.Name()+"$")
+	helper.Env = append(os.Environ(), xHelperDir+"="+dir)
+	if out, err := helper.CombinedOutput(); err != nil {
+		t.Fatalf("x helper: %v\n%s", err, out)
 	}
 	got, err := os.ReadFile(childEnv)
 	if err != nil {
@@ -181,4 +197,21 @@ func TestXRealChildPassesShellThroughFence(t *testing.T) {
 	if want := "EDITOR=shell-live\nTHEME=ocean\n"; string(got) != want {
 		t.Fatalf("child env:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+// xHelperExec runs inside the re-executed binary: it wires the fixture under
+// dir and lets x deliver the child. On success the exec replaces this process
+// with the shell and never returns; reaching the end of the function means
+// the child exited without replacing us.
+func xHelperExec(t *testing.T, dir string) {
+	t.Setenv("EDITOR", "shell-live")
+	workDir := filepath.Join(dir, "wd")
+	globalPath := filepath.Join(dir, "global.yaml")
+	childEnv := filepath.Join(dir, "child-env.txt")
+	script := fmt.Sprintf("printf 'EDITOR=%%s\\nTHEME=%%s\\n' \"$EDITOR\" \"$THEME\" > %q", childEnv)
+
+	if _, err := runCommand(t, "--config", globalPath, "--chdir", workDir, "x", "bare", "--", "/bin/sh", "-c", script); err != nil {
+		t.Fatalf("x bare: %v", err)
+	}
+	t.Fatal("x must replace the helper process via exec")
 }
