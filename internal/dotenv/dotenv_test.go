@@ -1,6 +1,7 @@
 package dotenv
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -251,5 +252,36 @@ func TestFormatUnsetsAmongQuoted(t *testing.T) {
 	want := "A$B=\"x y\"\n# HAS SPACE=  # unset by \"p\"\n"
 	if got != want {
 		t.Errorf("Format unsets among quoted:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// TestFormatTombstoneQuotesProfile pins %q quoting of the attribution: a
+// profile name containing a quote renders escaped, matching show's row.
+func TestFormatTombstoneQuotesProfile(t *testing.T) {
+	got := string(Format(nil, nil, map[string]string{"A": `pr"of`}, Options{Header: false}))
+	want := "# A=  # unset by \"pr\\\"of\"\n"
+	if got != want {
+		t.Errorf("tombstone quoting:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderParseIgnoresTombstones pins the round-trip contract: a rendered
+// document parses back to exactly the live entries — tombstone rows vanish
+// instead of landing as the next key's comment, so import can neither grow
+// the file nor plant tombstones on profiles that never unset anything.
+func TestRenderParseIgnoresTombstones(t *testing.T) {
+	env := map[string]string{"API_URL": "https://api.example.com", "PORT": "8080"}
+	comments := map[string]string{"PORT": "the port"}
+	doc := Format(env, comments, map[string]string{"DEBUG": `pr"of`}, Options{Header: false})
+	got, _, err := Parse(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{
+		{Key: "API_URL", Value: "https://api.example.com"},
+		{Key: "PORT", Value: "8080", Comment: "the port"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("render→parse:\ngot  %+v\nwant %+v", got, want)
 	}
 }

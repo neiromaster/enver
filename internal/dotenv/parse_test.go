@@ -80,3 +80,51 @@ func TestParseReportsSkippedLines(t *testing.T) {
 		t.Fatalf("skips = %v, want %v", skips, want)
 	}
 }
+
+// TestParseTombstoneRecognizer pins the grammar: exactly enver's row shape
+// qualifies, near-miss comments do not.
+func TestParseTombstoneRecognizer(t *testing.T) {
+	if k, ok := parseTombstone(`# DEBUG=  # unset by "prod"`); !ok || k != "DEBUG" {
+		t.Errorf("exact row: got (%q, %v)", k, ok)
+	}
+	if k, ok := parseTombstone(`#DEBUG=  # unset by "prod"`); !ok || k != "DEBUG" {
+		t.Errorf("no space after #: got (%q, %v)", k, ok)
+	}
+	if k, ok := parseTombstone(`# A=  # unset by "pr\"of"`); !ok || k != "A" {
+		t.Errorf("escaped quote: got (%q, %v)", k, ok)
+	}
+	for _, line := range []string{
+		`# DEBUG= some note`,         // not an unset attribution
+		`# DEBUG= # unset by "prod"`, // one space, not two
+		`# DEBUG=  # unset by prod`,  // unquoted profile
+		`# DEBUG=  # unset by "prod`, // unterminated quote
+		`# 1BAD=  # unset by "prod"`, // invalid key
+	} {
+		if _, ok := parseTombstone(line); ok {
+			t.Errorf("parseTombstone(%q) accepted a near-miss", line)
+		}
+	}
+}
+
+// TestParseDropsTombstones pins that enver's own unset rows re-import as
+// nothing, and that neighboring comments still attach across the gap.
+func TestParseDropsTombstones(t *testing.T) {
+	in := tombstoneRow("DEBUG", "mid") +
+		"# real comment\nPORT=8080\n" +
+		tombstoneRow("TRACE", "prod") +
+		"\nA=1\n" +
+		tombstoneRow("VERBOSE", "leaf") +
+		"B=2\n"
+	got, _, err := Parse([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{
+		{Key: "PORT", Value: "8080", Comment: "real comment"},
+		{Key: "A", Value: "1"},
+		{Key: "B", Value: "2"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tombstone drop:\ngot  %+v\nwant %+v", got, want)
+	}
+}

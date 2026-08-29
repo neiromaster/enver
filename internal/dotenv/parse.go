@@ -34,7 +34,10 @@ func (e parseError) Error() string { return e.msg }
 // (whitespace-then-#) comment stripped. Single, double, and backtick quotes may span
 // physical lines. Consecutive comment lines above a KEY (no blank between) attach to
 // it; a blank line resets. A leading export is stripped. Invalid keys and lines
-// without = are skipped and reported in skips.
+// without = are skipped and reported in skips. Tombstone rows enver itself emits
+// (`# KEY=  # unset by "profile"`, the unset rendering of Format) are recognized
+// and dropped: renderer metadata, re-derived from the target profile's own chain
+// at the next export, never stored as comments.
 func Parse(data []byte) (entries []Entry, skips []Skip, err error) {
 	var pending []string
 	var open byte // open quote for a multi-line value, else 0
@@ -68,6 +71,9 @@ func Parse(data []byte) (entries []Entry, skips []Skip, err error) {
 		case trimmed == "":
 			pending = nil
 		case strings.HasPrefix(trimmed, "#"):
+			if _, tomb := parseTombstone(trimmed); tomb {
+				continue
+			}
 			pending = append(pending, strings.TrimSpace(trimmed[1:]))
 		default:
 			body := strings.TrimPrefix(trimmed, "export ")

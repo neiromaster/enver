@@ -16,8 +16,12 @@ PORT=8080
 ```
 
 Consumers ignore the comments; curators see the variable is absent on
-purpose. The same tombstones appear in `show` (`# DEBUG — unset by "prod"`,
-and an `unsets` map in `--format json`).
+purpose. `enver import` recognizes these rows and drops them: the fence is
+renderer metadata, re-derived from the target profile's own chain at the next
+export, so export → import round-trips without growing the file or planting
+tombstones on profiles that never unset anything. The same tombstones appear
+in `show` (`# DEBUG — unset by "prod"`, and an `unsets` map in
+`--format json`).
 
 ```sh
 enver dotenv prod -o prod.env          # export profile prod to prod.env
