@@ -48,8 +48,12 @@ Every `show` line is annotated with the defining profile and layer
 (`ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)`), so with multi-parent
 `extends` you can see at a glance which profile actually won a key — a
 variable picked up from `./.enver.yaml` is marked `(local)`, one from the
-global config `(global)`. `--format json` carries the same provenance as a
-structured `sources` map.
+global config `(global)`. Keys the chain deliberately excludes render as
+comment rows (`# DEBUG — unset by "prod"`, detailed in
+[`dotenv.md`](./dotenv.md)). `--format json` carries the same provenance as a
+structured `sources` map plus an `unsets` map with the same profile/layer
+shape, so a machine reader can tell a deliberately unset key from an
+accidental absence.
 
 Secret-looking values (keys matching `key|token|secret|password|passwd|auth|credential`,
 case-insensitive, or values that embed credentials in a URL such as
