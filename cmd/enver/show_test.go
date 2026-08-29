@@ -196,8 +196,7 @@ func TestPrintEnvUnsets(t *testing.T) {
 	chain := []string{"prod", "base"}
 	sources := map[string]config.Source{"PORT": {Profile: "base", Layer: "global"}}
 	unsets := map[string]config.Source{
-		"API_KEY": {Profile: "base", Layer: "global"},
-		"TRACE":   {Profile: "prod", Layer: "local"},
+		"TRACE": {Profile: "prod", Layer: "local"},
 	}
 
 	var out bytes.Buffer
@@ -205,17 +204,14 @@ func TestPrintEnvUnsets(t *testing.T) {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
-	if !strings.Contains(s, "# API_KEY — unset by \"base\"") {
-		t.Errorf("text output missing API_KEY tombstone row:\n%s", s)
-	}
 	if !strings.Contains(s, "# TRACE — unset by \"prod\"") {
 		t.Errorf("text output missing TRACE tombstone row:\n%s", s)
 	}
+	if !strings.Contains(s, "API_KEY=sk-a") {
+		t.Errorf("text output lost the masked live key:\n%s", s)
+	}
 	if !strings.Contains(s, "PORT=8080") {
 		t.Errorf("text output lost the live key:\n%s", s)
-	}
-	if strings.Contains(s, "API_KEY=") && !strings.Contains(s, "sk-ant-secret") {
-		t.Errorf("tombstone row must carry no value:\n%s", s)
 	}
 
 	var jout bytes.Buffer
@@ -244,5 +240,27 @@ func TestPrintEnvJSONOmitsEmptyUnsets(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "unsets") {
 		t.Errorf("empty unsets must not appear in JSON:\n%s", out.String())
+	}
+}
+
+// TestPrintEnvLiveBeatsTombstone pins the overlap contract: a key both live
+// and unset (a Resolved invariant violation) renders exactly one row — the
+// live one — instead of hiding the value behind a tombstone.
+func TestPrintEnvLiveBeatsTombstone(t *testing.T) {
+	env := map[string]string{"SECRET": "real-value"}
+	unsets := map[string]config.Source{"SECRET": {Profile: "prod", Layer: "global"}}
+	var out bytes.Buffer
+	if err := printEnv(&out, env, []string{"p"}, nil, unsets, true); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	s := out.String()
+	if n := strings.Count(s, "SECRET"); n != 1 {
+		t.Errorf("SECRET rendered %d times, want 1:\n%s", n, s)
+	}
+	if !strings.Contains(s, "SECRET=real-value") {
+		t.Errorf("live value hidden by tombstone:\n%s", s)
+	}
+	if strings.Contains(s, "unset by") {
+		t.Errorf("tombstone survived a live key:\n%s", s)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/spf13/cobra"
 )
 
@@ -82,27 +83,21 @@ func init() {
 // layer (`# from anth (global)`) so the chain header stays a summary and the
 // per-key winner is debuggable. Unset keys interleave in the same sort as
 // comment rows (`# KEY — unset by "anth"`), mirroring the dotenv export: the
-// deliberately absent variables stay visible next to the live ones.
+// deliberately absent variables stay visible next to the live ones. A live
+// key wins its row — Resolved keeps env and unsets disjoint, and the sorted
+// union collapses any violation rather than rendering it.
 func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, unmasked bool) error {
 	if _, err := fmt.Fprintf(w, "# profile: %s\n", strings.Join(chain, " → ")); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(env)+len(unsets))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	for k := range unsets {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		if u, ok := unsets[k]; ok {
-			if _, err := fmt.Fprintf(w, "# %s — unset by %q\n", k, u.Profile); err != nil {
+	for _, k := range envname.SortedUnion(env, unsets) {
+		v, live := env[k]
+		if !live {
+			if _, err := fmt.Fprintf(w, "# %s — unset by %q\n", k, unsets[k].Profile); err != nil {
 				return err
 			}
 			continue
 		}
-		v := env[k]
 		if !unmasked {
 			v = config.MaskValue(k, v)
 		}
