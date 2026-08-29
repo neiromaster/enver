@@ -441,7 +441,6 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		}
 		for k, v := range pf.env {
 			envname.Set(out.env, k, v)
-			envname.Delete(out.unsets, k)
 		}
 		for k, v := range pf.comments {
 			envname.Set(out.comments, k, v)
@@ -494,9 +493,11 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		envname.Delete(out.sources, u)
 		envname.Set(out.unsets, u, Source{Profile: name, Layer: c.unsetLayer(name, u)})
 	}
-	// A tombstone never coexists with a live key: a sibling parent's define
-	// can land after the sibling unset it stripped nothing against, so the
-	// final sweep drops stale entries.
+	// A tombstone never coexists with a live key, whichever order sibling
+	// parents fold in: parents arrive pre-folded, so the unsetting sibling's
+	// tombstone can land after the victim is already resident from the
+	// sibling that defines it. The final sweep drops stale entries in both
+	// orders — it is the invariant's single enforcement point.
 	for k := range out.unsets {
 		if envname.Has(out.env, k) {
 			envname.Delete(out.unsets, k)

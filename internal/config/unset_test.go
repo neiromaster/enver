@@ -605,3 +605,31 @@ func TestMergeChainedCarriedFenceAttribution(t *testing.T) {
 		t.Fatalf("KEY unset source = %+v, want {bare local} — the middle layer declared the fence", s)
 	}
 }
+
+// TestResolveSiblingOrdersKeepNoTombstoneWithLiveKey pins the final sweep as
+// the invariant's single enforcement point, in both sibling orders: [define,
+// unset] lands the tombstone with the victim already resident, [unset,
+// define] lands the victim after the tombstone. Either must end live without
+// a tombstone, so weakening the sweep fails a test instead of regressing.
+func TestResolveSiblingOrdersKeepNoTombstoneWithLiveKey(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{
+		"a": {Env: map[string]string{"K": "v"}},
+		"b": {Extends: Extends{"a"}, Unset: Unsets{"K"}},
+	}}
+	for _, parents := range []Extends{{"a", "b"}, {"b", "a"}} {
+		cfg := Config{Profiles: map[string]Profile{"c": {Extends: parents}}}
+		for name, p := range base.Profiles {
+			cfg.Profiles[name] = p
+		}
+		r, err := cfg.ResolveProfile("c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Env["K"] != "v" {
+			t.Fatalf("extends %v: K = %q (%v), want v — the sibling define wins", parents, r.Env["K"], r.Env)
+		}
+		if envname.Has(r.Unsets, "K") {
+			t.Fatalf("extends %v: tombstone on a live key: %v", parents, r.Unsets)
+		}
+	}
+}
