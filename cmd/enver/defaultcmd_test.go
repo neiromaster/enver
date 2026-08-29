@@ -46,6 +46,11 @@ func TestDefaultClearWithPositionalArgErrors(t *testing.T) {
 	path := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, true)
 	withGlobalConfig(t, path)
 
+	if err := defaultCmd.Flags().Set("clear", "true"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = defaultCmd.Flags().Set("clear", "false") })
+
 	err := defaultCmd.RunE(&cobra.Command{}, []string{"staging"})
 	if err == nil || !strings.Contains(err.Error(), "--clear takes no profile") {
 		t.Fatalf("err=%v, want clear-arg conflict", err)

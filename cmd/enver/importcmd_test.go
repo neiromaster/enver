@@ -489,14 +489,21 @@ func TestImportSummaryNotesSkippedLines(t *testing.T) {
 
 // runImportCmd executes the import command against a fixture directory with
 // the given flags, writing env into a local .env file. dir is the chdir root
-// holding global.yaml; the caller has already wired globalFlags.
+// holding global.yaml; the caller has already wired globalFlags. Flags are
+// parsed through the command's own flag set — calling RunE with raw args
+// would leave the bound vars unset.
 func runImportCmd(t *testing.T, envBody string, args ...string) error {
 	t.Helper()
 	envFile := filepath.Join(t.TempDir(), "vars.env")
 	if err := os.WriteFile(envFile, []byte(envBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return importCmd.RunE(&cobra.Command{}, append([]string{envFile}, args...))
+	savedExtends, savedReplace, savedForce := importExtends, importReplace, importForce
+	t.Cleanup(func() { importExtends, importReplace, importForce = savedExtends, savedReplace, savedForce })
+	if err := importCmd.ParseFlags(append([]string{envFile}, args...)); err != nil {
+		t.Fatal(err)
+	}
+	return importCmd.RunE(&cobra.Command{}, importCmd.Flags().Args())
 }
 
 func importFixtureLayers(t *testing.T) string {
