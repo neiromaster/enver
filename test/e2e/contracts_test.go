@@ -61,3 +61,23 @@ func TestCompleteListsProfiles(t *testing.T) {
 		t.Fatalf("completion must offer the profile tokens, got: %q", r.Stdout)
 	}
 }
+
+// TestShowPipedOutputStaysEscapeFree pins the documented pipe contract end to
+// end: text show through a pipe never emits ANSI escapes, even in a
+// color-capable environment with NO_COLOR absent.
+func TestShowPipedOutputStaysEscapeFree(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n")
+	s.setEnv("NO_COLOR", "")
+	s.setEnv("TERM", "xterm-256color")
+	r := s.run("show", "p")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if strings.ContainsRune(r.Stdout, '\x1b') {
+		t.Fatalf("piped show output carries ANSI escapes: %q", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "A=1") {
+		t.Fatalf("piped show lost the value: %q", r.Stdout)
+	}
+}

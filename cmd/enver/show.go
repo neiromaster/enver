@@ -25,16 +25,23 @@ var (
 	boldStyle = lipgloss.NewStyle().Bold(true)
 )
 
-// stdoutIsTTY is a var so tests can force the colored path without a pty.
-var stdoutIsTTY = func() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
+// writerIsTTY reports whether w is an interactive terminal. It is a var so
+// tests can force either side without a pty.
+var writerIsTTY = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-// colorEnabled reports whether printEnv may emit ANSI styling: only onto a
-// terminal, and never under NO_COLOR (https://no-color.org, empty counts as
-// absent).
-func colorEnabled() bool {
-	return stdoutIsTTY() && os.Getenv("NO_COLOR") == ""
+// colorEnabled reports whether printEnv may emit ANSI styling onto w: only
+// onto a terminal, and never under NO_COLOR (https://no-color.org, empty
+// counts as absent) or TERM=dumb. The decision follows the writer itself, so
+// any redirection of the command's output stays escape-free even when the
+// process stdout is a terminal.
+func colorEnabled(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return writerIsTTY(w)
 }
 
 var showCmd = &cobra.Command{
@@ -53,7 +60,8 @@ var showCmd = &cobra.Command{
 		}
 		switch showFormat {
 		case "text":
-			return printEnv(cmd.OutOrStdout(), r.Env, r.Chain, r.Sources, r.Unsets, showNoMask, colorEnabled())
+			out := cmd.OutOrStdout()
+			return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, showNoMask, colorEnabled(out))
 		case "json":
 			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
 		default:
@@ -110,20 +118,20 @@ func init() {
 // key wins its row — Resolved keeps env and unsets disjoint, and the sorted
 // union collapses any violation rather than rendering it. With color set,
 // keys render bold and every comment (header, provenance suffix, tombstones)
-// renders dim; the caller gates on TTY and NO_COLOR so pipes stay clean.
+// renders dim; the caller gates styling on the destination being a terminal
+// (never under NO_COLOR or TERM=dumb) so pipes stay clean.
 func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, unmasked, color bool) error {
-	dim, bold := plain, plain
+	var dim, bold lipgloss.Style
 	if color {
-		dim = func(s string) string { return dimStyle.Render(s) }
-		bold = func(s string) string { return boldStyle.Render(s) }
+		dim, bold = dimStyle, boldStyle
 	}
-	if _, err := fmt.Fprintln(w, dim("# profile: "+strings.Join(chain, " → "))); err != nil {
+	if _, err := fmt.Fprintln(w, dim.Render("# profile: "+strings.Join(chain, " → "))); err != nil {
 		return err
 	}
 	for _, k := range envname.SortedUnion(env, unsets) {
 		v, live := env[k]
 		if !live {
-			if _, err := fmt.Fprintln(w, dim(fmt.Sprintf("# %s — unset by %q", k, unsets[k].Profile))); err != nil {
+			if _, err := fmt.Fprintln(w, dim.Render(fmt.Sprintf("# %s — unset by %q", k, unsets[k].Profile))); err != nil {
 				return err
 			}
 			continue
@@ -132,20 +140,18 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 			v = config.MaskValue(k, v)
 		}
 		if s, ok := sources[k]; ok {
-			line := bold(k) + "=" + v + "  " + dim(fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer))
+			line := bold.Render(k) + "=" + v + "  " + dim.Render(fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer))
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := fmt.Fprintf(w, "%s=%s\n", bold(k), v); err != nil {
+		if _, err := fmt.Fprintf(w, "%s=%s\n", bold.Render(k), v); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-func plain(s string) string { return s }
 
 // showJSON is the machine-readable shape of `enver show --format json`.
 type showJSON struct {

@@ -57,8 +57,9 @@ accidental absence.
 
 In a terminal, text output is styled: keys are bold, and every comment — the
 `# profile:` header, provenance suffixes, unset rows — is dim. Styling is
-emitted only when stdout is a terminal and `NO_COLOR` is unset, so piped
-output (`enver show | grep`) stays plain. `--format json` is never styled.
+emitted only when the output destination is a terminal; `NO_COLOR` and
+`TERM=dumb` turn it off, so piped output (`enver show | grep`) stays plain.
+`--format json` is never styled.
 
 Secret-looking values (keys matching `key|token|secret|password|passwd|auth|credential`,
 case-insensitive, or values that embed credentials in a URL such as
