@@ -509,3 +509,59 @@ func TestChildSeesShellValueThroughUnset(t *testing.T) {
 		t.Fatalf("child env mentions %s %d times, want exactly once with the shell value", k, seen)
 	}
 }
+
+func TestChdir(t *testing.T) {
+	// Anchor a restorable cwd first: t.Chdir undoes any move the test makes.
+	t.Chdir(t.TempDir())
+
+	if err := Chdir(""); err != nil {
+		t.Fatalf(`Chdir("") = %v, want nil`, err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := Chdir(missing); err == nil {
+		t.Fatalf("Chdir(%q) = nil, want an error", missing)
+	}
+	dir := t.TempDir()
+	if err := Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%q) = %v, want nil", dir, err)
+	}
+	if wd, err := os.Getwd(); err != nil || wd != dir {
+		t.Fatalf("cwd = %q (err %v), want %q", wd, err, dir)
+	}
+}
+
+func TestMatchingProfiles(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "profiles:\n  alpha:\n    env:\n      A: \"1\"\n  beta:\n    env:\n      B: \"2\"\n  delta:\n    extends: [alpha]\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+
+	if got := MatchingProfiles(opts, ""); !sliceEq(got, []string{"alpha", "beta", "delta"}) {
+		t.Fatalf(`MatchingProfiles("") = %v, want all three`, got)
+	}
+	if got := MatchingProfiles(opts, "be"); !sliceEq(got, []string{"beta"}) {
+		t.Fatalf(`MatchingProfiles("be") = %v, want [beta]`, got)
+	}
+	// No match: the pre-allocated result slice comes back empty but non-nil;
+	// only a load error yields a true nil.
+	if got := MatchingProfiles(opts, "zz"); len(got) != 0 {
+		t.Fatalf(`MatchingProfiles("zz") = %v, want empty`, got)
+	}
+	missing := Options{ConfigPath: filepath.Join(dir, "missing.yaml"), NoLocal: true}
+	// A missing config file is not an error: load yields an empty Config, so
+	// completion comes back empty, not nil.
+	if got := MatchingProfiles(missing, ""); len(got) != 0 {
+		t.Fatalf("MatchingProfiles(missing config) = %v, want empty", got)
+	}
+	broken := filepath.Join(dir, "broken.yaml")
+	if err := os.WriteFile(broken, []byte("["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Only a real load error (here: unparseable YAML) yields nil.
+	if got := MatchingProfiles(Options{ConfigPath: broken, NoLocal: true}, ""); got != nil {
+		t.Fatalf("MatchingProfiles(unparseable config) = %v, want nil", got)
+	}
+}
