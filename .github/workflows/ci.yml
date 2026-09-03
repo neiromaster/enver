@@ -72,16 +72,20 @@ jobs:
           go tool covdata textfmt -i="$GOCOVERDIR" -o coverage.txt
           total=$(go tool cover -func=coverage.txt | awk '/^total:/ {gsub("%",""); print $NF}')
           echo "total coverage: ${total}% (gate: ${MIN_COVER}%)"
-          awk -v t="$total" -v m="$MIN_COVER" 'BEGIN { exit !(t+0 > m+0) }'
-          hit=$(grep -E 'exec_(windows|unix)\.go' coverage.txt | awk '$NF > 0' | head -1)
+          if ! awk -v t="$total" -v m="$MIN_COVER" 'BEGIN { exit !(t+0 > m+0) }'; then
+            echo "::error::coverage ${total}% is not above the gate ${MIN_COVER}%"
+            exit 1
+          fi
+          hit=$(grep -E 'exec_(windows|unix)\.go' coverage.txt | awk '$NF > 0' | head -1 || true)
           if [ -z "$hit" ]; then
             echo "::error::unit covdata missing: no covered exec_* spawn-failure line"
             exit 1
           fi
 
       - name: upload coverage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.txt
+          if-no-files-found: ignore

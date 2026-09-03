@@ -40,6 +40,7 @@ hooks:
 
 # Full suite under coverage: unit binaries and the instrumented e2e binary
 # share one covdata dir. Prints the gate number (`total:` line).
+# CI gates on this number: MIN_COVER in .github/workflows/ci.yml.
 #
 # COVDIR must be absolute: each package's test binary runs with the package
 # dir as cwd, so a relative GOCOVERDIR would resolve elsewhere and be skipped.
