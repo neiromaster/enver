@@ -14,6 +14,12 @@ const (
 	decoyYAML  = "profiles:\n  decoy:\n    env:\n      DECOY: \"1\"\n"
 )
 
+// fallbackHint is the exact bottom-rung resolution: with no home at all, xdg
+// falls back to "/", so the hint names the "/"-rooted config path. It is
+// left-anchored on the "Create one at: " prefix because a fallback regressed
+// to the working directory would carry the same tail.
+var fallbackHint = "Create one at: " + filepath.Join("/", ".config", "enver", "config.yaml")
+
 // platformHomeRungWritable reports whether the rung below HOME resolves to a
 // real directory on this platform: os.UserHomeDir reads USERPROFILE on
 // Windows. On POSIX it reads $HOME only and errors once HOME is dropped, so
@@ -82,18 +88,14 @@ func TestConfigHomeRungPlatformHome(t *testing.T) {
 		}
 		return
 	}
-	want := filepath.Join("/", ".config", "enver", "config.yaml")
-	assertListed(t, r, want, "")
+	assertListed(t, r, fallbackHint, "")
 }
 
 // TestConfigHomeRungFallbackHint pins the bottom rung: with every home
-// variable dropped, os.UserHomeDir errors and xdg falls back to "/", so the
-// hint must name the /-anchored .config/enver/config.yaml — rejecting a
-// fallback that regressed to the working directory or a temp dir. No writes
-// anywhere — machine paths are off limits, nothing is written.
+// variable dropped, os.UserHomeDir errors and xdg falls back to "/". No
+// writes anywhere — machine paths are off limits, nothing is written.
 func TestConfigHomeRungFallbackHint(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME", "USERPROFILE")
-	want := filepath.Join("/", ".config", "enver", "config.yaml")
-	assertListed(t, s.run("list", "-g"), want, "")
+	assertListed(t, s.run("list", "-g"), fallbackHint, "")
 }
