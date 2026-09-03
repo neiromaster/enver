@@ -134,10 +134,10 @@ func TestExecChildPropagatesExitCode(t *testing.T) {
 }
 
 // TestExecChildSpawnFailureReturnsOne pins the non-ExitError path: a spawn
-// that never starts reports 1 after the stderr note.
+// that never starts reports 1.
 func TestExecChildSpawnFailureReturnsOne(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		// A directory as Path fails CreateProcess with a non-ExitError.
+		// A directory as Path is rejected by os/exec before any child starts, a non-ExitError.
 		dir := t.TempDir()
 		if code := execChild(dir, []string{dir}, nil, "enver x"); code != 1 {
 			t.Fatalf("execChild(directory) = %d, want 1", code)
