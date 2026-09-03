@@ -134,6 +134,23 @@ func (s *sandbox) setEnv(k, v string) {
 	s.env = append(s.env, k+"="+v)
 }
 
+// dropEnv removes the named variables from the sandbox environment so a test
+// can exercise a lower rung of the config-home ladder.
+func (s *sandbox) dropEnv(keys ...string) {
+	s.t.Helper()
+	dropped := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		dropped[k] = true
+	}
+	env := make([]string, 0, len(s.env))
+	for _, kv := range s.env {
+		if !dropped[strings.SplitN(kv, "=", 2)[0]] {
+			env = append(env, kv)
+		}
+	}
+	s.env = env
+}
+
 type result struct {
 	ExitCode int
 	Stdout   string
