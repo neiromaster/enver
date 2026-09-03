@@ -533,8 +533,8 @@ func TestChdir(t *testing.T) {
 func TestMatchingProfiles(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	cfg := "profiles:\n  alpha:\n    env:\n      A: \"1\"\n  beta:\n    env:\n      B: \"2\"\n  delta:\n    extends: [alpha]\n"
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+	cfgContent := "profiles:\n  alpha:\n    env:\n      A: \"1\"\n  beta:\n    env:\n      B: \"2\"\n  delta:\n    extends: [alpha]\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	opts := Options{ConfigPath: cfgPath, NoLocal: true}
@@ -547,14 +547,14 @@ func TestMatchingProfiles(t *testing.T) {
 	}
 	// No match: the pre-allocated result slice comes back empty but non-nil;
 	// only a load error yields a true nil.
-	if got := MatchingProfiles(opts, "zz"); len(got) != 0 {
-		t.Fatalf(`MatchingProfiles("zz") = %v, want empty`, got)
+	if got := MatchingProfiles(opts, "zz"); got == nil || len(got) != 0 {
+		t.Fatalf(`MatchingProfiles("zz") = %v, want empty non-nil`, got)
 	}
 	missing := Options{ConfigPath: filepath.Join(dir, "missing.yaml"), NoLocal: true}
 	// A missing config file is not an error: load yields an empty Config, so
 	// completion comes back empty, not nil.
-	if got := MatchingProfiles(missing, ""); len(got) != 0 {
-		t.Fatalf("MatchingProfiles(missing config) = %v, want empty", got)
+	if got := MatchingProfiles(missing, ""); got == nil || len(got) != 0 {
+		t.Fatalf("MatchingProfiles(missing config) = %v, want empty non-nil", got)
 	}
 	broken := filepath.Join(dir, "broken.yaml")
 	if err := os.WriteFile(broken, []byte("["), 0o600); err != nil {
