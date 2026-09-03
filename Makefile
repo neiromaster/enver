@@ -4,7 +4,7 @@ BINARY := enver
 PKG := github.com/neiromaster/enver
 COVDIR := $(CURDIR)/.coverage
 # Everything but test/e2e, which needs its own coverage leg (see `cover`).
-UNIT_PKGS := $(shell go list ./... | grep -v '/test/e2e')
+UNIT_PKGS = $(shell go list ./... | grep -v '/test/e2e')
 
 # Build the binary into ./bin, keeping the repo root clean.
 build:
@@ -32,7 +32,7 @@ fmt:
 	go fmt ./...
 
 clean:
-	rm -rf bin
+	rm -rf bin .coverage coverage.txt
 
 # Install git hooks via lefthook (a pinned Go tool dependency, no global install).
 hooks:
@@ -50,7 +50,7 @@ hooks:
 # its test binary un-instrumented, so TestMain sees the real GOCOVERDIR and
 # the instrumented enver child inherits it instead of the doomed temp path.
 cover:
-	rm -rf .coverage
+	rm -rf .coverage coverage.txt
 	mkdir -p .coverage
 	ENVER_E2E_COVER=1 GOCOVERDIR=$(COVDIR) go test -race -count=1 -cover -coverpkg=./... $(UNIT_PKGS) -args -test.gocoverdir=$(COVDIR)
 	ENVER_E2E_COVER=1 GOCOVERDIR=$(COVDIR) go test -race -count=1 ./test/e2e
