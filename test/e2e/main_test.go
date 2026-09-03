@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("ENVER_E2E_COVER") != "" {
 		if covDir := os.Getenv("GOCOVERDIR"); covDir != "" {
 			if abs, err := filepath.Abs(covDir); err == nil {
-				os.Setenv("GOCOVERDIR", abs)
+				_ = os.Setenv("GOCOVERDIR", abs) // best effort: a failed reassignment degrades to the loud GOCOVERDIR warning
 			}
 		}
 		// -cover must precede the package argument: go's flag parsing stops
