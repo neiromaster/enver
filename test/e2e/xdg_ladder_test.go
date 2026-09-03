@@ -20,6 +20,8 @@ const (
 // the rung degrades to the "/"-fallback hint — observable, not writable.
 func platformHomeRungWritable() bool { return runtime.GOOS == "windows" }
 
+// assertListed requires the run to exit 0, its output to carry want, and —
+// unless notWant is empty — not to carry notWant.
 func assertListed(t *testing.T, r result, want, notWant string) {
 	t.Helper()
 	if r.ExitCode != 0 {
@@ -46,8 +48,9 @@ func TestConfigHomeRungXDG(t *testing.T) {
 	assertListed(t, s.run("list", "-g"), "ladder", "decoy")
 }
 
-// TestConfigHomeRungHOME pins the middle rung (the 125b3df precedence): with
-// XDG dropped, HOME wins over the platform home.
+// TestConfigHomeRungHOME pins the middle rung, guarding the precedence
+// regression where the platform home beats HOME: with XDG dropped, HOME must
+// win over the platform home.
 func TestConfigHomeRungHOME(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "USERPROFILE")
@@ -59,9 +62,10 @@ func TestConfigHomeRungHOME(t *testing.T) {
 	assertListed(t, s.run("list", "-g"), "ladder", "decoy")
 }
 
-// TestConfigHomeRungPlatformHome pins the df72d82 rung: with XDG and HOME
-// dropped, os.UserHomeDir resolves the config home (USERPROFILE on Windows).
-// POSIX degrades to the "/"-fallback hint.
+// TestConfigHomeRungPlatformHome pins the platform-home rung, guarding the
+// home-resolution regression where os.UserHomeDir is never consulted: with
+// XDG and HOME dropped, os.UserHomeDir resolves the config home (USERPROFILE
+// on Windows). POSIX degrades to the "/"-fallback hint.
 func TestConfigHomeRungPlatformHome(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME")
@@ -78,23 +82,18 @@ func TestConfigHomeRungPlatformHome(t *testing.T) {
 		}
 		return
 	}
-	if !strings.Contains(r.Stdout, "config.yaml") {
-		t.Fatalf("POSIX hint must name config.yaml, got: %q", r.Stdout)
-	}
+	want := filepath.Join("/", ".config", "enver", "config.yaml")
+	assertListed(t, r, want, "")
 }
 
 // TestConfigHomeRungFallbackHint pins the bottom rung: with every home
 // variable dropped, os.UserHomeDir errors and xdg falls back to "/", so the
-// hint names a config.yaml. No writes anywhere — the "/" root is not writable
-// in CI and machine paths are off limits.
+// hint must name the /-anchored .config/enver/config.yaml — rejecting a
+// fallback that regressed to the working directory or a temp dir. No writes
+// anywhere — machine paths are off limits, nothing is written.
 func TestConfigHomeRungFallbackHint(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME", "USERPROFILE")
-	r := s.run("list", "-g")
-	if r.ExitCode != 0 {
-		t.Fatalf("list -g exit = %d, stderr: %s", r.ExitCode, r.Stderr)
-	}
-	if !strings.Contains(r.Stdout, "config.yaml") {
-		t.Fatalf("the fallback hint must name config.yaml, got: %q", r.Stdout)
-	}
+	want := filepath.Join("/", ".config", "enver", "config.yaml")
+	assertListed(t, s.run("list", "-g"), want, "")
 }
