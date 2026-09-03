@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,8 +45,7 @@ func TestMain(m *testing.M) {
 		}
 		// -cover must precede the package argument: go's flag parsing stops
 		// at the first non-flag argument.
-		last := len(build.Args) - 1
-		build.Args = append(build.Args[:last], "-cover", build.Args[last])
+		build.Args = slices.Insert(build.Args, len(build.Args)-1, "-cover")
 	}
 	build.Dir = repoRoot()
 	if out, err := build.CombinedOutput(); err != nil {
