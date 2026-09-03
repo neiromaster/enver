@@ -16,6 +16,13 @@ func TestConfigHomeLadder(t *testing.T) {
 	}
 
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/env/home")
+	homeDir = func() (string, error) { return "/stub/home", nil }
+	if got := ConfigHome(); got != filepath.Join("/env/home", ".config") {
+		t.Fatalf("ConfigHome with HOME set = %q, want %q", got, filepath.Join("/env/home", ".config"))
+	}
+
+	t.Setenv("HOME", "")
 	homeDir = func() (string, error) { return "/home/u", nil }
 	if got := ConfigHome(); got != filepath.Join("/home/u", ".config") {
 		t.Fatalf("ConfigHome with home = %q, want %q", got, filepath.Join("/home/u", ".config"))

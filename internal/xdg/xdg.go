@@ -11,12 +11,15 @@ import (
 var homeDir = os.UserHomeDir
 
 // ConfigHome returns the XDG config home: $XDG_CONFIG_HOME when set, else
-// <home>/.config, with the home directory from os.UserHomeDir ($HOME on Unix,
-// %USERPROFILE% on Windows). A missing home falls back to "/" so the result
-// stays an absolute path either way.
+// $HOME/.config, falling back to the platform home directory from
+// os.UserHomeDir (%USERPROFILE% on Windows) when $HOME is unset. A missing
+// home falls back to "/" so the result stays an absolute path either way.
 func ConfigHome() string {
 	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
 		return x
+	}
+	if home := os.Getenv("HOME"); home != "" {
+		return filepath.Join(home, ".config")
 	}
 	home, err := homeDir()
 	if err != nil || home == "" {
