@@ -31,6 +31,22 @@ func TestMain(m *testing.M) {
 		enverBin += ".exe"
 	}
 	build := exec.Command("go", "build", "-o", enverBin, "./cmd/enver")
+	// Coverage runs opt in via ENVER_E2E_COVER: the instrumented binary then
+	// contributes covdata through GOCOVERDIR. Plain builds stay unchanged —
+	// an instrumented binary without GOCOVERDIR warns on every child run.
+	// GOCOVERDIR is absolutized so sandboxed children (which run from another
+	// cwd) still land in the same directory.
+	if os.Getenv("ENVER_E2E_COVER") != "" {
+		if covDir := os.Getenv("GOCOVERDIR"); covDir != "" {
+			if abs, err := filepath.Abs(covDir); err == nil {
+				os.Setenv("GOCOVERDIR", abs)
+			}
+		}
+		// -cover must precede the package argument: go's flag parsing stops
+		// at the first non-flag argument.
+		last := len(build.Args) - 1
+		build.Args = append(build.Args[:last], "-cover", build.Args[last])
+	}
 	build.Dir = repoRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: build enver: %v\n%s", err, out)
