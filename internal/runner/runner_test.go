@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -94,5 +95,58 @@ func TestMergedEnvCaseVariantOverlay(t *testing.T) {
 		}
 	} else if len(got) != 2 {
 		t.Fatalf("MergedEnv = %v, want both spellings on POSIX", got)
+	}
+}
+
+// childExitCommand returns a child that exits with the given code: cmd on
+// windows, sh on posix.
+func childExitCommand(t *testing.T, code int) (string, []string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		path, err := exec.LookPath("cmd")
+		if err != nil {
+			t.Fatalf("cmd.exe not on PATH: %v", err)
+		}
+		return path, []string{"cmd", "/c", "exit", strconv.Itoa(code)}
+	}
+	path, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("sh not on PATH: %v", err)
+	}
+	return path, []string{"sh", "-c", "exit " + strconv.Itoa(code)}
+}
+
+// TestExecChildPropagatesExitCode pins the windows child-wait path: the
+// child's exit code is ours. The unix sibling cannot run here — execChild
+// execve-replaces the process — and stays covered by the e2e suite.
+func TestExecChildPropagatesExitCode(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("unix execChild replaces the process via execve; covered by e2e TestXPropagatesChildExitCode")
+	}
+	path, args := childExitCommand(t, 3)
+	if code := execChild(path, args, nil, "enver x"); code != 3 {
+		t.Fatalf("execChild exit = %d, want 3", code)
+	}
+	path, args = childExitCommand(t, 0)
+	if code := execChild(path, args, nil, "enver x"); code != 0 {
+		t.Fatalf("execChild exit = %d, want 0", code)
+	}
+}
+
+// TestExecChildSpawnFailureReturnsOne pins the non-ExitError path: a spawn
+// that never starts reports 1 after the stderr note.
+func TestExecChildSpawnFailureReturnsOne(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// A directory as Path fails CreateProcess with a non-ExitError.
+		dir := t.TempDir()
+		if code := execChild(dir, []string{dir}, nil, "enver x"); code != 1 {
+			t.Fatalf("execChild(directory) = %d, want 1", code)
+		}
+		return
+	}
+	// syscall.Exec failure path: the process survives a bad path.
+	bad := "/enver-no-such-binary-xyz"
+	if code := execChild(bad, []string{bad}, nil, "enver x"); code != 1 {
+		t.Fatalf("execChild(bad path) = %d, want 1", code)
 	}
 }
