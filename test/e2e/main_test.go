@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,22 +30,23 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		enverBin += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", enverBin, "./cmd/enver")
-	// Coverage runs opt in via ENVER_E2E_COVER: the instrumented binary then
-	// contributes covdata through GOCOVERDIR. Plain builds stay unchanged —
-	// an instrumented binary without GOCOVERDIR warns on every child run.
-	// GOCOVERDIR is absolutized so sandboxed children (which run from another
-	// cwd) still land in the same directory.
-	if os.Getenv("ENVER_E2E_COVER") != "" {
-		if covDir := os.Getenv("GOCOVERDIR"); covDir != "" {
-			if abs, err := filepath.Abs(covDir); err == nil {
-				_ = os.Setenv("GOCOVERDIR", abs) // best effort: a failed reassignment degrades to the loud GOCOVERDIR warning
-			}
+	// Coverage runs are keyed on GOCOVERDIR alone: when set, the enver binary
+	// is built instrumented and the children contribute covdata through it.
+	// Plain builds stay unchanged — an instrumented binary without GOCOVERDIR
+	// warns on every child run. The directory must be absolute: go test runs
+	// this test binary with the package dir as cwd, so a relative GOCOVERDIR
+	// would silently resolve against the wrong base.
+	covDir := os.Getenv("GOCOVERDIR")
+	buildArgs := []string{"go", "build"}
+	if covDir != "" {
+		if !filepath.IsAbs(covDir) {
+			fmt.Fprintf(os.Stderr, "e2e: GOCOVERDIR must be absolute (go test runs test binaries in the package dir), got: %s\n", covDir)
+			os.Exit(2)
 		}
-		// -cover must precede the package argument: go's flag parsing stops
-		// at the first non-flag argument.
-		build.Args = slices.Insert(build.Args, len(build.Args)-1, "-cover")
+		buildArgs = append(buildArgs, "-cover")
 	}
+	buildArgs = append(buildArgs, "-o", enverBin, "./cmd/enver")
+	build := exec.Command(buildArgs[0], buildArgs[1:]...)
 	build.Dir = repoRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: build enver: %v\n%s", err, out)
@@ -85,14 +85,7 @@ func newSandbox(t *testing.T) *sandbox {
 	if real := os.Getenv("XDG_CONFIG_HOME"); real != "" && real == cfgHome {
 		t.Fatalf("sandbox config home %s collides with the real one", cfgHome)
 	}
-	env := make([]string, 0, len(os.Environ())+3)
-	for _, kv := range os.Environ() {
-		switch strings.SplitN(kv, "=", 2)[0] {
-		case "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "ENVER_KEY":
-			continue
-		}
-		env = append(env, kv)
-	}
+	env := filterEnv(os.Environ(), "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "ENVER_KEY")
 	env = append(env,
 		"HOME="+home,
 		"USERPROFILE="+home,
@@ -150,21 +143,26 @@ func (s *sandbox) setEnv(k, v string) {
 	s.env = append(s.env, k+"="+v)
 }
 
-// dropEnv removes the named variables from the sandbox environment so a test
-// can exercise a lower rung of the config-home ladder.
-func (s *sandbox) dropEnv(keys ...string) {
-	s.t.Helper()
+// filterEnv drops the named variables from a KEY=VALUE environment.
+func filterEnv(env []string, keys ...string) []string {
 	dropped := make(map[string]bool, len(keys))
 	for _, k := range keys {
 		dropped[k] = true
 	}
-	env := make([]string, 0, len(s.env))
-	for _, kv := range s.env {
+	filtered := make([]string, 0, len(env))
+	for _, kv := range env {
 		if !dropped[strings.SplitN(kv, "=", 2)[0]] {
-			env = append(env, kv)
+			filtered = append(filtered, kv)
 		}
 	}
-	s.env = env
+	return filtered
+}
+
+// dropEnv removes the named variables from the sandbox environment so a test
+// can exercise a lower rung of the config-home ladder.
+func (s *sandbox) dropEnv(keys ...string) {
+	s.t.Helper()
+	s.env = filterEnv(s.env, keys...)
 }
 
 type result struct {
