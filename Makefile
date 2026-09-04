@@ -52,10 +52,16 @@ hooks:
 #
 # Paths are quoted throughout: make expands $(COVDIR) verbatim into the
 # recipe text, and a checkout path with spaces must survive the shell.
+#
+# The unit leg runs without -race and pins -covermode=set: -race forces
+# covermode=atomic, while the instrumented e2e binary (go build -cover)
+# counts in set mode, and covdata refuses to merge mixed modes. Race
+# coverage stays on `test` and the e2e leg, whose test binary is
+# un-instrumented.
 cover:
 	rm -rf .coverage coverage.txt
 	mkdir -p "$(COVDIR)/unit" "$(COVDIR)/e2e"
-	go test -race -count=1 -cover -coverpkg=./... $(UNIT_PKGS) -args -test.gocoverdir="$(COVDIR)/unit"
+	go test -count=1 -cover -covermode=set -coverpkg=./... $(UNIT_PKGS) -args -test.gocoverdir="$(COVDIR)/unit"
 	GOCOVERDIR="$(COVDIR)/e2e" go test -race -count=1 ./test/e2e
 	go tool covdata textfmt -i="$(COVDIR)/unit,$(COVDIR)/e2e" -o coverage.txt
 	go tool cover -func=coverage.txt | tail -1
