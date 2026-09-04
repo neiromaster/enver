@@ -70,10 +70,10 @@ func TestUnsetYAMLScalarAndSequence(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(doc), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !sliceEq(cfg.Profiles["a"].Unset, []string{"API_KEY"}) {
+	if !slices.Equal(cfg.Profiles["a"].Unset, []string{"API_KEY"}) {
 		t.Fatalf("scalar unset = %v, want [API_KEY]", cfg.Profiles["a"].Unset)
 	}
-	if !sliceEq(cfg.Profiles["b"].Unset, []string{"A", "B"}) {
+	if !slices.Equal(cfg.Profiles["b"].Unset, []string{"A", "B"}) {
 		t.Fatalf("sequence unset = %v, want [A B]", cfg.Profiles["b"].Unset)
 	}
 }
@@ -137,7 +137,7 @@ func TestMergeUnsetListIsTheOverridingLayers(t *testing.T) {
 	}
 	baseNoUnset := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"K": "base"}}}}
 	over := Config{Profiles: map[string]Profile{"p": {Unset: Unsets{"B", "C"}}}}
-	if u := Merge(baseNoUnset, over).Profiles["p"].Unset; !sliceEq(u, []string{"B", "C"}) {
+	if u := Merge(baseNoUnset, over).Profiles["p"].Unset; !slices.Equal(u, []string{"B", "C"}) {
 		t.Fatalf("merged unset = %v, want [B C]", u)
 	}
 }

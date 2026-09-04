@@ -20,12 +20,6 @@ const (
 // to the working directory would carry the same tail.
 var fallbackHint = "Create one at: " + filepath.Join("/", ".config", "enver", "config.yaml")
 
-// platformHomeRungWritable reports whether the rung below HOME resolves to a
-// real directory on this platform: os.UserHomeDir reads USERPROFILE on
-// Windows. On POSIX it reads $HOME only and errors once HOME is dropped, so
-// the rung degrades to the "/"-fallback hint — observable, not writable.
-func platformHomeRungWritable() bool { return runtime.GOOS == "windows" }
-
 // assertListed requires the run to exit 0, its output to carry want, and —
 // unless notWant is empty — not to carry notWant.
 func assertListed(t *testing.T, r result, want, notWant string) {
@@ -70,19 +64,22 @@ func TestConfigHomeRungHOME(t *testing.T) {
 
 // TestConfigHomeRungPlatformHome pins the platform-home rung, guarding the
 // home-resolution regression where os.UserHomeDir is never consulted: with
-// XDG and HOME dropped, os.UserHomeDir resolves the config home (USERPROFILE
-// on Windows). POSIX degrades to the "/"-fallback hint.
+// XDG and HOME dropped, os.UserHomeDir resolves the config home. Windows
+// reads USERPROFILE, so a config planted there must win; POSIX reads $HOME
+// only (already dropped), so the rung degrades to the bottom rung — and the
+// still-set USERPROFILE must stay unconsulted, yielding the same
+// "/"-fallback hint pinned by TestConfigHomeRungFallbackHint.
 func TestConfigHomeRungPlatformHome(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME")
-	if platformHomeRungWritable() {
+	if runtime.GOOS == "windows" {
 		s.writeGlobal(ladderYAML) // USERPROFILE/.config
 	}
 	r := s.run("list", "-g")
 	if r.ExitCode != 0 {
 		t.Fatalf("list -g exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
-	if platformHomeRungWritable() {
+	if runtime.GOOS == "windows" {
 		if !strings.Contains(r.Stdout, "ladder") {
 			t.Fatalf("USERPROFILE rung must resolve the config, got: %q", r.Stdout)
 		}

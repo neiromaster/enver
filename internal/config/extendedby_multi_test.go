@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -16,19 +17,19 @@ func TestExtendedByMultiParent(t *testing.T) {
 
 	got := cfg.ExtendedBy("base")
 	want := []string{"child1", "child2", "multi"}
-	if !sliceEq(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("ExtendedBy(base) = %v, want %v", got, want)
 	}
 
 	got = cfg.ExtendedBy("child1")
 	want = []string{"multi"}
-	if !sliceEq(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("ExtendedBy(child1) = %v, want %v", got, want)
 	}
 
 	got = cfg.ExtendedBy("child2")
 	want = []string{"multi"}
-	if !sliceEq(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("ExtendedBy(child2) = %v, want %v", got, want)
 	}
 }

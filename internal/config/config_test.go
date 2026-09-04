@@ -56,7 +56,7 @@ func TestMergeExtends(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := mergeExtends(c.base, c.over)
-		if !sliceEq(got, c.want) {
+		if !slices.Equal(got, c.want) {
 			t.Fatalf("%s: mergeExtends(%v, %v) = %v, want %v", c.name, c.base, c.over, got, c.want)
 		}
 	}
@@ -65,7 +65,7 @@ func TestMergeExtends(t *testing.T) {
 	base := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"g"}, Env: map[string]string{"K": "base"}}}}
 	over := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"l"}, Env: map[string]string{"K2": "over"}}}}
 	merged := Merge(base, over)
-	if got := merged.Profiles["p"].Extends; !sliceEq(got, Extends{"g", "l"}) {
+	if got := merged.Profiles["p"].Extends; !slices.Equal(got, Extends{"g", "l"}) {
 		t.Fatalf("merged extends = %v, want [g l]", got)
 	}
 
@@ -94,7 +94,7 @@ func TestResolveProfileExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := r.Chain, []string{"leaf", "mid", "root"}; !sliceEq(got, want) {
+	if got, want := r.Chain, []string{"leaf", "mid", "root"}; !slices.Equal(got, want) {
 		t.Fatalf("chain = %v, want %v", got, want)
 	}
 	want := map[string]string{"A": "1", "B": "2", "C": "3"}
@@ -296,18 +296,6 @@ func chdir(t *testing.T, dir string) func() {
 	return func() { _ = os.Chdir(wd) }
 }
 
-func sliceEq(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a) && i < len(b); i++ {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func mapEq(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -352,7 +340,7 @@ func TestExtendedBy(t *testing.T) {
 	}}
 	got := cfg.ExtendedBy("base")
 	want := []string{"mid", "other"}
-	if !sliceEq(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("ExtendedBy(base) = %v, want %v", got, want)
 	}
 	if got := cfg.ExtendedBy("leaf"); len(got) != 0 {
@@ -563,7 +551,7 @@ func TestResolveProfileMultipleExtends(t *testing.T) {
 	if !mapEq(r.Env, want) {
 		t.Fatalf("env = %v, want %v", r.Env, want)
 	}
-	if got, want := r.Chain, []string{"mix", "trait1", "base", "trait2"}; !sliceEq(got, want) {
+	if got, want := r.Chain, []string{"mix", "trait1", "base", "trait2"}; !slices.Equal(got, want) {
 		t.Fatalf("chain = %v, want %v", got, want)
 	}
 }
@@ -600,7 +588,7 @@ func TestExtendsYAMLScalarAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Profiles["mix"].Extends; !sliceEq(got, []string{"a", "b"}) {
+	if got := cfg.Profiles["mix"].Extends; !slices.Equal(got, []string{"a", "b"}) {
 		t.Fatalf("list extends = %v, want [a b]", got)
 	}
 	// scalar form still works
@@ -608,7 +596,7 @@ func TestExtendsYAMLScalarAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ = load(path)
-	if got := cfg.Profiles["one"].Extends; !sliceEq(got, []string{"a"}) {
+	if got := cfg.Profiles["one"].Extends; !slices.Equal(got, []string{"a"}) {
 		t.Fatalf("scalar extends = %v, want [a]", got)
 	}
 }
