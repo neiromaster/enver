@@ -60,27 +60,7 @@ jobs:
 
       - name: coverage gate
         if: runner.os == 'Linux'
-        env:
-          GOCOVERDIR: ${{ github.workspace }}/.coverage
-          ENVER_E2E_COVER: "1"
-          MIN_COVER: "78"
-        run: |
-          mkdir -p "$GOCOVERDIR"
-          UNIT_PKGS=$(go list ./... | grep -v '/test/e2e')
-          ENVER_E2E_COVER=1 GOCOVERDIR="$GOCOVERDIR" go test -race -count=1 -cover -coverpkg=./... $UNIT_PKGS -args -test.gocoverdir="$GOCOVERDIR"
-          ENVER_E2E_COVER=1 GOCOVERDIR="$GOCOVERDIR" go test -race -count=1 ./test/e2e
-          go tool covdata textfmt -i="$GOCOVERDIR" -o coverage.txt
-          total=$(go tool cover -func=coverage.txt | awk '/^total:/ {gsub("%",""); print $NF}')
-          echo "total coverage: ${total}% (gate: ${MIN_COVER}%)"
-          if ! awk -v t="$total" -v m="$MIN_COVER" 'BEGIN { exit !(t+0 > m+0) }'; then
-            echo "::error::coverage ${total}% is not above the gate ${MIN_COVER}%"
-            exit 1
-          fi
-          hit=$(grep -E 'exec_(windows|unix)\.go' coverage.txt | awk '$NF > 0' | head -1 || true)
-          if [ -z "$hit" ]; then
-            echo "::error::unit covdata missing: no covered exec_* spawn-failure line"
-            exit 1
-          fi
+        run: make cover-gate
 
       - name: upload coverage
         if: runner.os == 'Linux' && !cancelled()
