@@ -210,9 +210,11 @@ func TestXRealChildPassesShellThroughFence(t *testing.T) {
 }
 
 // xHelperExec runs inside the re-executed binary: it wires the fixture under
-// dir and lets x deliver the child. On success the exec replaces this process
-// with the shell and never returns; reaching the end of the function means
-// the child exited without replacing us.
+// dir and lets x deliver the child. Without GOCOVERDIR the exec replaces this
+// process with the shell and never returns, so reaching the end of the
+// function means the child exited without replacing us; under a coverage
+// build (GOCOVERDIR set — the same signal execChild keys on) fork+wait is the
+// expected delivery, and surviving is the pass.
 func xHelperExec(t *testing.T, dir string) {
 	t.Setenv("EDITOR", "shell-live")
 	workDir := filepath.Join(dir, "wd")
@@ -223,5 +225,9 @@ func xHelperExec(t *testing.T, dir string) {
 	if _, err := runCommand(t, "--config", globalPath, "--chdir", workDir, "x", "bare", "--", "/bin/sh", "-c", script); err != nil {
 		t.Fatalf("x bare: %v", err)
 	}
-	t.Fatal("x must replace the helper process via exec")
+	// Coverage builds lose syscall.Exec to the waitChild fallback, so only a
+	// plain run must prove the process replacement.
+	if os.Getenv("GOCOVERDIR") == "" {
+		t.Fatal("x must replace the helper process via exec")
+	}
 }
