@@ -116,12 +116,13 @@ func childExitCommand(t *testing.T, code int) (string, []string) {
 	return path, []string{"sh", "-c", "exit " + strconv.Itoa(code)}
 }
 
-// TestExecChildPropagatesExitCode pins the windows child-wait path: the
-// child's exit code is ours. The unix sibling cannot run here — execChild
-// execve-replaces the process — and stays covered by the e2e suite.
+// TestExecChildPropagatesExitCode pins the child-wait path: the child's exit
+// code is ours. Windows always waits; on unix the wait path is coverage-only,
+// so the test stands in for a coverage build with a non-empty GOCOVERDIR —
+// the default execve path would replace the test process itself.
 func TestExecChildPropagatesExitCode(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("unix execChild replaces the process via execve; covered by e2e TestXPropagatesChildExitCode")
+		t.Setenv("GOCOVERDIR", t.TempDir())
 	}
 	path, args := childExitCommand(t, 3)
 	if code := execChild(path, args, nil, "enver x"); code != 3 {
@@ -144,7 +145,10 @@ func TestExecChildSpawnFailureReturnsOne(t *testing.T) {
 		}
 		return
 	}
-	// syscall.Exec failure path: the process survives a bad path.
+	// syscall.Exec failure path: the process survives a bad path. Clear
+	// GOCOVERDIR to pin the execve branch — a coverage build sets it and
+	// would take the wait path instead.
+	t.Setenv("GOCOVERDIR", "")
 	bad := "/enver-no-such-binary-xyz"
 	if code := execChild(bad, []string{bad}, nil, "enver x"); code != 1 {
 		t.Fatalf("execChild(bad path) = %d, want 1", code)
