@@ -1,3 +1,31 @@
+// Enver injects environment variables from named, layered YAML profiles
+// into any child command.
+//
+// Configuration is a two-layer merge: one global store at
+// ~/.config/enver/config.yaml overlaid by an optional project file,
+// ./.enver.yaml. Profiles inherit values through multi-parent extends
+// chains resolved root-first, and unset fences keep listed keys out of
+// the injected environment so shell values pass through untouched.
+// Secret values are encrypted at rest with argon2id-derived keys and
+// AES-256-GCM. enver never writes to the target tool's own
+// configuration.
+//
+// # Commands
+//
+//   - x runs a child command with the resolved profile environment
+//     injected, stdio connected, exit code propagated.
+//   - show prints a resolved profile with per-value provenance and
+//     masks secret values in text output.
+//   - export prints shell export lines for a profile.
+//   - list prints available profiles; validate reports config errors.
+//   - add, edit, remove, rename, duplicate and default manage profiles;
+//     they are interactive and require a TTY on stdin.
+//   - import converts a .env file into a profile; dotenv prints the
+//     profile back in .env form.
+//   - encrypt, decrypt and keygen manage encryption of secret values.
+//
+// Full documentation lives at
+// https://github.com/neiromaster/enver/tree/main/docs.
 package main
 
 import (

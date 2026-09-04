@@ -1,3 +1,8 @@
+// Package crypto encrypts and decrypts secret values at rest with
+// argon2id-derived keys and AES-256-GCM. The enc:v3 value header carries
+// its own KDF parameters, bounded at parse time so a hostile config
+// cannot inflate the derivation cost. Config readers decrypt
+// transparently; the master key file is created and written here.
 package crypto
 
 import (
