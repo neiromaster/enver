@@ -33,7 +33,7 @@ func TestParseProfileAndCmd(t *testing.T) {
 			if prof != c.wantProf {
 				t.Errorf("profile = %q, want %q", prof, c.wantProf)
 			}
-			if !sliceEq(cmd, c.wantCmd) {
+			if !slices.Equal(cmd, c.wantCmd) {
 				t.Errorf("cmdArgs = %v, want %v", cmd, c.wantCmd)
 			}
 		})
@@ -435,10 +435,6 @@ profiles:
 	}
 }
 
-func sliceEq(a, b []string) bool {
-	return slices.Equal(a, b)
-}
-
 func TestResolveRecoveryConflictingEras(t *testing.T) {
 	// Two eras in one profile cannot share a passphrase-derived key; picking a
 	// salt by map order would flip recovery between working and failing per
@@ -518,8 +514,23 @@ func TestChdir(t *testing.T) {
 	if err := Chdir(dir); err != nil {
 		t.Fatalf("Chdir(%q) = %v, want nil", dir, err)
 	}
-	if wd, err := os.Getwd(); err != nil || wd != dir {
-		t.Fatalf("cwd = %q (err %v), want %q", wd, err, dir)
+	// SameFile, not string equality: Getwd returns the OS-canonical path,
+	// which differs from t.TempDir() on hosts whose temp root is a symlink
+	// (macOS: /var -> /private/var) even though Chdir landed correctly.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() = %v, want nil", err)
+	}
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wi, err := os.Stat(wd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(di, wi) {
+		t.Fatalf("cwd = %q, want %q", wd, dir)
 	}
 }
 
@@ -532,10 +543,10 @@ func TestMatchingProfiles(t *testing.T) {
 	}
 	opts := Options{ConfigPath: cfgPath, NoLocal: true}
 
-	if got := MatchingProfiles(opts, ""); !sliceEq(got, []string{"alpha", "beta", "delta"}) {
+	if got := MatchingProfiles(opts, ""); !slices.Equal(got, []string{"alpha", "beta", "delta"}) {
 		t.Fatalf(`MatchingProfiles("") = %v, want all three`, got)
 	}
-	if got := MatchingProfiles(opts, "be"); !sliceEq(got, []string{"beta"}) {
+	if got := MatchingProfiles(opts, "be"); !slices.Equal(got, []string{"beta"}) {
 		t.Fatalf(`MatchingProfiles("be") = %v, want [beta]`, got)
 	}
 	// No match: the pre-allocated result slice comes back empty but non-nil;
