@@ -2,7 +2,7 @@
 
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { spawnSync } = require('node:child_process')
+const { spawnSync, spawn } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -65,4 +65,58 @@ test('shim exits 1 with a message when the platform package is missing', () => {
   })
   assert.equal(r.status, 1)
   assert.match(r.stderr, /not installed/)
+})
+
+test('shim exits 1 when binary is missing/not executable', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-no-bin-'))
+  try {
+    const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${shim.platformKey()}`)
+    fs.mkdirSync(pkgDir, { recursive: true })
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
+    
+    const r = spawnSync(process.execPath, [SHIM_PATH], {
+      env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
+      encoding: 'utf8',
+    })
+    assert.equal(r.status, 1)
+    assert.match(r.stderr, /failed to execute binary/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('shim propagates SIGINT', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-sigint-'))
+  try {
+    const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${shim.platformKey()}`)
+    fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true })
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
+    const binPath = path.join(pkgDir, 'bin', shim.binaryName(shim.platformKey()))
+    
+    // Use a shell script that sleeps
+    fs.writeFileSync(binPath, '#!/bin/sh\nsleep 30\n')
+    fs.chmodSync(binPath, 0o755)
+
+    const child = spawn(process.execPath, [SHIM_PATH], {
+      env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
+    })
+
+    await new Promise((resolve, reject) => {
+      child.on('exit', (code, signal) => {
+        try {
+          assert.equal(signal, 'SIGINT')
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      })
+
+      // Give it a moment to start and register listeners
+      setTimeout(() => {
+        child.kill('SIGINT')
+      }, 100)
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

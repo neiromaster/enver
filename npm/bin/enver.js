@@ -34,9 +34,17 @@ function run(binPath, args) {
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => child.kill(sig))
   }
+  child.on('error', (err) => {
+    console.error(`[enver] failed to execute binary: ${err.message}`)
+    process.exit(1)
+  })
   child.on('exit', (code, signal) => {
-    if (signal) process.kill(process.pid, signal)
-    else process.exit(code ?? 1)
+    if (signal) {
+      for (const sig of ['SIGINT', 'SIGTERM']) process.removeAllListeners(sig)
+      process.kill(process.pid, signal)
+    } else {
+      process.exit(code ?? 1)
+    }
   })
 }
 
