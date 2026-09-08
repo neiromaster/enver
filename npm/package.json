@@ -1,0 +1,23 @@
+{
+  "name": "@neiromaster/enver",
+  "version": "0.0.0",
+  "description": "Inject environment variables from layered YAML profiles into any command",
+  "bin": { "enver": "bin/enver.js" },
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"],
+  "optionalDependencies": {
+    "@neiromaster/enver-darwin-arm64": "0.0.0",
+    "@neiromaster/enver-darwin-x64": "0.0.0",
+    "@neiromaster/enver-linux-arm64": "0.0.0",
+    "@neiromaster/enver-linux-x64": "0.0.0",
+    "@neiromaster/enver-win32-arm64": "0.0.0",
+    "@neiromaster/enver-win32-x64": "0.0.0"
+  },
+  "files": ["bin", "README.md"],
+  "license": "MIT",
+  "engines": { "node": ">=16" },
+  "repository": { "type": "git", "url": "git+https://github.com/neiromaster/enver.git" },
+  "homepage": "https://github.com/neiromaster/enver",
+  "bugs": { "url": "https://github.com/neiromaster/enver/issues" },
+  "publishConfig": { "access": "public" }
+}
