@@ -46,6 +46,12 @@ brew install enver               # wires shell completions; strips Gatekeeper qu
 go install github.com/neiromaster/enver/cmd/enver@latest
 ```
 
+**npm**:
+
+```sh
+npm install -g @neiromaster/enver
+```
+
 Build from source (`make build` → `./bin/enver`) or grab pre-compiled
 linux/darwin/windows × amd64/arm64 archives with completions from the
 [releases page](https://github.com/neiromaster/enver/releases).
