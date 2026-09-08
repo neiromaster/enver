@@ -93,8 +93,16 @@ test('shim propagates SIGINT', async () => {
     fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
     const binPath = path.join(pkgDir, 'bin', shim.binaryName(shim.platformKey()))
     
-    // Use a shell script that sleeps
-    fs.writeFileSync(binPath, '#!/bin/sh\nsleep 30\n')
+    // A Node child that re-raises SIGINT so it dies from the signal
+    // deterministically on every platform (a /bin/sh child is not
+    // reliable: dash on Linux may not die from a lone SIGINT).
+    fs.writeFileSync(binPath, `#!/usr/bin/env node
+process.on('SIGINT', () => {
+  process.removeAllListeners('SIGINT')
+  process.kill(process.pid, 'SIGINT')
+})
+setInterval(() => {}, 1000)
+`)
     fs.chmodSync(binPath, 0o755)
 
     const child = spawn(process.execPath, [SHIM_PATH], {

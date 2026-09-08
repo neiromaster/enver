@@ -69,3 +69,15 @@ jobs:
           name: coverage
           path: coverage.txt
           if-no-files-found: ignore
+
+  shim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: shim tests
+        run: node --test 'npm/test/*.test.js'
