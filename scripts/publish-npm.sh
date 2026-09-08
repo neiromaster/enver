@@ -85,7 +85,8 @@ for entry in "${PLATFORMS[@]}"; do
   "os": ["${pkg_key%%-*}"],
   "cpu": ["${pkg_key##*-}"],
   "files": ["bin"],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/neiromaster/enver.git" }
 }
 EOF
   publish_or_pack "$dir"
