@@ -17,9 +17,9 @@ This package installs the prebuilt `enver` binary for your platform
 ## Install
 
 ```sh
-npm install -g @neiromaster/enver
+npm install -g @enver-go/enver
 # or run without installing:
-npx @neiromaster/enver --help
+npx @enver-go/enver --help
 ```
 
 ## Docs

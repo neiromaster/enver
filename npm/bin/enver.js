@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict'
 
-// Bin shim for the @neiromaster/enver npm package. The real binary lives in a
+// Bin shim for the @enver-go/enver npm package. The real binary lives in a
 // platform package installed as an optionalDependency; this shim resolves it
 // and spawns it, so `enver` works with zero lifecycle scripts (pnpm-safe).
 
@@ -10,7 +10,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const PKG_PREFIX = '@neiromaster/enver'
+const PKG_PREFIX = '@enver-go/enver'
 
 // SIGHUP is forwarded because the detached child no longer receives terminal
 // hangup directly — only the shim does.

@@ -3,14 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Publish @neiromaster/enver and its 6 platform packages to npm.
-# Usage: publish-npm.sh <version> [--pack-only]
+# Publish @enver-go/enver and its 6 platform packages to npm.
+# Usage: publish-npm.sh <version> [--pack-only] [--no-provenance]
 #   <version>   semver without the v prefix, e.g. 0.8.4
 #   --pack-only emit local .tgz tarballs into ./dist-npm instead of publishing
+#   --no-provenance skip the provenance attestation (first-release bootstrap,
+#                   when publishing from a local machine with a token)
 
-VERSION="${1:?usage: publish-npm.sh <version> [--pack-only]}"
+VERSION="${1:?usage: publish-npm.sh <version> [--pack-only] [--no-provenance]}"
 PACK_ONLY=0
+PROVENANCE=1
 [[ "${2:-}" == "--pack-only" ]] && PACK_ONLY=1
+[[ "${2:-}" == "--no-provenance" ]] && PROVENANCE=0
+PROVENANCE_ARGS=()
+[[ "$PROVENANCE" == 1 ]] && PROVENANCE_ARGS+=(--provenance)
 
 REPO="neiromaster/enver"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
@@ -51,7 +57,7 @@ publish_or_pack() {
   local dir="$1" pkg="$2"
   if [[ "$PACK_ONLY" == 1 ]]; then
     (cd "$dir" && npm pack --pack-destination "$OUT_DIR" >/dev/null)
-  elif ! (cd "$dir" && npm publish --provenance --access public --tag "$NPM_TAG"); then
+  elif ! (cd "$dir" && npm publish "${PROVENANCE_ARGS[@]}" --access public --tag "$NPM_TAG"); then
     # The npm view guards below can misread a transient registry error as
     # "not published"; a publish conflict re-checked with a fresh view is
     # the authoritative already-published signal.
@@ -74,7 +80,7 @@ curl -fsSL "${BASE_URL}/checksums.txt" -o "$WORK/checksums.txt"
 # 1. platform packages (before the meta, so the meta resolves cleanly)
 for entry in "${PLATFORMS[@]}"; do
   IFS=: read -r pkg_key os_arch ext bin_name <<< "$entry"
-  pkg="@neiromaster/enver-${pkg_key}"
+  pkg="@enver-go/enver-${pkg_key}"
   if [[ "$PACK_ONLY" == 0 ]] && npm view "$pkg@$VERSION" >/dev/null 2>&1; then
     echo "skip $pkg@$VERSION (already published)"
     continue
@@ -111,8 +117,8 @@ EOF
 done
 
 # 2. meta package
-if [[ "$PACK_ONLY" == 0 ]] && npm view "@neiromaster/enver@$VERSION" >/dev/null 2>&1; then
-  echo "skip @neiromaster/enver@$VERSION (already published)"
+if [[ "$PACK_ONLY" == 0 ]] && npm view "@enver-go/enver@$VERSION" >/dev/null 2>&1; then
+  echo "skip @enver-go/enver@$VERSION (already published)"
   exit 0
 fi
 META="$WORK/meta"
@@ -122,6 +128,6 @@ cp -r npm/bin "$META/bin"
 npm --prefix "$META" pkg set version="$VERSION"
 for entry in "${PLATFORMS[@]}"; do
   pkg_key="${entry%%:*}"
-  npm --prefix "$META" pkg set "optionalDependencies.@neiromaster/enver-${pkg_key}=$VERSION"
+  npm --prefix "$META" pkg set "optionalDependencies.@enver-go/enver-${pkg_key}=$VERSION"
 done
-publish_or_pack "$META" "@neiromaster/enver@$VERSION"
+publish_or_pack "$META" "@enver-go/enver@$VERSION"

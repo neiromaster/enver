@@ -49,7 +49,7 @@ go install github.com/neiromaster/enver/cmd/enver@latest
 **npm**:
 
 ```sh
-npm install -g @neiromaster/enver
+npm install -g @enver-go/enver
 ```
 
 Build from source (`make build` → `./bin/enver`) or grab pre-compiled

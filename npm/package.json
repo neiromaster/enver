@@ -1,5 +1,5 @@
 {
-  "name": "@neiromaster/enver",
+  "name": "@enver-go/enver",
   "version": "0.0.0",
   "description": "Inject environment variables from layered YAML profiles into any command",
   "bin": { "enver": "bin/enver.js" },

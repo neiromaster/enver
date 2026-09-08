@@ -34,7 +34,7 @@ setInterval(() => {}, 1000)
 `
 
 function fakePlatformPackage(dir, key, { exitCode = 0, binContent, binMode = 0o755 } = {}) {
-  const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${key}`)
+  const pkgDir = path.join(dir, 'node_modules', '@enver-go', `enver-${key}`)
   fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true })
   fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
   if (binContent === null) return undefined
@@ -54,7 +54,7 @@ test('binaryName appends .exe on win32', () => {
 })
 
 test('packageName prefixes the scope', () => {
-  assert.equal(shim.packageName('darwin-arm64'), '@neiromaster/enver-darwin-arm64')
+  assert.equal(shim.packageName('darwin-arm64'), '@enver-go/enver-darwin-arm64')
 })
 
 test('shim propagates the child exit code', { skip: WIN }, () => {
