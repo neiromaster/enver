@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 # Publish @neiromaster/enver and its 6 platform packages to npm.
 # Usage: publish-npm.sh <version> [--pack-only]
 #   <version>   semver without the v prefix, e.g. 0.8.4
@@ -29,6 +31,14 @@ if [[ "$VERSION" == "0.0.0" ]]; then
   exit 1
 fi
 
+# A prerelease (e.g. 1.0.0-rc1) must not claim the `latest` dist-tag.
+if [[ "$VERSION" == *-* ]]; then
+  NPM_TAG="${VERSION#*-}"
+  NPM_TAG="${NPM_TAG%%+*}"
+else
+  NPM_TAG="latest"
+fi
+
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -38,11 +48,19 @@ sha256() {
 }
 
 publish_or_pack() {
-  local dir="$1"
+  local dir="$1" pkg="$2"
   if [[ "$PACK_ONLY" == 1 ]]; then
     (cd "$dir" && npm pack --pack-destination "$OUT_DIR" >/dev/null)
-  else
-    (cd "$dir" && npm publish --provenance --access public)
+  elif ! (cd "$dir" && npm publish --provenance --access public --tag "$NPM_TAG"); then
+    # The npm view guards below can misread a transient registry error as
+    # "not published"; a publish conflict re-checked with a fresh view is
+    # the authoritative already-published signal.
+    if npm view "$pkg" >/dev/null 2>&1; then
+      echo "skip $pkg (published concurrently, or the earlier view check hit a registry error)"
+    else
+      echo "npm publish failed for $pkg and it is not on the registry" >&2
+      return 1
+    fi
   fi
 }
 
@@ -89,7 +107,7 @@ for entry in "${PLATFORMS[@]}"; do
   "repository": { "type": "git", "url": "git+https://github.com/neiromaster/enver.git" }
 }
 EOF
-  publish_or_pack "$dir"
+  publish_or_pack "$dir" "$pkg@$VERSION"
 done
 
 # 2. meta package
@@ -106,4 +124,4 @@ for entry in "${PLATFORMS[@]}"; do
   pkg_key="${entry%%:*}"
   npm --prefix "$META" pkg set "optionalDependencies.@neiromaster/enver-${pkg_key}=$VERSION"
 done
-publish_or_pack "$META"
+publish_or_pack "$META" "@neiromaster/enver@$VERSION"
