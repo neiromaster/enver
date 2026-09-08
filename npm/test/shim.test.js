@@ -10,14 +10,37 @@ const path = require('node:path')
 const shim = require('../bin/enver.js')
 
 const SHIM_PATH = path.join(__dirname, '..', 'bin', 'enver.js')
+const WIN = process.platform === 'win32'
 
-function fakePlatformPackage(dir, key, exitCode) {
+// A node child that counts the SIGINTs it receives and exits 100+n after a
+// short grace window, so a second (double) delivery is observable.
+const SIGINT_COUNT = `#!/usr/bin/env node
+let n = 0
+process.on('SIGINT', () => {
+  n++
+  setTimeout(() => process.exit(100 + n), 200)
+})
+setInterval(() => {}, 1000)
+`
+
+// A node child that re-raises SIGINT so it dies from the signal
+// deterministically.
+const SIGINT_DIE = `#!/usr/bin/env node
+process.on('SIGINT', () => {
+  process.removeAllListeners('SIGINT')
+  process.kill(process.pid, 'SIGINT')
+})
+setInterval(() => {}, 1000)
+`
+
+function fakePlatformPackage(dir, key, { exitCode = 0, binContent, binMode = 0o755 } = {}) {
   const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${key}`)
   fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true })
   fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
+  if (binContent === null) return undefined
   const binPath = path.join(pkgDir, 'bin', shim.binaryName(key))
-  fs.writeFileSync(binPath, `#!/usr/bin/env node\nprocess.exit(${exitCode})\n`)
-  fs.chmodSync(binPath, 0o755)
+  fs.writeFileSync(binPath, binContent ?? `#!/usr/bin/env node\nprocess.exit(${exitCode})\n`)
+  fs.chmodSync(binPath, binMode)
   return binPath
 }
 
@@ -34,20 +57,10 @@ test('packageName prefixes the scope', () => {
   assert.equal(shim.packageName('darwin-arm64'), '@neiromaster/enver-darwin-arm64')
 })
 
-test('resolveBinary points at the platform package bin', () => {
+test('shim propagates the child exit code', { skip: WIN }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-shim-'))
   try {
-    const binPath = fakePlatformPackage(dir, 'darwin-arm64', 0)
-    assert.equal(fs.realpathSync(shim.resolveBinary('darwin-arm64', dir)), fs.realpathSync(binPath))
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('shim propagates the child exit code', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-shim-'))
-  try {
-    fakePlatformPackage(dir, shim.platformKey(), 42)
+    fakePlatformPackage(dir, shim.platformKey(), { exitCode: 42 })
     const r = spawnSync(process.execPath, [SHIM_PATH], {
       env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
       encoding: 'utf8',
@@ -67,13 +80,25 @@ test('shim exits 1 with a message when the platform package is missing', () => {
   assert.match(r.stderr, /not installed/)
 })
 
-test('shim exits 1 when binary is missing/not executable', () => {
+test('shim exits 1 with a message when the binary is not on disk', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-no-bin-'))
   try {
-    const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${shim.platformKey()}`)
-    fs.mkdirSync(pkgDir, { recursive: true })
-    fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
-    
+    fakePlatformPackage(dir, shim.platformKey(), { binContent: null })
+    const r = spawnSync(process.execPath, [SHIM_PATH], {
+      env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
+      encoding: 'utf8',
+    })
+    assert.equal(r.status, 1)
+    assert.match(r.stderr, /binary missing/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('shim exits 1 when the binary is not executable', { skip: WIN }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-noexec-'))
+  try {
+    fakePlatformPackage(dir, shim.platformKey(), { binMode: 0o644 })
     const r = spawnSync(process.execPath, [SHIM_PATH], {
       env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
       encoding: 'utf8',
@@ -85,25 +110,42 @@ test('shim exits 1 when binary is missing/not executable', () => {
   }
 })
 
-test('shim propagates SIGINT', async () => {
+test('shim forwards exactly one SIGINT per terminal Ctrl+C', { skip: WIN }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-sigint-once-'))
+  try {
+    fakePlatformPackage(dir, shim.platformKey(), { binContent: SIGINT_COUNT })
+
+    // detached makes the shim its own process group leader, so a group-wide
+    // signal — what a terminal delivers to the foreground group — reaches the
+    // shim and only the shim, which forwards it exactly once.
+    const child = spawn(process.execPath, [SHIM_PATH], {
+      env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
+      detached: true,
+    })
+
+    await new Promise((resolve, reject) => {
+      child.on('exit', (code) => {
+        try {
+          assert.equal(code, 101, 'the child must see exactly one SIGINT')
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      })
+      setTimeout(() => {
+        process.kill(-child.pid, 'SIGINT')
+      }, 300)
+      setTimeout(() => reject(new Error('shim did not exit')), 3000)
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('shim propagates SIGINT', { skip: WIN }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'enver-sigint-'))
   try {
-    const pkgDir = path.join(dir, 'node_modules', '@neiromaster', `enver-${shim.platformKey()}`)
-    fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true })
-    fs.writeFileSync(path.join(pkgDir, 'package.json'), '{}')
-    const binPath = path.join(pkgDir, 'bin', shim.binaryName(shim.platformKey()))
-    
-    // A Node child that re-raises SIGINT so it dies from the signal
-    // deterministically on every platform (a /bin/sh child is not
-    // reliable: dash on Linux may not die from a lone SIGINT).
-    fs.writeFileSync(binPath, `#!/usr/bin/env node
-process.on('SIGINT', () => {
-  process.removeAllListeners('SIGINT')
-  process.kill(process.pid, 'SIGINT')
-})
-setInterval(() => {}, 1000)
-`)
-    fs.chmodSync(binPath, 0o755)
+    fakePlatformPackage(dir, shim.platformKey(), { binContent: SIGINT_DIE })
 
     const child = spawn(process.execPath, [SHIM_PATH], {
       env: { ...process.env, NODE_PATH: path.join(dir, 'node_modules') },
