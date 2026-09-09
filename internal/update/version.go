@@ -28,7 +28,7 @@ func canonicalVersion(v string) string {
 	return semver.Canonical(v)
 }
 
-// latestOrEqual reports whether current is at or above latest.
-func latestOrEqual(current, latest string) bool {
+// LatestOrEqual reports whether current is at or above latest.
+func LatestOrEqual(current, latest string) bool {
 	return semver.Compare(canonicalVersion(current), canonicalVersion(latest)) >= 0
 }

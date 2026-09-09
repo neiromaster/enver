@@ -23,12 +23,15 @@
 //   - import converts a .env file into a profile; dotenv prints the
 //     profile back in .env form.
 //   - encrypt, decrypt and keygen manage encryption of secret values.
+//   - update updates the enver binary to the latest release; --check only
+//     reports whether an update is available.
 //
 // Full documentation lives at
 // https://github.com/neiromaster/enver/tree/main/docs.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -71,6 +74,7 @@ environment injected, without mutating any tool's own config.
   enver duplicate <src> [new]           copy a profile
   enver default [profile]               set/show the default (--clear to clear)
   enver validate                        check config health
+  enver update [--check]                update enver to the latest release
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
 Profile names may collide with subcommand verbs; enver x <name> -- <command>
@@ -94,7 +98,7 @@ func init() {
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
 
-	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd)
+	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd, updateCmd)
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		return applyChdir()
@@ -106,6 +110,13 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		var ce *codedError
+		if errors.As(err, &ce) {
+			if !ce.silent {
+				fmt.Fprintf(os.Stderr, "enver: %v\n", ce.err)
+			}
+			os.Exit(ce.code)
+		}
 		fmt.Fprintf(os.Stderr, "enver: %v\n", err)
 		os.Exit(1)
 	}
@@ -244,4 +255,21 @@ func completeProfileInTarget(cmd *cobra.Command, args []string, toComplete strin
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 	return targetProfiles(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// codedError carries a process exit code out of a command. main unwraps it:
+// a silent error exits with code without printing; others print the message
+// first. Without one, main exits 1.
+type codedError struct {
+	err    error
+	code   int
+	silent bool
+}
+
+func (e *codedError) Error() string { return e.err.Error() }
+func (e *codedError) Unwrap() error { return e.err }
+
+// exitErr wraps err as an exit-code-2 failure for main.
+func exitErr(err error, code int) error {
+	return &codedError{err: err, code: code}
 }

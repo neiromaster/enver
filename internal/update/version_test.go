@@ -31,7 +31,7 @@ func TestLatestOrEqual(t *testing.T) {
 		{"dev", "0.9.1", false},
 	}
 	for _, c := range cases {
-		if got := latestOrEqual(c.current, c.latest); got != c.want {
+		if got := LatestOrEqual(c.current, c.latest); got != c.want {
 			t.Errorf("latestOrEqual(%q, %q) = %v, want %v", c.current, c.latest, got, c.want)
 		}
 	}
