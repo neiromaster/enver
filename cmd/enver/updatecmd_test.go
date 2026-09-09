@@ -125,8 +125,13 @@ func TestRunUpdateDelegateFailureExits2(t *testing.T) {
 	update.Output = func(name string, args ...string) (string, error) { return "/usr/local", nil }
 	t.Cleanup(func() { update.LookPath, update.RunCommand, update.Output = oldLook, oldRun, oldOut })
 
+	var gotName string
+	var gotArgs []string
 	oldDelegate := delegate
-	delegate = func(name string, args []string) error { return errors.New("brew upgrade failed") }
+	delegate = func(name string, args []string) error {
+		gotName, gotArgs = name, args
+		return errors.New("brew upgrade failed")
+	}
 	t.Cleanup(func() { delegate = oldDelegate })
 
 	pointClientAt(t, mockGitHub(t, "v0.9.1", nil))
@@ -137,5 +142,8 @@ func TestRunUpdateDelegateFailureExits2(t *testing.T) {
 	}
 	if ce.code != 2 {
 		t.Errorf("exit code = %d, want 2", ce.code)
+	}
+	if gotName != "brew" || len(gotArgs) != 2 || gotArgs[0] != "upgrade" || gotArgs[1] != "enver" {
+		t.Errorf("delegate = %s %v, want brew upgrade enver", gotName, gotArgs)
 	}
 }
