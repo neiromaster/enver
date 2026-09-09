@@ -52,7 +52,44 @@ go install github.com/neiromaster/enver/cmd/enver@latest
 npm install -g @enver-go/enver
 ```
 
+**Script** (no package manager, macOS/Linux):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | bash
+# pin a version:
+curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | bash -s -- v0.9.1
+```
+
+Windows (PowerShell 5.0+):
+
+```powershell
+irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
+# pin a version:
+$env:ENVER_VERSION = "v0.9.1"; irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
+```
+
+> **Piping a script to your shell runs it without review — read it first.**
+> The installer verifies the download against the release's SHA-256
+> checksums, then installs to `~/.local/bin` (macOS/Linux) or
+> `%LOCALAPPDATA%\enver\bin` (Windows); `ENVER_INSTALL_DIR` overrides.
+> Uninstall: delete the `enver` binary (plus the PATH entry the Windows
+> script may have added).
+
+**Update**:
+
+```sh
+enver update              # via the owning package manager, or self-replace
+enver update --check      # exit 0 up to date, 1 update available, 2 error
+```
+
+`enver update` delegates to npm / brew / `go install` when enver was
+installed that way; a directly-installed binary is replaced from GitHub
+releases. The new binary takes effect on the next launch. Version lookups
+use the GitHub API (60 requests/hour unauthenticated; set `GITHUB_TOKEN`
+to raise the limit).
+
 Build from source (`make build` → `./bin/enver`) or grab pre-compiled
+
 linux/darwin/windows × amd64/arm64 archives with completions from the
 [releases page](https://github.com/neiromaster/enver/releases).
 

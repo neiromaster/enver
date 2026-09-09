@@ -23,10 +23,17 @@ enver validate                            Check config health
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
+enver update [--check]                 Update the enver binary; --check reports (0/1/2 exit codes)
 ```
 
 On an interactive terminal, `enver x` primes the tab title with the profile
 name before exec, so the child's own title replaces it as soon as it sets one.
+
+`enver update` applies the latest release, dispatching to the package
+manager that owns the install (npm, brew, go install) or replacing a
+directly-installed binary from GitHub releases after verifying its SHA-256.
+Exit codes: 0 up to date, 1 update available (`--check`), 2 error. The new
+binary is used on the next launch.
 
 ## Global flags
 
