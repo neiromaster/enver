@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # One-line installer for enver (macOS/Linux). Review this script before
-# piping it to sh:
+# piping it to bash:
 #   https://github.com/neiromaster/enver/blob/main/scripts/install.sh
 #
 # Usage:
