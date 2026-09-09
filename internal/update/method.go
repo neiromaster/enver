@@ -83,7 +83,9 @@ func ResolveMethod(exe string) Method {
 		return MethodNPM
 	}
 	if b := brewPath(); b != "" && RunCommand(b, "list", "enver") {
-		return MethodBrew
+		if prefix, err := Output(b, "--prefix"); err == nil && within(prefix, exe) {
+			return MethodBrew
+		}
 	}
 	if dir, ok := goBinDir(); ok && within(dir, exe) {
 		return MethodGo

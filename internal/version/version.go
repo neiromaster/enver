@@ -16,6 +16,18 @@ var (
 // String renders Version with optional commit/date metadata. When Version is
 // "dev", it falls back to the build's VCS info.
 func String() string {
+	v, c, d := resolve()
+	return formatVersion(v, c, d)
+}
+
+// Resolved returns the effective version: Version, or the build's VCS
+// version when Version is "dev" (go install / development builds).
+func Resolved() string {
+	v, _, _ := resolve()
+	return v
+}
+
+func resolve() (string, string, string) {
 	v, c, d := Version, Commit, Date
 	if v == "dev" {
 		if bi, ok := debug.ReadBuildInfo(); ok {
@@ -24,7 +36,7 @@ func String() string {
 			}
 		}
 	}
-	return formatVersion(v, c, d)
+	return v, c, d
 }
 
 func formatVersion(version, commit, date string) string {

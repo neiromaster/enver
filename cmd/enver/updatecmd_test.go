@@ -108,3 +108,34 @@ func TestRunUpdateDelegatesToLocalNPM(t *testing.T) {
 		t.Errorf("delegate = %s %v, want npm update with --prefix", gotName, gotArgs)
 	}
 }
+
+func TestRunUpdateDelegateFailureExits2(t *testing.T) {
+	oldPath, oldVersion := execPath, version.Version
+	execPath = func() (string, error) { return "/usr/local/bin/enver", nil }
+	version.Version = "0.0.1"
+	t.Cleanup(func() { execPath, version.Version = oldPath, oldVersion })
+
+	// Force brew detection so the update delegates to brew.
+	oldLook, oldRun, oldOut := update.LookPath, update.RunCommand, update.Output
+	update.LookPath = func(string) (string, error) { return "/usr/local/bin/brew", nil }
+	update.RunCommand = func(name string, args ...string) bool {
+		return name == "/usr/local/bin/brew" && len(args) == 2 &&
+			args[0] == "list" && args[1] == "enver"
+	}
+	update.Output = func(name string, args ...string) (string, error) { return "/usr/local", nil }
+	t.Cleanup(func() { update.LookPath, update.RunCommand, update.Output = oldLook, oldRun, oldOut })
+
+	oldDelegate := delegate
+	delegate = func(name string, args []string) error { return errors.New("brew upgrade failed") }
+	t.Cleanup(func() { delegate = oldDelegate })
+
+	pointClientAt(t, mockGitHub(t, "v0.9.1", nil))
+	err := runUpdate(false)
+	var ce *codedError
+	if !errors.As(err, &ce) {
+		t.Fatalf("runUpdate err = %v, want codedError", err)
+	}
+	if ce.code != 2 {
+		t.Errorf("exit code = %d, want 2", ce.code)
+	}
+}

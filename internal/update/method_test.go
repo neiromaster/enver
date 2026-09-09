@@ -24,15 +24,30 @@ func TestResolveMethod(t *testing.T) {
 		},
 		{
 			name: "brew installed",
-			exe:  filepath.Join("opt", "homebrew", "Cellar", "enver", "0.9.1", "bin", "enver"),
+			exe:  filepath.Join("/opt", "homebrew", "Cellar", "enver", "0.9.1", "bin", "enver"),
 			setup: func() {
 				LookPath = func(string) (string, error) { return "/opt/homebrew/bin/brew", nil }
 				RunCommand = func(name string, args ...string) bool {
 					return name == "/opt/homebrew/bin/brew" && len(args) == 2 &&
 						args[0] == "list" && args[1] == "enver"
 				}
+				Output = func(name string, args ...string) (string, error) { return "/opt/homebrew", nil }
 			},
 			want: MethodBrew,
+		},
+		{
+			name: "brew installed but exe elsewhere",
+			exe:  filepath.Join("/home", "u", ".local", "bin", "enver"),
+			setup: func() {
+				LookPath = func(string) (string, error) { return "/opt/homebrew/bin/brew", nil }
+				RunCommand = func(name string, args ...string) bool {
+					return name == "/opt/homebrew/bin/brew" && len(args) == 2 &&
+						args[0] == "list" && args[1] == "enver"
+				}
+				Output = func(name string, args ...string) (string, error) { return "/opt/homebrew", nil }
+				goBinDir = func() (string, bool) { return filepath.Join("/home", "u", "go", "bin"), true }
+			},
+			want: MethodDirect,
 		},
 		{
 			name: "go bin",
@@ -55,12 +70,12 @@ func TestResolveMethod(t *testing.T) {
 			want: MethodDirect,
 		},
 	}
-	origLook, origRun, origGo := LookPath, RunCommand, goBinDir
-	t.Cleanup(func() { LookPath, RunCommand, goBinDir = origLook, origRun, origGo })
+	origLook, origRun, origGo, origOut := LookPath, RunCommand, goBinDir, Output
+	t.Cleanup(func() { LookPath, RunCommand, goBinDir, Output = origLook, origRun, origGo, origOut })
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			LookPath, RunCommand, goBinDir = origLook, origRun, origGo
+			LookPath, RunCommand, goBinDir, Output = origLook, origRun, origGo, origOut
 			if c.setup != nil {
 				c.setup()
 			}

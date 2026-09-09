@@ -75,7 +75,7 @@ func runUpdate(check bool) error {
 	if err != nil {
 		return exitErr(fmt.Errorf("check for the latest release: %w", err), 2)
 	}
-	current := version.Version
+	current := version.Resolved()
 	if update.LatestOrEqual(current, latest) {
 		fmt.Printf("enver %s is up to date\n", current)
 		return nil

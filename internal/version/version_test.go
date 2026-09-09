@@ -25,6 +25,21 @@ func TestFormatVersion(t *testing.T) {
 	}
 }
 
+func TestResolved(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+
+	Version = "v0.9.1"
+	if got := Resolved(); got != "v0.9.1" {
+		t.Errorf("Resolved() with Version=v0.9.1 = %q, want v0.9.1", got)
+	}
+
+	Version = "dev"
+	if got := Resolved(); got != "dev" {
+		t.Errorf("Resolved() with Version=dev = %q, want dev", got)
+	}
+}
+
 func TestResolveFromBuildInfo(t *testing.T) {
 	cases := []struct {
 		name                string

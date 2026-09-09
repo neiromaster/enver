@@ -23,7 +23,7 @@ enver validate                            Check config health
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
-enver update [--check]                 Update the enver binary; --check reports (0/1/2 exit codes)
+enver update [--check]                    Update the enver binary; --check reports (0/1/2 exit codes)
 ```
 
 On an interactive terminal, `enver x` primes the tab title with the profile
