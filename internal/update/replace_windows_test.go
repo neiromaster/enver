@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -30,7 +31,8 @@ func fakeArchive(t *testing.T) []byte {
 }
 
 func TestAcquireLockWindows(t *testing.T) {
-	exe := t.TempDir() + "\\enver.exe"
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "enver.exe")
 	unlock1, err := acquireLock(exe)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +42,7 @@ func TestAcquireLockWindows(t *testing.T) {
 	}
 	unlock1()
 
-	lock := t.TempDir() + "\\.enver-update.lock"
+	lock := filepath.Join(dir, ".enver-update.lock")
 	os.WriteFile(lock, []byte("stale"), 0o600)
 	old := time.Now().Add(-11 * time.Minute)
 	os.Chtimes(lock, old, old)
