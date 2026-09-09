@@ -28,3 +28,6 @@ key
 
 # npm publish pack-only output
 dist-npm/
+
+# worktrees
+.worktrees/
