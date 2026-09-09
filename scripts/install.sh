@@ -6,8 +6,8 @@ set -euo pipefail
 #   https://github.com/neiromaster/enver/blob/main/scripts/install.sh
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | sh -s -- v0.9.1
+#   curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.sh | bash -s -- v0.9.1
 #
 # Env:
 #   ENVER_VERSION      tag to install (default: latest release)
@@ -37,10 +37,15 @@ if [[ -z "$version" ]]; then
   version="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
     grep -o '"tag_name":[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4)"
 fi
+
+if [[ -z "$version" ]]; then
+  echo "enver: could not resolve the latest release" >&2
+  exit 1
+fi
 [[ "$version" == v* ]] || version="v$version"
 
-install_dir="${ENVER_INSTALL_DIR:-$HOME/.local/bin}"
-if command -v realpath >/dev/null 2>&1; then
+install_dir="${ENVER_INSTALL_DIR:-${HOME:-}/.local/bin}"
+if command -v realpath >/dev/null 2>&1 && realpath -m . >/dev/null 2>&1; then
   install_dir="$(realpath -m "$install_dir")"
 elif [[ "$install_dir" != /* ]]; then
   install_dir="$PWD/$install_dir"
