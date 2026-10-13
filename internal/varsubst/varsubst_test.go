@@ -44,6 +44,13 @@ func TestExpandValueBraced(t *testing.T) {
 		{"${MISSING+alt}", ""},       // unset -> nothing
 		{"${SET:-$EMPTY}", "v"},      // operand expanded
 		{"${unclosed", "${unclosed"}, // no closing brace -> literal
+
+		{"${SET:-${MISSING}}", "v"}, // nested operand skipped when value wins
+		{"${MISSING:-${SET}}", "v"}, // nested operand expanded
+		{"${EMPTY:-${SET}}", "v"},   // empty -> nested default
+		{"${SET:+${MISSING}}", ""},  // nested alt expanded to empty
+		{"${MISSING:-{a}}", "{a}"},  // literal brace in operand
+		{"${A:-${B}", "${A:-${B}"},  // unclosed nested -> literal
 	}
 	for _, c := range cases {
 		if got := expandValue(c.in, lk); got != c.want {
