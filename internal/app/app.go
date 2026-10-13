@@ -9,6 +9,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/runner"
 	"github.com/neiromaster/enver/internal/varsubst"
 )
@@ -112,7 +113,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, runner.MergedEnv(osEnvMap(), r.Env), opts.Name, profile); code != 0 {
+	if code := runner.Run(cmdArgs, childEnv(r.Env), opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil
@@ -273,6 +274,17 @@ func osEnvMap() map[string]string {
 		}
 	}
 	return m
+}
+
+// childEnv merges the process environment with the resolved profile env for
+// the exec path, dropping ENVER_KEY first: enver's own decryption credential
+// must not ride along into every child process, unlike the user's shell
+// exports. Interpolation still sees it — a profile may reference it
+// explicitly.
+func childEnv(profileEnv map[string]string) []string {
+	m := osEnvMap()
+	envname.Delete(m, "ENVER_KEY")
+	return runner.MergedEnv(m, profileEnv)
 }
 
 // firstSaltAndSample returns the salt, KDF parameters, and full value of an
