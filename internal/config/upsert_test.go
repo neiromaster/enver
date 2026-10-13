@@ -546,3 +546,25 @@ func TestFirstSaltAndSampleConflictingSalts(t *testing.T) {
 		t.Fatalf("FirstSaltAndSample must reject conflicting salts, got: %v", err)
 	}
 }
+
+func TestUpsertProfileBoolSpelledEnvKey(t *testing.T) {
+	// A hand-authored TRUE: env key decodes with a !!bool tag but a literal
+	// string value, and envname.Valid accepts it: the write path must find the
+	// existing entry instead of appending a duplicate mapping key.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  p:\n    env:\n      TRUE: old\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"TRUE": "new"}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	if got := cfg.Profiles["p"].Env["TRUE"]; got != "new" {
+		t.Fatalf("TRUE = %q, want new (duplicate key or lost update)", got)
+	}
+}
