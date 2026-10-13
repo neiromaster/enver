@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -152,5 +154,43 @@ func TestExecChildSpawnFailureReturnsOne(t *testing.T) {
 	bad := "/enver-no-such-binary-xyz"
 	if code := execChild(bad, []string{bad}, nil, "enver x"); code != 1 {
 		t.Fatalf("execChild(bad path) = %d, want 1", code)
+	}
+}
+
+func TestLookPathEnvUsesMergedPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit probe is unix-shaped")
+	}
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "enver-probe-cmd")
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := MergedEnv(map[string]string{}, map[string]string{"PATH": dir})
+	got, err := lookPathEnv("enver-probe-cmd", env)
+	if err != nil {
+		t.Fatalf("lookPathEnv: %v", err)
+	}
+	if got != probe {
+		t.Fatalf("lookPathEnv = %q, want %q (resolved against the merged PATH)", got, probe)
+	}
+}
+
+func TestLookPathEnvIgnoresParentPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit probe is unix-shaped")
+	}
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "enver-probe-cmd")
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	// The merged env points somewhere else: the parent's PATH must not
+	// rescue the lookup.
+	empty := t.TempDir()
+	env := MergedEnv(map[string]string{}, map[string]string{"PATH": empty})
+	if got, err := lookPathEnv("enver-probe-cmd", env); err == nil {
+		t.Fatalf("lookPathEnv = %q, want not-found against the merged PATH", got)
 	}
 }
