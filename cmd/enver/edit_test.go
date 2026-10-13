@@ -234,6 +234,40 @@ func TestCommitValidateCycleRejected(t *testing.T) {
 	}
 }
 
+func TestApplyExtendsPickRejectsCycle(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"a":    {Env: map[string]string{"K": "v"}},
+		"b":    {Extends: config.Extends{"a"}},
+		"base": {},
+	}}
+	s := newEditState("a", config.Profile{}, nil, false)
+	s.extends = config.Extends{"base"}
+	err := applyExtendsPick(cfg, "a", &s, []string{"b"})
+	if err == nil {
+		t.Fatal("cycling pick accepted")
+	}
+	if len(s.extends) != 1 || s.extends[0] != "base" {
+		t.Fatalf("state changed on rejected pick: %v", s.extends)
+	}
+}
+
+func TestApplyExtendsPickAppliesAndClears(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{"base": {}}}
+	s := newEditState("a", config.Profile{}, nil, false)
+	if err := applyExtendsPick(cfg, "a", &s, []string{"base"}); err != nil {
+		t.Fatalf("valid pick rejected: %v", err)
+	}
+	if len(s.extends) != 1 || s.extends[0] != "base" {
+		t.Fatalf("pick not applied: %v", s.extends)
+	}
+	if err := applyExtendsPick(cfg, "a", &s, nil); err != nil {
+		t.Fatalf("clear rejected: %v", err)
+	}
+	if s.extends != nil {
+		t.Fatalf("clear left extends: %v", s.extends)
+	}
+}
+
 func TestCommitValidateValidExtends(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"K": "v"}},

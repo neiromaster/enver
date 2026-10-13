@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
@@ -508,7 +509,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			switch key {
 			case actionDone:
 				if err := commitEdit(path, cfg, s, wasDefault); err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "\n%v\n", err)
+					continue
 				}
 				if s.deleteProfile {
 					fmt.Printf("\n✓ removed profile %q\n", s.name)
@@ -532,10 +534,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				if err != nil || !confirmed {
 					continue
 				}
-				if len(picked) == 0 {
-					s.extends = nil
-				} else {
-					s.extends = config.Extends(picked)
+				if err := applyExtendsPick(cfg, name, &s, picked); err != nil {
+					fmt.Fprintf(os.Stderr, "\n%v\n", err)
 				}
 			case actionDefault:
 				s.isDefault = !s.isDefault
@@ -627,6 +627,22 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			s.upsert(edited)
 		}
 	}
+}
+
+// applyExtendsPick sets the working copy's extends from a confirmed picker
+// result, rejecting a chain that would cycle before any state changes — the
+// same verdict commitValidate would give, surfaced while the menu is still
+// open instead of at Done.
+func applyExtendsPick(cfg config.Config, name string, s *editState, picked []string) error {
+	if len(picked) > 0 && extendsCycles(cfg, name, picked) {
+		return fmt.Errorf("extends %s would create a cycle", strings.Join(picked, ", "))
+	}
+	if len(picked) == 0 {
+		s.extends = nil
+	} else {
+		s.extends = config.Extends(picked)
+	}
+	return nil
 }
 
 // commitEdit commits the working copy: a pending delete is honored first;
