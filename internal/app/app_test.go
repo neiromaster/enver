@@ -10,6 +10,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/runner"
 )
 
@@ -567,5 +568,26 @@ func TestMatchingProfiles(t *testing.T) {
 	// Only a real load error (here: unparseable YAML) yields nil.
 	if got := MatchingProfiles(Options{ConfigPath: broken, NoLocal: true}, ""); got != nil {
 		t.Fatalf("MatchingProfiles(unparseable config) = %v, want nil", got)
+	}
+}
+
+func TestChildEnvDropsEnverKey(t *testing.T) {
+	t.Setenv("ENVER_KEY", "sk-decrypt-master")
+	env := childEnv(map[string]string{"ENVER_INJECTED": "yes"})
+	sawKey, sawInjected := false, false
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		switch {
+		case envname.Equal(k, "ENVER_KEY"):
+			sawKey = true
+		case k == "ENVER_INJECTED":
+			sawInjected = true
+		}
+	}
+	if sawKey {
+		t.Fatal("ENVER_KEY leaked into the child environment")
+	}
+	if !sawInjected {
+		t.Fatal("profile env missing from the child environment")
 	}
 }
