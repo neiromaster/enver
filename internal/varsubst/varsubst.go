@@ -23,11 +23,12 @@ func expandValue(s string, lookup func(name string) (string, bool)) string {
 			continue
 		}
 		if i+1 < len(s) && s[i+1] == '{' {
-			end := strings.IndexByte(s[i+2:], '}')
+			end := closingBrace(s[i+2:])
 			if end < 0 {
-				b.WriteByte('$')
-				i++
-				continue
+				// Unmatched ${: the remainder is literal, not a mix of literal
+				// text and any well-formed reference nested inside it.
+				b.WriteString(s[i:])
+				return b.String()
 			}
 			b.WriteString(evalBraced(s[i+2:i+2+end], lookup))
 			i += 2 + end + 1
@@ -44,6 +45,25 @@ func expandValue(s string, lookup func(name string) (string, bool)) string {
 		i += 1 + n
 	}
 	return b.String()
+}
+
+// closingBrace returns the index of the `}` that closes a braced expression
+// whose content starts at s[0], counting nesting depth so operand references
+// like ${A:-${B}} end at their own brace. -1 when unmatched.
+func closingBrace(s string) int {
+	depth := 1
+	for j := 0; j < len(s); j++ {
+		switch s[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return -1
 }
 
 // readName reads an identifier ([A-Za-z_][A-Za-z0-9_]*) from the start of s,
