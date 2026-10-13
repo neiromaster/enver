@@ -367,9 +367,9 @@ func (m *selectModel) toggleRanked(idx int) {
 	m.order = append(m.order, idx)
 }
 
-// toggleAllRanked applies * in ordered mode: when every choice is ranked it
-// clears the whole order, otherwise it ranks the missing choices in option
-// order.
+// toggleAllRanked applies * in ordered mode over the visible choices only:
+// when every visible choice is ranked it drops those ranks — hidden ones keep
+// theirs — otherwise it ranks the missing visible choices in option order.
 func (m *selectModel) toggleAllRanked(choices []int) {
 	allOn := len(choices) > 0
 	for _, i := range choices {
@@ -379,7 +379,17 @@ func (m *selectModel) toggleAllRanked(choices []int) {
 		}
 	}
 	if allOn {
-		m.order = nil
+		visible := make(map[int]bool, len(choices))
+		for _, i := range choices {
+			visible[i] = true
+		}
+		kept := make([]int, 0, len(m.order))
+		for _, i := range m.order {
+			if !visible[i] {
+				kept = append(kept, i)
+			}
+		}
+		m.order = kept
 		return
 	}
 	for _, i := range choices {

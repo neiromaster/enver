@@ -398,6 +398,17 @@ func TestMultiSelectOrderedStarRanksInOptionOrder(t *testing.T) {
 	}
 }
 
+func TestMultiSelectOrderedStarUnderFilterKeepsHiddenRanks(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a", "b", "c"})
+	m = press(m, tea.KeyPressMsg{Text: "/"})          // enter filter mode
+	m = press(m, tea.KeyPressMsg{Text: "l"})          // narrow to Alpha
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep filter, exit mode
+	m = press(m, tea.KeyPressMsg{Text: "*"})          // all-off for visible rows only
+	if got := m.orderedValues(); len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Fatalf("after * under filter = %v, want [b c] (hidden ranks kept)", got)
+	}
+}
+
 func TestMultiSelectOrderedRenderMarks(t *testing.T) {
 	m := newOrderedMultiModel("t", opts3(), []string{"a"})
 	view := m.View().Content
