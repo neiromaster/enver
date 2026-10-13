@@ -220,3 +220,24 @@ func TestWriteProfileRejectsNonMappingRoot(t *testing.T) {
 		t.Fatalf("file was modified: %q", data)
 	}
 }
+
+func TestDeleteProfileBoolSpelledName(t *testing.T) {
+	// A profile named `true` decodes its mapping key with a !!bool tag; the
+	// delete path must remove it, not report success while leaving it behind.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  true:\n    env:\n      K: v\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProfile(path, "true"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after delete: %v", err)
+	}
+	if _, ok := cfg.Profiles["true"]; ok {
+		t.Fatal("profile `true` survived deletion")
+	}
+}
