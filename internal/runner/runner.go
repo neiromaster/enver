@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,13 @@ func MergedEnv(osEnv, profileEnv map[string]string) []string {
 func Run(cmdArgs []string, env []string, name, profile string) int {
 	path, err := lookPathEnv(cmdArgs[0], env)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, exec.ErrDot) {
+			fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
+		} else {
+			// A lookup failure that is not absence (a stat error, a PATH-swap
+			// failure on Windows): "command not found" would misdiagnose it.
+			fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		}
 		return 127
 	}
 	if term.IsTerminal(int(os.Stdout.Fd())) {
@@ -53,35 +60,14 @@ func Run(cmdArgs []string, env []string, name, profile string) int {
 	return execChild(path, cmdArgs, env, name)
 }
 
-// lookPathEnv resolves name the way the child will see it: against the PATH
-// the merged env carries, not enver's own process PATH — a profile that
-// replaces PATH must also steer the lookup. exec.LookPath only consults the
-// process environment, so the PATH is swapped for the duration of the lookup
-// and restored after; a merged PATH identical to the process one skips the
-// swap and keeps stdlib resolution (and its Windows PATHEXT rules) untouched.
-func lookPathEnv(name string, env []string) (string, error) {
-	merged := ""
+// mergedPath returns the PATH carried by the merged child env, "" when absent.
+func mergedPath(env []string) string {
 	for _, kv := range env {
 		if k, v, ok := strings.Cut(kv, "="); ok && envname.Equal(k, "PATH") {
-			merged = v
-			break
+			return v
 		}
 	}
-	if merged == os.Getenv("PATH") {
-		return exec.LookPath(name)
-	}
-	old, had := os.LookupEnv("PATH")
-	if err := os.Setenv("PATH", merged); err != nil {
-		return "", err
-	}
-	defer func() {
-		if had {
-			_ = os.Setenv("PATH", old)
-		} else {
-			_ = os.Unsetenv("PATH")
-		}
-	}()
-	return exec.LookPath(name)
+	return ""
 }
 
 // launchTitleOSC primes the terminal title before exec: the first OSC 0 locks
