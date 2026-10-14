@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -79,8 +78,8 @@ var importCmd = &cobra.Command{
 					return fmt.Errorf("extends profile %q does not exist", p)
 				}
 			}
-			if extendsCycles(merged, name, parents) {
-				return fmt.Errorf("extends %s would create a cycle", strings.Join(parents, ", "))
+			if err := extendsCycleError(merged, name, parents); err != nil {
+				return err
 			}
 		}
 		summary, err := app.ImportEnv(r, writeTarget(), name, importExtends, app.ImportOptions{
