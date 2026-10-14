@@ -113,7 +113,14 @@ func Run(args []string, dashAt int, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if code := runner.Run(cmdArgs, childEnv(r.Env), opts.Name, profile); code != 0 {
+	env, notice, err := childEnv(opts, r.Env)
+	if err != nil {
+		return err
+	}
+	if notice != "" {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", opts.Name, notice)
+	}
+	if code := runner.Run(cmdArgs, env, opts.Name, profile); code != 0 {
 		os.Exit(code)
 	}
 	return nil
@@ -280,11 +287,34 @@ func osEnvMap() map[string]string {
 // the exec path, dropping ENVER_KEY first: enver's own decryption credential
 // must not ride along into every child process, unlike the user's shell
 // exports. Interpolation still sees it — a profile may reference it
-// explicitly.
-func childEnv(profileEnv map[string]string) []string {
+// explicitly. ENVER_FORWARD_KEY (any non-empty value) opts out so nested enver
+// invocations can decrypt. The returned notice, when non-empty, is printed to
+// stderr before exec: dropping a key the user set is the one silent behavior
+// change worth announcing.
+func childEnv(opts Options, profileEnv map[string]string) (env []string, notice string, err error) {
 	m := osEnvMap()
+	if os.Getenv("ENVER_FORWARD_KEY") != "" {
+		key, _, err := resolveKey(opts)
+		if err != nil {
+			return nil, "", err
+		}
+
+		// Re-export the key that actually decrypts, whatever source it came
+		// from (--key file, ENVER_KEY, or the key cache), so nested enver
+		// invocations under the child (make → enver x) can decrypt too.
+		// Salt-less, so the child can decrypt but not encrypt. Without a key
+		// there is nothing to forward; a stray empty entry goes too.
+		envname.Delete(m, "ENVER_KEY")
+		if key != nil {
+			envname.Set(m, "ENVER_KEY", crypto.EncodeKey(key))
+		}
+		return runner.MergedEnv(m, profileEnv), "", nil
+	}
+	if os.Getenv("ENVER_KEY") != "" {
+		notice = "ENVER_KEY is not passed to the child; set ENVER_FORWARD_KEY=1 to forward it"
+	}
 	envname.Delete(m, "ENVER_KEY")
-	return runner.MergedEnv(m, profileEnv)
+	return runner.MergedEnv(m, profileEnv), notice, nil
 }
 
 // firstSaltAndSample returns the salt, KDF parameters, and full value of an

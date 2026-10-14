@@ -589,3 +589,17 @@ func TestParseV3ErrorEchoBounded(t *testing.T) {
 		t.Fatalf("error message (%d chars) longer than input (%d chars): %q", len(errMsg), len(malformed), errMsg)
 	}
 }
+
+func TestEncodeKeyRoundTrip(t *testing.T) {
+	key := make([]byte, keySize)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	decoded, err := DecodeKey(EncodeKey(key))
+	if err != nil {
+		t.Fatalf("DecodeKey(EncodeKey(key)) failed: %v", err)
+	}
+	if !bytes.Equal(decoded, key) {
+		t.Fatalf("round trip mismatch: got %v, want %v", decoded, key)
+	}
+}
