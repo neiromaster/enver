@@ -110,6 +110,12 @@ func DecodeKey(s string) ([]byte, error) {
 	return key, nil
 }
 
+// EncodeKey base64-encodes key bytes into the inline ENVER_KEY form, the
+// inverse of DecodeKey.
+func EncodeKey(key []byte) string {
+	return base64.StdEncoding.EncodeToString(key)
+}
+
 // IsEncrypted reports whether v carries the enc:v3: prefix.
 func IsEncrypted(v string) bool {
 	return strings.HasPrefix(v, prefixV3)

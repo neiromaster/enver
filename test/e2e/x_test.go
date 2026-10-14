@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"runtime"
 	"strings"
 	"testing"
@@ -110,5 +112,44 @@ func TestXChildRedefinitionBeatsInheritedUnset(t *testing.T) {
 	}
 	if got := strings.TrimSpace(r.Stdout); got != "from-leaf" {
 		t.Fatalf("a closer redefinition must override the inherited unset, got %q (stderr: %s)", got, r.Stderr)
+	}
+}
+
+func TestXStripsEnverKeyFromChild(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n")
+	s.setEnv("ENVER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	r := s.run(append([]string{"x", "p", "--"}, childAbsentProbe("ENVER_KEY")...)...)
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "absent") {
+		t.Fatalf("ENVER_KEY must not reach the child, got %d, %q, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+	if !strings.Contains(r.Stderr, "ENVER_FORWARD_KEY=1 to forward it") {
+		t.Fatalf("stripping a set key must print the forwarding hint, stderr: %s", r.Stderr)
+	}
+}
+
+func TestXForwardKeyMaterializesKeyFileKey(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	requireKeygen(t, s)
+	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
+		t.Fatalf("encrypt failed: %s", r.Stderr)
+	}
+	var cache struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(s.readFile(s.keyPath())), &cache); err != nil {
+		t.Fatal(err)
+	}
+	s.setEnv("ENVER_FORWARD_KEY", "1")
+	r := s.run(append([]string{"x", "p", "--"}, childPrinter("ENVER_KEY")...)...)
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if got := strings.TrimSpace(r.Stdout); got != cache.Key {
+		t.Fatalf("the key-file key must be materialized as the child ENVER_KEY, got %q, want %q", got, cache.Key)
+	}
+	if strings.Contains(r.Stderr, "ENVER_FORWARD_KEY") {
+		t.Fatalf("an explicit opt-in must not print the strip hint, stderr: %s", r.Stderr)
 	}
 }
