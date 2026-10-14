@@ -634,8 +634,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 // same verdict commitValidate would give, surfaced while the menu is still
 // open instead of at Done.
 func applyExtendsPick(cfg config.Config, name string, s *editState, picked []string) error {
-	if len(picked) > 0 && extendsCycles(cfg, name, picked) {
-		return fmt.Errorf("extends %s would create a cycle", strings.Join(picked, ", "))
+	if err := extendsCycleError(cfg, name, picked); err != nil {
+		return err
 	}
 	if len(picked) == 0 {
 		s.extends = nil
@@ -667,10 +667,7 @@ func commitValidate(cfg config.Config, s editState) error {
 	if err := s.canCommit(); err != nil {
 		return err
 	}
-	if len(s.extends) > 0 && extendsCycles(cfg, s.name, s.extends) {
-		return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
-	}
-	return nil
+	return extendsCycleError(cfg, s.name, s.extends)
 }
 
 func editTitle(s editState) string {

@@ -185,8 +185,8 @@ func doAdd(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	if len(extends) > 0 && extendsCycles(merged, name, extends) {
-		return fmt.Errorf("extends %s would create a cycle", strings.Join(extends, ", "))
+	if err := extendsCycleError(merged, name, extends); err != nil {
+		return err
 	}
 
 	parentEnv, inheritedWarns := parentEnvFor(merged, name, extends)
