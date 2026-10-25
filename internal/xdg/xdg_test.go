@@ -10,9 +10,13 @@ import (
 func TestConfigHomeLadder(t *testing.T) {
 	defer func() { homeDir = os.UserHomeDir }()
 
-	t.Setenv("XDG_CONFIG_HOME", "/xdg")
-	if got := ConfigHome(); got != "/xdg" {
-		t.Fatalf("ConfigHome with XDG set = %q, want /xdg", got)
+	// t.TempDir is absolute on every platform, unlike a "/xdg" literal that
+	// Windows filepath.IsAbs rejects (no volume), which would turn this into
+	// a test of the relative-value fallback instead.
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if got := ConfigHome(); got != xdg {
+		t.Fatalf("ConfigHome with XDG set = %q, want %q", got, xdg)
 	}
 
 	t.Setenv("XDG_CONFIG_HOME", "")
