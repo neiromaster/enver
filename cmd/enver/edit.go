@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -44,6 +45,20 @@ type editState struct {
 	origIsDefault bool
 	origEntries   []ui.EnvEntry
 	origUnset     config.Unsets
+}
+
+// menuErrorAction classifies a failed menu Select. A cancel — ErrCanceled,
+// however wrapped — is a normal exit: with pending edits the caller asks
+// before discarding (ask=true), otherwise the session just ends cleanly.
+// Any other error is a real failure and propagates instead of exiting 0.
+func menuErrorAction(err error, dirty bool) (exitErr error, ask bool) {
+	if !errors.Is(err, ui.ErrCanceled) {
+		return err, false
+	}
+	if !dirty {
+		return nil, false
+	}
+	return nil, true
 }
 
 func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
@@ -492,9 +507,11 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		inherited := listedInheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
 		if err != nil {
-			// Only a cancel with pending edits is worth confirming; any other
-			// error (no TTY, tea failure) or a clean cancel just exits.
-			if err != ui.ErrCanceled || !s.dirty() {
+			exitErr, ask := menuErrorAction(err, s.dirty())
+			if exitErr != nil {
+				return exitErr
+			}
+			if !ask {
 				return nil
 			}
 			discard, cerr := ui.Confirm("Discard unsaved changes and exit?", false)
