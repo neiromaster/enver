@@ -76,6 +76,9 @@ func runUpdate(check bool) error {
 		return exitErr(fmt.Errorf("check for the latest release: %w", err), 2)
 	}
 	current := version.Resolved()
+	if !update.IsKnownVersion(current) {
+		return exitErr(fmt.Errorf("cannot update: version %q is not a release (built from source?); a release update could silently replace it — install with `go install` from a tag or a release artifact, then update again", current), 2)
+	}
 	if update.LatestOrEqual(current, latest) {
 		fmt.Printf("enver %s is up to date\n", current)
 		return nil

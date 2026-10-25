@@ -19,6 +19,27 @@ func TestCanonicalVersion(t *testing.T) {
 	}
 }
 
+func TestIsKnownVersion(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"v0.9.1", true},
+		{"0.9.2", true},
+		{"v0.9.3-rc1", true},
+		{"0.9.1-g1234567", true},
+		{"dev", false},
+		{"(devel)", false},
+		{"", false},
+		{"v0.0.0", false},
+	}
+	for _, c := range cases {
+		if got := IsKnownVersion(c.in); got != c.want {
+			t.Errorf("IsKnownVersion(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestLatestOrEqual(t *testing.T) {
 	cases := []struct {
 		current, latest string
