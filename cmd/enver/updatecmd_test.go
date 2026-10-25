@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/update"
@@ -39,6 +40,31 @@ func pointClientAt(t *testing.T, base string) {
 	oldAPI, oldDL := update.DefaultAPIBase, update.DefaultDownloadBase
 	update.DefaultAPIBase, update.DefaultDownloadBase = base, base
 	t.Cleanup(func() { update.DefaultAPIBase, update.DefaultDownloadBase = oldAPI, oldDL })
+}
+
+// TestRunUpdateRefusesUnknownVersion pins the from-source guard: a build
+// whose version resolves to nothing (dev) must refuse rather than compare as
+// v0.0.0 — always "update available" — and self-replace a locally built
+// binary with the latest release.
+func TestRunUpdateRefusesUnknownVersion(t *testing.T) {
+	oldVersion, oldPath := version.Version, execPath
+	version.Version = "dev"
+	exe := filepath.Join(t.TempDir(), "enver")
+	if err := os.WriteFile(exe, []byte("stub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	execPath = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { version.Version, execPath = oldVersion, oldPath })
+
+	pointClientAt(t, mockGitHub(t, "v0.9.1", nil))
+	err := runUpdate(false)
+	var ce *codedError
+	if !errors.As(err, &ce) || ce.code != 2 {
+		t.Fatalf("runUpdate err = %v, want an exit-2 codedError", err)
+	}
+	if !strings.Contains(err.Error(), "built from source") {
+		t.Fatalf("err = %v, want the built-from-source refusal", err)
+	}
 }
 
 func TestRunUpdateUpToDate(t *testing.T) {

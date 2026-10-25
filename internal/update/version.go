@@ -28,6 +28,15 @@ func canonicalVersion(v string) string {
 	return semver.Canonical(v)
 }
 
+// IsKnownVersion reports whether v resolves to a real release version, not
+// the v0.0.0 placeholder canonicalVersion maps unknowable values (dev,
+// (devel), empty) to. Update refuses on such builds: v0.0.0 compares below
+// every release, so an update check would always fire and a direct-install
+// update would silently replace a locally built binary.
+func IsKnownVersion(v string) bool {
+	return canonicalVersion(v) != "v0.0.0"
+}
+
 // LatestOrEqual reports whether current is at or above latest.
 func LatestOrEqual(current, latest string) bool {
 	return semver.Compare(canonicalVersion(current), canonicalVersion(latest)) >= 0
