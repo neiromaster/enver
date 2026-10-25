@@ -72,8 +72,12 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 
 mkdir -p "$install_dir"
-tar -xzf "$work/$archive" -C "$install_dir" enver
-chmod 755 "$install_dir/enver"
+# Extract into the work dir and swap by rename: a mid-extract failure must
+# never leave a truncated binary in the install dir, and rename lets a
+# running enver keep its inode instead of failing with ETXTBSY.
+tar -xzf "$work/$archive" -C "$work" enver
+install -m 755 "$work/enver" "$install_dir/.enver.new"
+mv -f "$install_dir/.enver.new" "$install_dir/enver"
 
 "$install_dir/enver" --version >&2
 if ! command -v enver >/dev/null 2>&1; then
