@@ -490,6 +490,29 @@ func mustMarshalJSON(t *testing.T, v any) []byte {
 	return b
 }
 
+// TestWriteKeyCacheTightensExistingMode pins the key-cache permission
+// contract: the cache holds a live AES key, so overwriting an existing file
+// must end at 0600 — os.WriteFile applies its mode only at creation and would
+// leave a looser pre-existing mode in place.
+func TestWriteKeyCacheTightensExistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(path, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	salt := []byte("0123456789abcdef")
+	key := make([]byte, keySize)
+	if err := WriteKeyCache(path, NewKeyCache(salt, key)); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key cache mode = %v, want 0600 over a looser existing file", fi.Mode().Perm())
+	}
+}
+
 func TestKeyCacheRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "key")
