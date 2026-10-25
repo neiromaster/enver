@@ -1,4 +1,4 @@
-.PHONY: build install test vet lint clean fmt hooks completions cover cover-gate
+.PHONY: build install test vet lint clean fmt hooks completions cover cover-gate shim
 
 BINARY := enver
 PKG := github.com/neiromaster/enver
@@ -22,6 +22,10 @@ install:
 
 test:
 	go test -race -count=1 ./...
+
+# npm shim tests — the same suite CI's shim job runs.
+shim:
+	node --test npm/test/*.test.js
 
 vet:
 	go vet ./...
