@@ -174,7 +174,9 @@ func findLocal() []string {
 	return []string{p}
 }
 
-// Merge folds override into base: override wins for default and per-key env;
+// Merge folds override into base: override wins for default and per-key env,
+// except that an empty override Default never clears the base default —
+// clearing is per-layer (`enver default --clear` writes the owning file);
 // extends concatenates as [base…, override…] deduped, so local mixins compose
 // with rather than replace global ones. Unsets are layer-scoped, not unioned:
 // folding a shared profile applies the inherited copy's fence to its own env
