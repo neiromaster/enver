@@ -162,6 +162,33 @@ func TestEncryptFileJoinsFileWideSameSaltEra(t *testing.T) {
 	}
 }
 
+// TestDecryptFileTightensFileMode pins the plaintext-permission contract: the
+// decrypted document holds live secrets, so the write that produces it must
+// leave the file 0600 — os.WriteFile alone keeps whatever looser mode an
+// existing file already carried.
+func TestDecryptFileTightensFileMode(t *testing.T) {
+	key := make([]byte, 32)
+	salt := []byte("aaaaaaaaaaaaaaaa")
+	enc, err := crypto.EncryptValueWithParams("v", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      TOKEN: "+enc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := DecryptFile(path, key, ""); err != nil || n != 1 {
+		t.Fatalf("decrypt: n=%d err=%v, want 1/nil", n, err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode after decrypt = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
 // TestDecryptFileWrongKeyActionableError pins the pre-verify contract: a key
 // that cannot read the target profile's values fails once, naming the
 // recovery path, instead of a per-value wrong-key error mid-run. The advised
