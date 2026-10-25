@@ -456,3 +456,19 @@ func TestDimRowRendersFaint(t *testing.T) {
 		t.Fatalf("cursor row should keep its active highlight, not dim:\n%s", m.View().Content)
 	}
 }
+
+// TestSelectFilterAcceptsPaste pins that a bracketed paste lands in the
+// filter: bubbletea enables bracketed paste by default, and dropping the
+// PasteMsg made pasting into the filter a silent no-op.
+func TestSelectFilterAcceptsPaste(t *testing.T) {
+	m := newSelectModel("t", opts3(), false)
+	m = press(m, tea.KeyPressMsg{Text: "/"})
+	mm, _ := m.Update(tea.PasteMsg{Content: "gam"})
+	m = mm.(*selectModel)
+	if m.filter.value != "gam" {
+		t.Fatalf("filter = %q, want pasted gam", m.filter.value)
+	}
+	if nav := m.nav(); len(nav) != 1 || m.options[nav[0]].Value != "c" {
+		t.Fatalf("pasted filter must narrow the list, nav = %v", nav)
+	}
+}
