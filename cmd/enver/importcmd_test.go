@@ -147,6 +147,48 @@ func TestCompleteImport(t *testing.T) {
 	}
 }
 
+func TestCompleteImportExtends(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	for _, p := range []string{"prod", "dev", "stage"} {
+		if err := config.UpsertProfile(path, p, config.Profile{Env: map[string]string{"A": "1"}}, false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().Bool("no-local", false, "")
+	_ = cmd.Flags().Set("config", path)
+	_ = cmd.Flags().Set("no-local", "true")
+
+	got, dir := completeImportExtends(cmd, nil, "")
+	if dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("empty: dir=%v, want NoFileComp", dir)
+	}
+	if len(got) != 3 {
+		t.Errorf("empty: got %v, want 3 profiles", got)
+	}
+
+	got, _ = completeImportExtends(cmd, nil, "d")
+	if len(got) != 1 || got[0] != "dev" {
+		t.Errorf("segment \"d\": got %v, want [dev]", got)
+	}
+
+	got, _ = completeImportExtends(cmd, nil, "prod,")
+	if len(got) != 2 {
+		t.Fatalf("after comma: got %v, want stage and dev", got)
+	}
+	for _, c := range got {
+		if c == "prod,prod" || !strings.HasPrefix(c, "prod,") {
+			t.Errorf("after comma: candidate %q must keep the typed prefix and skip picked parents", c)
+		}
+	}
+
+	got, _ = completeImportExtends(cmd, nil, "prod,d")
+	if len(got) != 1 || got[0] != "prod,dev" {
+		t.Errorf("segment after prefix: got %v, want [prod,dev]", got)
+	}
+}
+
 func TestImportExtendsCreate(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.UpsertProfile(cfgPath, "base", config.Profile{Env: map[string]string{"ROOT": "1"}}, false, false); err != nil {
