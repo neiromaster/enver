@@ -33,7 +33,7 @@ var listCmd = &cobra.Command{
 func init() {
 	listCmd.Flags().StringVar(&listFormat, "format", "text", "output format: text or json")
 	_ = listCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"text", "json"}, cobra.ShellCompDirectiveDefault
+		return []string{"text", "json"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
 
