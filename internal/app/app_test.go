@@ -188,6 +188,9 @@ func TestRunNoProfileNoDefault(t *testing.T) {
 	if !strings.Contains(err.Error(), "no profile specified and no default set") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !strings.Contains(err.Error(), "enver default") {
+		t.Fatalf("error should hint the fix, got: %v", err)
+	}
 }
 
 func TestProfileOrDefault(t *testing.T) {
