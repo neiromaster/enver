@@ -10,12 +10,13 @@ import (
 // homeDir stands in for os.UserHomeDir in tests.
 var homeDir = os.UserHomeDir
 
-// ConfigHome returns the XDG config home: $XDG_CONFIG_HOME when set, else
+// ConfigHome returns the XDG config home: $XDG_CONFIG_HOME when set to an
+// absolute path (the basedir spec ignores relative values), else
 // $HOME/.config, falling back to the platform home directory from
 // os.UserHomeDir (%USERPROFILE% on Windows) when $HOME is unset. A missing
 // home falls back to "/" so the result stays an absolute path either way.
 func ConfigHome() string {
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" && filepath.IsAbs(x) {
 		return x
 	}
 	if home := os.Getenv("HOME"); home != "" {
