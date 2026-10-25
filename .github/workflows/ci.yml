@@ -42,6 +42,11 @@ jobs:
           go mod tidy -diff
           go -C tools mod tidy -diff
 
+      - name: completions drift
+        run: |
+          bash scripts/generate-completions.sh
+          git diff --exit-code -- completions/
+
   test:
     strategy:
       fail-fast: false
