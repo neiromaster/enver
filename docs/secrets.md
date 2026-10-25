@@ -61,6 +61,17 @@ passphrase prompt that derives, verifies, and caches the key. Where stdin is
 not a terminal the prompt is skipped and the command fails loudly instead of
 hanging. A profile with no encrypted values runs without any key.
 
+**The exec path drops `ENVER_KEY` from the child environment** — the child gets
+the decrypted values, not the key. When a set key was dropped, `enver x` prints
+a one-line stderr note naming the opt-out. Nested enver invocations under the
+child (a Makefile calling `enver` inside `enver x -- make`) opt back in with
+`ENVER_FORWARD_KEY=1`: the resolved key — whatever source it came from (`--key`,
+the env var, or the key cache) — is re-exported as the child's `ENVER_KEY`,
+carrying no salt, so nested runs can decrypt but not encrypt. The flag rides
+along with the child, so one opt-in covers the whole process tree. In CI,
+prefer placing the key file at `~/.config/enver/key` instead: children read it
+directly, with no key material in any environment.
+
 **Recovery on a new machine:** clone the encrypted config, then run
 `enver x <profile> -- <command>` (or `enver encrypt` / `enver decrypt`) and
 enter the passphrase when prompted — the key is derived from the salt embedded

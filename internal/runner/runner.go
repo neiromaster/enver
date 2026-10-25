@@ -2,10 +2,12 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/envname"
 	"golang.org/x/term"
@@ -41,15 +43,31 @@ func MergedEnv(osEnv, profileEnv map[string]string) []string {
 // profile is shown in the terminal title until the child sends its own. It
 // returns the child's exit code (127 if the command is not found).
 func Run(cmdArgs []string, env []string, name, profile string) int {
-	path, err := exec.LookPath(cmdArgs[0])
+	path, err := lookPathEnv(cmdArgs[0], env)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
+		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, exec.ErrDot) {
+			fmt.Fprintf(os.Stderr, "%s: command not found: %s\n", name, cmdArgs[0])
+		} else {
+			// A lookup failure that is not absence (a stat error, a PATH-swap
+			// failure on Windows): "command not found" would misdiagnose it.
+			fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		}
 		return 127
 	}
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		_, _ = os.Stdout.WriteString(launchTitleOSC(profile))
 	}
 	return execChild(path, cmdArgs, env, name)
+}
+
+// mergedPath returns the PATH carried by the merged child env, "" when absent.
+func mergedPath(env []string) string {
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && envname.Equal(k, "PATH") {
+			return v
+		}
+	}
+	return ""
 }
 
 // launchTitleOSC primes the terminal title before exec: the first OSC 0 locks

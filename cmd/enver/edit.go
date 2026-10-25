@@ -2,8 +2,10 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
@@ -43,6 +45,20 @@ type editState struct {
 	origIsDefault bool
 	origEntries   []ui.EnvEntry
 	origUnset     config.Unsets
+}
+
+// menuErrorAction classifies a failed menu Select. A cancel — ErrCanceled,
+// however wrapped — is a normal exit: with pending edits the caller asks
+// before discarding (ask=true), otherwise the session just ends cleanly.
+// Any other error is a real failure and propagates instead of exiting 0.
+func menuErrorAction(err error, dirty bool) (exitErr error, ask bool) {
+	if !errors.Is(err, ui.ErrCanceled) {
+		return err, false
+	}
+	if !dirty {
+		return nil, false
+	}
+	return nil, true
 }
 
 func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
@@ -491,9 +507,11 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		inherited := listedInheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
 		if err != nil {
-			// Only a cancel with pending edits is worth confirming; any other
-			// error (no TTY, tea failure) or a clean cancel just exits.
-			if err != ui.ErrCanceled || !s.dirty() {
+			exitErr, ask := menuErrorAction(err, s.dirty())
+			if exitErr != nil {
+				return exitErr
+			}
+			if !ask {
 				return nil
 			}
 			discard, cerr := ui.Confirm("Discard unsaved changes and exit?", false)
@@ -508,7 +526,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			switch key {
 			case actionDone:
 				if err := commitEdit(path, cfg, s, wasDefault); err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "\n%v\n", err)
+					continue
 				}
 				if s.deleteProfile {
 					fmt.Printf("\n✓ removed profile %q\n", s.name)
@@ -532,10 +551,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				if err != nil || !confirmed {
 					continue
 				}
-				if len(picked) == 0 {
-					s.extends = nil
-				} else {
-					s.extends = config.Extends(picked)
+				if err := applyExtendsPick(cfg, name, &s, picked); err != nil {
+					fmt.Fprintf(os.Stderr, "\n%v\n", err)
 				}
 			case actionDefault:
 				s.isDefault = !s.isDefault
@@ -629,6 +646,22 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// applyExtendsPick sets the working copy's extends from a confirmed picker
+// result, rejecting a chain that would cycle before any state changes — the
+// same verdict commitValidate would give, surfaced while the menu is still
+// open instead of at Done.
+func applyExtendsPick(cfg config.Config, name string, s *editState, picked []string) error {
+	if err := extendsCycleError(cfg, name, picked); err != nil {
+		return err
+	}
+	if len(picked) == 0 {
+		s.extends = nil
+	} else {
+		s.extends = config.Extends(picked)
+	}
+	return nil
+}
+
 // commitEdit commits the working copy: a pending delete is honored first;
 // otherwise it validates (extends cycle, non-empty invariant) and writes the
 // profile. setDefault/clearDefault are derived from wasDefault vs the toggled
@@ -651,10 +684,7 @@ func commitValidate(cfg config.Config, s editState) error {
 	if err := s.canCommit(); err != nil {
 		return err
 	}
-	if len(s.extends) > 0 && extendsCycles(cfg, s.name, s.extends) {
-		return fmt.Errorf("extends %s would create a cycle", strings.Join(s.extends, ", "))
-	}
-	return nil
+	return extendsCycleError(cfg, s.name, s.extends)
 }
 
 func editTitle(s editState) string {

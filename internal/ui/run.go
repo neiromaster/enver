@@ -19,11 +19,15 @@ func run(m tea.Model) (tea.Model, error) {
 	if !Interactive() {
 		return m, errors.New("interactive prompt requires a terminal")
 	}
-	// Each prompt is its own tea.Program, whose last frame stays on screen after
-	// exit. Without a gap, successive prompts (e.g. edit → pick profile → edit
-	// variable) merge into one block. Print a blank line first to separate them.
-	_, _ = os.Stdout.WriteString("\n")
-	out, err := tea.NewProgram(m).Run()
+	// Prompts render on stderr, matching Password: stdout must stay clean for
+	// redirects (`enver rename p > log` captures neither frames nor the raw-
+	// mode escape sequences), while the terminal still shows the prompt.
+	// Each prompt is its own tea.Program, whose last frame stays on screen
+	// after exit. Without a gap, successive prompts (e.g. edit → pick profile
+	// → edit variable) merge into one block. Print a blank line first to
+	// separate them.
+	_, _ = os.Stderr.WriteString("\n")
+	out, err := tea.NewProgram(m, tea.WithOutput(os.Stderr)).Run()
 	if err != nil {
 		return m, err
 	}

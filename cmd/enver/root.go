@@ -18,8 +18,11 @@
 //     masks secret values in text output.
 //   - export prints shell export lines for a profile.
 //   - list prints available profiles; validate reports config errors.
-//   - add, edit, remove, rename, duplicate and default manage profiles;
-//     they are interactive and require a TTY on stdin.
+//   - add, edit, remove, rename, duplicate and default manage profiles.
+//     add and edit always drive an interactive UI and need a TTY on
+//     stdin; remove, rename, duplicate and default prompt only for
+//     missing arguments and otherwise run non-interactively (remove
+//     takes --yes to skip its confirmation).
 //   - import converts a .env file into a profile; dotenv prints the
 //     profile back in .env form.
 //   - encrypt, decrypt and keygen manage encryption of secret values.

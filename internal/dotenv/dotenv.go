@@ -10,7 +10,7 @@ import (
 	"github.com/neiromaster/enver/internal/envname"
 )
 
-// needsQuote reports whether v must be single-quoted in a .env file. A value is
+// needsQuote reports whether v must be quoted in a .env file. A value is
 // safe bare only when it is non-empty and free of whitespace, comment/start/hash
 // metacharacters, quotes, backslashes, dollar signs, and control characters.
 func needsQuote(v string) bool {
@@ -96,8 +96,8 @@ func parseTombstone(line string) (string, bool) {
 // When opts.Header is set, a 2-line header precedes the variables. For each key
 // present in comments, the comment is emitted as "# "-prefixed line(s) above the
 // variable; keys without a comment produce no comment line. Values are bare when
-// safe, single-quoted when unsafe, and double-quoted dotenvx-style when they
-// carry $ references the consumer should expand. Keys in unsets — mapping each
+// safe and double-quoted dotenvx-style when unsafe, including values carrying
+// $ references the consumer should expand. Keys in unsets — mapping each
 // key to the profile that unset it — render as commented-out assignments
 // (`# KEY=  # unset by "profile"`) interleaved in the same sort, so the file
 // also documents the variables deliberately absent from the profile. Format

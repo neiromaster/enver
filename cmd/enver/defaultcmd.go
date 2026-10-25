@@ -43,7 +43,7 @@ var defaultCmd = &cobra.Command{
 		}
 		if len(args) == 0 {
 			if cfg.Default == "" {
-				return fmt.Errorf("no default profile set")
+				return fmt.Errorf("no default profile set; set one with `enver default <profile>`")
 			}
 			fmt.Println(cfg.Default)
 			return nil

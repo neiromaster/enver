@@ -6,9 +6,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// findIndex locates key in a mapping node's content. Keys match by scalar
+// value across tags: a hand-authored bool-spelled key (`TRUE:`) decodes with
+// a !!bool tag but the same literal text the struct reader exposes, and the
+// writer must find that entry rather than append a duplicate. Merge keys
+// never match.
 func findIndex(mapping *yaml.Node, key string) int {
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Tag == "!!str" && mapping.Content[i].Value == key {
+		k := mapping.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Tag != "!!merge" && k.Value == key {
 			return i + 1
 		}
 	}

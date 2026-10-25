@@ -125,10 +125,11 @@ func newCheckedMultiModel(title string, options []Option, checked []string) *sel
 
 // MultiSelectChecked is a checkbox multi-select with pre-checked rows (matched
 // by Value). Confirming reports (values, true, nil) where values are the
-// still-checked Values in option order. Leaving without confirming — esc/ctrl+c
-// or enter on an Action row such as Back — reports (state, false, nil), state
-// being the checkbox layout at that moment, so callers can tell a bare exit
-// from a session that had toggles pending. Action rows never appear in values.
+// still-checked Values in option order. Enter on an Action row such as Back
+// reports (state, false, nil), state being the checkbox layout at that
+// moment, so callers can tell a bare exit from a session that had toggles
+// pending; esc/ctrl+c instead cancels with ErrCanceled and discards the
+// state. Action rows never appear in values.
 func MultiSelectChecked(title string, options []Option, checked []string) ([]string, bool, error) {
 	out, err := run(newCheckedMultiModel(title, options, checked))
 	if err != nil {
@@ -141,9 +142,10 @@ func MultiSelectChecked(title string, options []Option, checked []string) ([]str
 // MultiSelectOrdered is a multi-select that preserves selection order: ranks
 // seed from order (matched by Value, in the sequence given), picking appends
 // to the end, </>/←→ move rows within the order. Confirming reports the
-// selected Values in rank order; leaving without confirming — esc/ctrl+c or
-// enter on an Action row such as Back — reports the current order and false,
-// so callers can tell a bare exit from a session with pending changes.
+// selected Values in rank order. Enter on an Action row such as Back reports
+// the current order and false, so callers can tell a bare exit from a
+// session with pending changes; esc/ctrl+c instead cancels with ErrCanceled
+// and discards the order.
 func MultiSelectOrdered(title string, options []Option, order []string) ([]string, bool, error) {
 	out, err := run(newOrderedMultiModel(title, options, order))
 	if err != nil {
@@ -211,6 +213,12 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = k.Height
 		return m, nil
+	case tea.PasteMsg:
+		// Bracketed paste is on by default; dropping the message made pasting
+		// into the filter a silent no-op.
+		if m.filter.active {
+			m.filter.value += k.Content
+		}
 	case tea.KeyPressMsg:
 		if m.filter.active {
 			return m.applyFilterKey(k)
@@ -367,9 +375,9 @@ func (m *selectModel) toggleRanked(idx int) {
 	m.order = append(m.order, idx)
 }
 
-// toggleAllRanked applies * in ordered mode: when every choice is ranked it
-// clears the whole order, otherwise it ranks the missing choices in option
-// order.
+// toggleAllRanked applies * in ordered mode over the visible choices only:
+// when every visible choice is ranked it drops those ranks — hidden ones keep
+// theirs — otherwise it ranks the missing visible choices in option order.
 func (m *selectModel) toggleAllRanked(choices []int) {
 	allOn := len(choices) > 0
 	for _, i := range choices {
@@ -379,7 +387,17 @@ func (m *selectModel) toggleAllRanked(choices []int) {
 		}
 	}
 	if allOn {
-		m.order = nil
+		visible := make(map[int]bool, len(choices))
+		for _, i := range choices {
+			visible[i] = true
+		}
+		kept := make([]int, 0, len(m.order))
+		for _, i := range m.order {
+			if !visible[i] {
+				kept = append(kept, i)
+			}
+		}
+		m.order = kept
 		return
 	}
 	for _, i := range choices {

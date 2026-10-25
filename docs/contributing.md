@@ -7,7 +7,9 @@ Bug reports, docs and tests are welcome.
 ## Local checks
 
 ```sh
-make vet lint test
+make vet lint test   # fast feedback
+make cover-gate      # the coverage gate CI enforces (MIN_COVER=78)
+make shim            # npm shim tests (node --test)
 ```
 
 A pre-commit hook (via [lefthook](https://github.com/evilmartians/lefthook))
@@ -26,6 +28,18 @@ Keep `tools/` free of .go files: the tools module must stay invisible to
 The `use` order in `go.work` matters too: the repo root must stay first so
 release tooling treats it as the main module.
 
-CI also runs `gofmt` and `golangci-lint`, so unformatted code won't merge.
+`completions/` is generated (`make completions`) and committed: CI fails when
+a cobra or command-tree change would alter it.
+
+CI also runs `gofmt`, `golangci-lint`, and `go mod tidy` checks, so
+unformatted or untidy code won't merge.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+## Releasing
+
+Before tagging, cut the changelog: rename the `Unreleased` section to the
+new version with its date and start a fresh empty `Unreleased` above it —
+the section is never cut automatically. Then tag `vX.Y.Z` and push the tag;
+the Release workflow runs the tests first, then publishes the GitHub
+release, the Homebrew cask, and the npm packages.

@@ -398,6 +398,17 @@ func TestMultiSelectOrderedStarRanksInOptionOrder(t *testing.T) {
 	}
 }
 
+func TestMultiSelectOrderedStarUnderFilterKeepsHiddenRanks(t *testing.T) {
+	m := newOrderedMultiModel("t", opts3(), []string{"a", "b", "c"})
+	m = press(m, tea.KeyPressMsg{Text: "/"})          // enter filter mode
+	m = press(m, tea.KeyPressMsg{Text: "l"})          // narrow to Alpha
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep filter, exit mode
+	m = press(m, tea.KeyPressMsg{Text: "*"})          // all-off for visible rows only
+	if got := m.orderedValues(); len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Fatalf("after * under filter = %v, want [b c] (hidden ranks kept)", got)
+	}
+}
+
 func TestMultiSelectOrderedRenderMarks(t *testing.T) {
 	m := newOrderedMultiModel("t", opts3(), []string{"a"})
 	view := m.View().Content
@@ -443,5 +454,21 @@ func TestDimRowRendersFaint(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if strings.Contains(m.View().Content, "\x1b[2mBeta") {
 		t.Fatalf("cursor row should keep its active highlight, not dim:\n%s", m.View().Content)
+	}
+}
+
+// TestSelectFilterAcceptsPaste pins that a bracketed paste lands in the
+// filter: bubbletea enables bracketed paste by default, and dropping the
+// PasteMsg made pasting into the filter a silent no-op.
+func TestSelectFilterAcceptsPaste(t *testing.T) {
+	m := newSelectModel("t", opts3(), false)
+	m = press(m, tea.KeyPressMsg{Text: "/"})
+	mm, _ := m.Update(tea.PasteMsg{Content: "gam"})
+	m = mm.(*selectModel)
+	if m.filter.value != "gam" {
+		t.Fatalf("filter = %q, want pasted gam", m.filter.value)
+	}
+	if nav := m.nav(); len(nav) != 1 || m.options[nav[0]].Value != "c" {
+		t.Fatalf("pasted filter must narrow the list, nav = %v", nav)
 	}
 }

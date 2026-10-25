@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -231,6 +233,40 @@ func TestCommitValidateCycleRejected(t *testing.T) {
 	s.extends = config.Extends{"b"} // a extending b, where b extends a
 	if err := commitValidate(cfg, s); err == nil {
 		t.Fatal("cycle not rejected")
+	}
+}
+
+func TestApplyExtendsPickRejectsCycle(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"a":    {Env: map[string]string{"K": "v"}},
+		"b":    {Extends: config.Extends{"a"}},
+		"base": {},
+	}}
+	s := newEditState("a", config.Profile{}, nil, false)
+	s.extends = config.Extends{"base"}
+	err := applyExtendsPick(cfg, "a", &s, []string{"b"})
+	if err == nil {
+		t.Fatal("cycling pick accepted")
+	}
+	if len(s.extends) != 1 || s.extends[0] != "base" {
+		t.Fatalf("state changed on rejected pick: %v", s.extends)
+	}
+}
+
+func TestApplyExtendsPickAppliesAndClears(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{"base": {}}}
+	s := newEditState("a", config.Profile{}, nil, false)
+	if err := applyExtendsPick(cfg, "a", &s, []string{"base"}); err != nil {
+		t.Fatalf("valid pick rejected: %v", err)
+	}
+	if len(s.extends) != 1 || s.extends[0] != "base" {
+		t.Fatalf("pick not applied: %v", s.extends)
+	}
+	if err := applyExtendsPick(cfg, "a", &s, nil); err != nil {
+		t.Fatalf("clear rejected: %v", err)
+	}
+	if s.extends != nil {
+		t.Fatalf("clear left extends: %v", s.extends)
 	}
 }
 
@@ -716,5 +752,28 @@ func TestInheritedEntriesExcludesOwnKeys(t *testing.T) {
 	}
 	if !slices.Equal(keys, []string{"A", "C"}) {
 		t.Errorf("inheritedEntries keys = %v, want [A C]", keys)
+	}
+}
+
+// TestMenuErrorAction pins how a failed menu Select is classified: real
+// errors propagate (exit stays loud), cancels — including wrapped
+// ErrCanceled — only ask before discarding pending edits, and a clean cancel
+// with nothing pending just exits.
+func TestMenuErrorAction(t *testing.T) {
+	boom := errors.New("tea exploded")
+	if got, ask := menuErrorAction(boom, true); !errors.Is(got, boom) || ask {
+		t.Errorf("real error must propagate, got (%v, ask=%v)", got, ask)
+	}
+
+	wrapped := fmt.Errorf("menu: %w", ui.ErrCanceled)
+	if got, ask := menuErrorAction(wrapped, false); got != nil || ask {
+		t.Errorf("clean wrapped cancel must exit nil, got (%v, ask=%v)", got, ask)
+	}
+	if got, ask := menuErrorAction(wrapped, true); got != nil || !ask {
+		t.Errorf("wrapped cancel with pending edits must ask, got (%v, ask=%v)", got, ask)
+	}
+
+	if got, ask := menuErrorAction(ui.ErrCanceled, true); got != nil || !ask {
+		t.Errorf("bare cancel with pending edits must ask, got (%v, ask=%v)", got, ask)
 	}
 }

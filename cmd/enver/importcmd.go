@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -57,7 +58,7 @@ var importCmd = &cobra.Command{
 			if err := requireInteractive("profile name"); err != nil {
 				return err
 			}
-			n, ok := promptProfileName()
+			n, ok := promptProfileName("Profile name", ui.Input)
 			if !ok {
 				return nil
 			}
@@ -79,8 +80,8 @@ var importCmd = &cobra.Command{
 					return fmt.Errorf("extends profile %q does not exist", p)
 				}
 			}
-			if extendsCycles(merged, name, parents) {
-				return fmt.Errorf("extends %s would create a cycle", strings.Join(parents, ", "))
+			if err := extendsCycleError(merged, name, parents); err != nil {
+				return err
 			}
 		}
 		summary, err := app.ImportEnv(r, writeTarget(), name, importExtends, app.ImportOptions{
@@ -104,6 +105,31 @@ func init() {
 	importCmd.Flags().BoolVar(&importReplace, "replace", false, "wipe the profile's own env and unset list before importing")
 	importCmd.Flags().BoolVar(&importForce, "force", false, "skip the --replace removal confirmation")
 	importCmd.Flags().StringVar(&importExtends, "extends", "", "set or override the profile's extends (comma-separated for multiple)")
+	_ = importCmd.RegisterFlagCompletionFunc("extends", completeImportExtends)
+}
+
+// completeImportExtends completes the --extends flag: the trailing
+// comma-segment against the merged view the flag is itself validated on,
+// keeping typed parents as the prefix and not re-offering them.
+func completeImportExtends(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := applyChdir(); err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	prefix := ""
+	if i := strings.LastIndex(toComplete, ","); i >= 0 {
+		prefix = toComplete[:i+1]
+		toComplete = toComplete[i+1:]
+	}
+	picked := app.SplitExtends(prefix)
+	cfgPath, _ := cmd.Flags().GetString("config")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	var out []string
+	for _, n := range app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete) {
+		if !slices.Contains(picked, n) {
+			out = append(out, prefix+n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
 // effectiveResolve resolves a profile from the merged two-layer view the

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
+	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/runner"
 )
 
@@ -61,6 +63,20 @@ func TestRunRequiresCommand(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestRunMissingDashEchoesInterpretedSplit(t *testing.T) {
+	// `enver x prod ls` (no `--`): prod reads as the profile and ls is
+	// dropped — the error must say both instead of implying args were empty.
+	err := Run([]string{"prod", "ls", "-la"}, -1, Options{Name: "enver x"})
+	if err == nil {
+		t.Fatal("Run returned nil, want an error")
+	}
+	for _, want := range []string{`interpreted "prod"`, `dropped "ls -la"`, "enver x prod -- ls -la"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q misses %q", err.Error(), want)
+		}
 	}
 }
 
@@ -171,6 +187,9 @@ func TestRunNoProfileNoDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no profile specified and no default set") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "enver default") {
+		t.Fatalf("error should hint the fix, got: %v", err)
 	}
 }
 
@@ -567,5 +586,153 @@ func TestMatchingProfiles(t *testing.T) {
 	// Only a real load error (here: unparseable YAML) yields nil.
 	if got := MatchingProfiles(Options{ConfigPath: broken, NoLocal: true}, ""); got != nil {
 		t.Fatalf("MatchingProfiles(unparseable config) = %v, want nil", got)
+	}
+}
+
+func TestChildEnvDropsEnverKey(t *testing.T) {
+	t.Setenv("ENVER_KEY", "sk-decrypt-master")
+	env, _, err := childEnv(Options{}, map[string]string{"ENVER_INJECTED": "yes"})
+	if err != nil {
+		t.Fatalf("stripping must not error: %v", err)
+	}
+	sawKey, sawInjected := false, false
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		switch {
+		case envname.Equal(k, "ENVER_KEY"):
+			sawKey = true
+		case k == "ENVER_INJECTED":
+			sawInjected = true
+		}
+	}
+	if sawKey {
+		t.Fatal("ENVER_KEY leaked into the child environment")
+	}
+	if !sawInjected {
+		t.Fatal("profile env missing from the child environment")
+	}
+}
+
+func TestChildEnvForwardKeepsEnverKey(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("ENVER_KEY", key)
+	t.Setenv("ENVER_FORWARD_KEY", "1")
+	env, notice, err := childEnv(Options{}, map[string]string{"ENVER_INJECTED": "yes"})
+	if err != nil {
+		t.Fatalf("forwarding must not error: %v", err)
+	}
+	if notice != "" {
+		t.Fatalf("an explicit opt-in must not warn, got notice %q", notice)
+	}
+	sawKey, sawInjected := false, false
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		switch {
+		case envname.Equal(k, "ENVER_KEY"):
+			sawKey = true
+			if v != key {
+				t.Fatalf("child ENVER_KEY = %q, want the forwarded key %q", v, key)
+			}
+		case k == "ENVER_INJECTED":
+			sawInjected = true
+		}
+	}
+	if !sawKey {
+		t.Fatal("ENVER_FORWARD_KEY must keep ENVER_KEY in the child environment")
+	}
+	if !sawInjected {
+		t.Fatal("profile env missing from the child environment")
+	}
+}
+
+func TestChildEnvNoticeWhenKeyStripped(t *testing.T) {
+	t.Setenv("ENVER_KEY", "sk-decrypt-master")
+	_, notice, err := childEnv(Options{}, nil)
+	if err != nil {
+		t.Fatalf("stripping must not error: %v", err)
+	}
+	if !strings.Contains(notice, "ENVER_FORWARD_KEY=1") {
+		t.Fatalf("stripping a set key must point at ENVER_FORWARD_KEY, got %q", notice)
+	}
+
+	t.Setenv("ENVER_KEY", "")
+	_, notice, err = childEnv(Options{}, nil)
+	if err != nil {
+		t.Fatalf("stripping must not error: %v", err)
+	}
+	if notice != "" {
+		t.Fatalf("an unset ENVER_KEY needs no notice, got %q", notice)
+	}
+}
+
+func TestChildEnvForwardMaterializesKeyFileKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key")
+	if err := crypto.GenerateKey(path, false); err != nil {
+		t.Fatal(err)
+	}
+	fileKey, _, err := crypto.LoadKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENVER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("ENVER_FORWARD_KEY", "1")
+	env, notice, err := childEnv(Options{KeyPath: path}, nil)
+	if err != nil {
+		t.Fatalf("forwarding a key-file key must not error: %v", err)
+	}
+	if notice != "" {
+		t.Fatalf("an explicit opt-in must not warn, got notice %q", notice)
+	}
+	want := base64.StdEncoding.EncodeToString(fileKey)
+	sawKey := false
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if !envname.Equal(k, "ENVER_KEY") {
+			continue
+		}
+		sawKey = true
+		if v != want {
+			t.Fatalf("child ENVER_KEY = %q, want the --key file key %q", v, want)
+		}
+	}
+	if !sawKey {
+		t.Fatal("the resolved --key key must be materialized as the child's ENVER_KEY")
+	}
+}
+
+func TestChildEnvForwardWithoutKeyLeavesNone(t *testing.T) {
+	t.Setenv("ENVER_KEY", "")
+	t.Setenv("ENVER_FORWARD_KEY", "1")
+	restore := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(t.TempDir(), "missing") }
+	t.Cleanup(func() { crypto.KeyFilePath = restore })
+	env, notice, err := childEnv(Options{}, map[string]string{"ENVER_INJECTED": "yes"})
+	if err != nil {
+		t.Fatalf("forwarding with no key anywhere must not error: %v", err)
+	}
+	if notice != "" {
+		t.Fatalf("nothing was dropped, so no notice, got %q", notice)
+	}
+	sawInjected := false
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if envname.Equal(k, "ENVER_KEY") {
+			t.Fatalf("no key to forward, yet the child env still carries %q", kv)
+		}
+		if k == "ENVER_INJECTED" {
+			sawInjected = true
+		}
+	}
+	if !sawInjected {
+		t.Fatal("profile env missing from the child environment")
+	}
+}
+
+func TestChildEnvForwardInvalidKeyFails(t *testing.T) {
+	t.Setenv("ENVER_KEY", "not-base64!!!")
+	t.Setenv("ENVER_FORWARD_KEY", "1")
+	_, _, err := childEnv(Options{}, nil)
+	if err == nil {
+		t.Fatal("forwarding undecodable key material must fail loudly, not silently drop the key")
 	}
 }

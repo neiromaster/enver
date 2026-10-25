@@ -74,10 +74,10 @@ func init() {
 	showCmd.Flags().StringVar(&showFormat, "format", "text", "output format: text or json")
 	exportCmd.Flags().StringVar(&exportFormat, "format", "bash", "output format: bash, fish, or powershell")
 	_ = showCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"text", "json"}, cobra.ShellCompDirectiveDefault
+		return []string{"text", "json"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = exportCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"bash", "fish", "powershell"}, cobra.ShellCompDirectiveDefault
+		return []string{"bash", "fish", "powershell"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
 

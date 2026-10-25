@@ -110,6 +110,12 @@ func DecodeKey(s string) ([]byte, error) {
 	return key, nil
 }
 
+// EncodeKey base64-encodes key bytes into the inline ENVER_KEY form, the
+// inverse of DecodeKey.
+func EncodeKey(key []byte) string {
+	return base64.StdEncoding.EncodeToString(key)
+}
+
 // IsEncrypted reports whether v carries the enc:v3: prefix.
 func IsEncrypted(v string) bool {
 	return strings.HasPrefix(v, prefixV3)
@@ -332,7 +338,9 @@ func NewKeyCache(salt, key []byte) KeyCache {
 	return KeyCache{Version: 1, Salt: salt, Key: key}
 }
 
-// WriteKeyCache writes c to path as JSON with 0600 perms.
+// WriteKeyCache writes c to path as JSON with 0600 perms — tightened on
+// overwrite too, since WriteFile's perm applies only at creation and the
+// cache holds a live AES key.
 func WriteKeyCache(path string, c KeyCache) error {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -343,7 +351,10 @@ func WriteKeyCache(path string, c KeyCache) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func parseKeyCache(data []byte) (KeyCache, error) {
