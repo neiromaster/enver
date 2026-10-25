@@ -138,7 +138,7 @@ func profileOrDefault(profile, def string) (string, error) {
 		profile = def
 	}
 	if profile == "" {
-		return "", fmt.Errorf("no profile specified and no default set in config")
+		return "", fmt.Errorf("no profile specified and no default set in config; set one with `enver default <profile>`")
 	}
 	return profile, nil
 }

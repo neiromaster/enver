@@ -14,6 +14,20 @@ import (
 // surfaces its parse error instead of masquerading as a missing profile.
 // Reachable only when reading skips the target: under --no-local app.Load
 // never opens the local file, so the target reload is the first to trip.
+func TestDefaultShowWithoutDefaultHintsTheFix(t *testing.T) {
+	global := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, false)
+	withGlobalConfig(t, global)
+	globalFlags.noLocal = true
+
+	err := defaultCmd.RunE(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatal("showing with no default set must error")
+	}
+	if !strings.Contains(err.Error(), "enver default") {
+		t.Fatalf("error should hint the fix, got: %v", err)
+	}
+}
+
 func TestDefaultCorruptTargetFileErrorsLoudly(t *testing.T) {
 	global := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, true)
 	dir := t.TempDir()
