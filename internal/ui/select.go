@@ -213,6 +213,12 @@ func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = k.Height
 		return m, nil
+	case tea.PasteMsg:
+		// Bracketed paste is on by default; dropping the message made pasting
+		// into the filter a silent no-op.
+		if m.filter.active {
+			m.filter.value += k.Content
+		}
 	case tea.KeyPressMsg:
 		if m.filter.active {
 			return m.applyFilterKey(k)
