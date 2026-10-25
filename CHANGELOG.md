@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+- **Security:** `ENVER_KEY` no longer reaches the child environment. `enver x`
+  used to copy `os.Environ()` wholesale, so anything it ran — the documented
+  CI pattern hands the key over as an env var — could read the master key and
+  decrypt every profile. Nested enver workflows (make → `enver show`) that
+  need it back can set `ENVER_FORWARD_KEY=1` to re-export the resolved key to
+  the child; a set key that is dropped says so on stderr.
+- **Security:** decrypt persists the plaintext config `0600` instead of the
+  umask default, the key cache is re-tightened to `0600` when overwriting an
+  existing looser file, and a relative `XDG_CONFIG_HOME` is ignored per the
+  XDG spec instead of silently writing the key into the cwd.
+- `enver x` resolves the child command against the merged environment's
+  `PATH`, so a profile that sets `PATH:` works with a bare command name
+  instead of exiting 127; lookup failures other than not-found surface
+  verbatim, and in the wait path (coverage builds, Windows) a child killed by
+  a signal exits `128+signal` instead of 255.
+- `enver x prod ls` without `--` now echoes the interpreted split — the token
+  taken as the profile and the text dropped — instead of only demanding a
+  command after `--`.
+- Nested references inside braced operands expand correctly
+  (`${A:-${B}}`): the closer is matched by brace depth, so a set default no
+  longer leaves a stray `}` in the value and an unset one no longer ships the
+  inner reference literally.
+- Password prompts: `Ctrl-C` cancels cleanly into the normal prompt loop (the
+  terminal is no longer left with echo off), and line-discipline control
+  bytes (`^W`, `^R`, `^V`, `^S`, `^Q`, `^O`) are consumed faithfully instead
+  of being appended to the passphrase.
+- Prompts render on stderr, matching `Password:` — `enver rename p > log`
+  captures neither TUI frames nor raw-mode escape sequences, only the
+  command's own output.
+- `enver edit` survives its error paths: a commit-time validation failure
+  (an extends cycle) keeps the session open with the message instead of
+  exiting and losing unsaved edits — cycles are also bounced at pick time
+  like in `add` — a real menu failure exits non-zero instead of silently
+  succeeding, and `*` under an active filter clears only the visible ranks
+  instead of the whole `extends` chain.
+- `enver rename` and `duplicate` re-prompt on an invalid prompted name like
+  `add` does, instead of hard-erroring the whole command.
+- "No default profile set" guards now carry the next-step hint every sibling
+  guard has (`enver default <profile>`).
+- **New:** `enver import --extends` completes profile parents for the
+  trailing comma-segment, skipping parents already picked; `--format` on
+  `show`, `list`, and `export` completes its enum without falling through to
+  filename completion.
+- YAML configs whose env keys spell booleans (`TRUE:`, `False:`, `on:` …)
+  load through the struct path but were invisible to the node-tree writers —
+  an upsert appended a duplicate mapping key that bricked every subsequent
+  read, and delete silently no-oped. Writers now match any scalar key tag.
+- `enver update` refuses to run from a from-source build (version `v0.0.0`)
+  instead of always reporting an update and replacing the local binary with
+  the latest release.
+- `scripts/install.sh` extracts into a work dir and swaps the binary in by
+  rename, so an interrupted install can no longer leave a truncated `enver`
+  clobbering a working one, and reinstalling over a running binary avoids
+  ETXTBSY.
+- Infra: the CI test matrix runs on macOS too; publishing a release requires
+  a green test run; `go mod tidy` is verified to leave no diff in both
+  modules; every GitHub Actions ref is pinned to a commit SHA; runs group by
+  ref with cancel-in-progress on CI; the generated shell completions are
+  committed with a drift check; `docs/contributing.md` matches the CI gates
+  (`make cover-gate`, `make shim`).
+
 ## v0.9.2 - 2026-09-09
 
 - **New:** `add` and `enver edit` compose multi-parent `extends`
