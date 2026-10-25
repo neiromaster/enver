@@ -38,3 +38,16 @@ func TestConfigHomeLadder(t *testing.T) {
 		t.Fatalf("ConfigHome without a home = %q, want %q", got, filepath.Join("/", ".config"))
 	}
 }
+
+// A relative XDG_CONFIG_HOME is ignored per the basedir spec — only absolute
+// values count — so a stray relative setting cannot relocate the config (and
+// the key file) into the working directory.
+func TestConfigHomeIgnoresRelativeXDG(t *testing.T) {
+	defer func() { homeDir = os.UserHomeDir }()
+	t.Setenv("XDG_CONFIG_HOME", "enver-cfg")
+	t.Setenv("HOME", "/env/home")
+	homeDir = func() (string, error) { return "/stub/home", nil }
+	if got := ConfigHome(); got != filepath.Join("/env/home", ".config") {
+		t.Fatalf("ConfigHome with relative XDG = %q, want the HOME fallback %q", got, filepath.Join("/env/home", ".config"))
+	}
+}
