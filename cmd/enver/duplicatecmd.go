@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/ui"
@@ -38,19 +37,18 @@ var duplicateCmd = &cobra.Command{
 		newName := ""
 		if len(args) > 1 {
 			newName = args[1]
-		}
-		if newName == "" {
+			if err := validateProfileName(newName); err != nil {
+				return err
+			}
+		} else {
 			if err := requireInteractive("new name"); err != nil {
 				return err
 			}
-			in, err := ui.Input("New profile name")
-			if err != nil {
+			n, ok := promptProfileName("New profile name", ui.Input)
+			if !ok {
 				return nil
 			}
-			newName = strings.TrimSpace(in)
-		}
-		if err := validateProfileName(newName); err != nil {
-			return err
+			newName = n
 		}
 		if _, ok := targetCfg.Profiles[newName]; ok {
 			return fmt.Errorf("profile %q already exists", newName)

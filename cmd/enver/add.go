@@ -22,12 +22,13 @@ func validateProfileName(name string) error {
 	return nil
 }
 
-// promptProfileName reads a profile name interactively, re-prompting on invalid
-// input. It returns the trimmed name and ok=true, or ok=false when the input
-// prompt fails (for example EOF), in which case the caller aborts silently.
-func promptProfileName() (string, bool) {
+// promptProfileName reads a profile name interactively under the given title,
+// re-prompting on invalid input. It returns the trimmed name and ok=true, or
+// ok=false when the input prompt fails (for example EOF), in which case the
+// caller aborts silently.
+func promptProfileName(title string, input func(string) (string, error)) (string, bool) {
 	for {
-		n, err := ui.Input("Profile name")
+		n, err := input(title)
 		if err != nil {
 			return "", false
 		}
@@ -156,7 +157,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		name = args[0]
 	}
 	if name == "" {
-		n, ok := promptProfileName()
+		n, ok := promptProfileName("Profile name", ui.Input)
 		if !ok {
 			return nil
 		}

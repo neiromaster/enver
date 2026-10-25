@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -39,19 +38,18 @@ var renameCmd = &cobra.Command{
 		newName := ""
 		if len(args) > 1 {
 			newName = args[1]
-		}
-		if newName == "" {
+			if err := validateProfileName(newName); err != nil {
+				return err
+			}
+		} else {
 			if err := requireInteractive("new name"); err != nil {
 				return err
 			}
-			in, err := ui.Input("New name")
-			if err != nil {
+			n, ok := promptProfileName("New name", ui.Input)
+			if !ok {
 				return nil
 			}
-			newName = strings.TrimSpace(in)
-		}
-		if err := validateProfileName(newName); err != nil {
-			return err
+			newName = n
 		}
 		if err := requireTargetProfile(targetCfg, path, oldName); err != nil {
 			return err
