@@ -114,3 +114,13 @@ func TestRunLookupErrorSurfacesVerbatim(t *testing.T) {
 		t.Fatalf("the real lookup error must surface verbatim, stderr: %q", msg)
 	}
 }
+
+// TestWaitChildSignalExitMapsTo128PlusSignal pins the wait-path exit contract:
+// a signal-killed child reports 128+signal like a shell would, not
+// ExitCode()'s -1 — which os.Exit renders as 255 with no hint of the signal.
+func TestWaitChildSignalExitMapsTo128PlusSignal(t *testing.T) {
+	code := waitChild("/bin/sh", []string{"sh", "-c", "kill -TERM $$"}, nil, "enver x")
+	if code != 128+15 {
+		t.Fatalf("exit = %d, want 128+15 (SIGTERM)", code)
+	}
+}
