@@ -204,7 +204,7 @@ func EncryptFile(path string, key, salt []byte, profile string, all bool) (int, 
 	return count, os.WriteFile(path, out, 0o644)
 }
 
-// DecryptFile reverses EncryptFile for the encrypted values it finds. The key is pre-verified against the first encrypted value in the target profiles, so a wrong key fails once with the recovery path instead of mid-run. Foreign enc: values fail loudly in every profile, filtered or not. Returns the count of decrypted values.
+// DecryptFile reverses EncryptFile for the encrypted values it finds. The key is pre-verified against the first encrypted value in the target profiles, so a wrong key fails once with the recovery path instead of mid-run. Foreign enc: values fail loudly in every profile, filtered or not. The rewritten file is left 0600 — it now holds plaintext secrets, and WriteFile's perm only applies at creation. Returns the count of decrypted values.
 func DecryptFile(path string, key []byte, profile string) (int, error) {
 	root, err := loadOrInitRoot(path)
 	if err != nil {
@@ -277,7 +277,10 @@ func DecryptFile(path string, key []byte, profile string) (int, error) {
 	if err != nil {
 		return count, err
 	}
-	return count, os.WriteFile(path, out, 0o644)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return count, err
+	}
+	return count, os.Chmod(path, 0o600)
 }
 
 // ScanCrypt walks every env value in the config at path through salts.Add.
