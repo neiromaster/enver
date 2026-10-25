@@ -66,6 +66,20 @@ func TestRunRequiresCommand(t *testing.T) {
 	}
 }
 
+func TestRunMissingDashEchoesInterpretedSplit(t *testing.T) {
+	// `enver x prod ls` (no `--`): prod reads as the profile and ls is
+	// dropped — the error must say both instead of implying args were empty.
+	err := Run([]string{"prod", "ls", "-la"}, -1, Options{Name: "enver x"})
+	if err == nil {
+		t.Fatal("Run returned nil, want an error")
+	}
+	for _, want := range []string{`interpreted "prod"`, `dropped "ls -la"`, "enver x prod -- ls -la"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q misses %q", err.Error(), want)
+		}
+	}
+}
+
 func TestResolveLazyKey(t *testing.T) {
 	// A plaintext profile resolves with no key available.
 	cfg := config.Config{Profiles: map[string]config.Profile{

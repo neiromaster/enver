@@ -107,6 +107,10 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 func Run(args []string, dashAt int, opts Options) error {
 	profile, cmdArgs := ParseProfileAndCmd(args, dashAt)
 	if len(cmdArgs) == 0 {
+		if dashAt < 0 && len(args) > 1 {
+			rest := strings.Join(args[1:], " ")
+			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s %s -- %s`", opts.Name, profile, rest, opts.Name, profile, rest)
+		}
 		return fmt.Errorf("%s requires a command after `--`", opts.Name)
 	}
 	profile, r, err := ResolveDefault(opts, profile)
