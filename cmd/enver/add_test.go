@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -206,5 +207,44 @@ func TestAddCompletesExistingProfiles(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("completions = %v, want dev", got)
+	}
+}
+
+// TestPromptProfileNameReprompts pins the shared prompted-name contract:
+// invalid input re-prompts instead of hard-erroring, and only a failed read
+// (EOF) aborts. rename and duplicate lean on the same helper.
+func TestPromptProfileNameReprompts(t *testing.T) {
+	var titles []string
+	inputs := []string{"  ", "bad name!", "  ok-name "}
+	i := 0
+	read := func(title string) (string, error) {
+		titles = append(titles, title)
+		v := inputs[i]
+		i++
+		return v, nil
+	}
+
+	got, ok := promptProfileName("New name", read)
+	if !ok {
+		t.Fatal("valid third input must return ok")
+	}
+	if got != "ok-name" {
+		t.Fatalf("got %q, want trimmed ok-name", got)
+	}
+	if len(titles) != 3 {
+		t.Errorf("prompted %d times, want 3 (re-prompt on invalid)", len(titles))
+	}
+	for _, ti := range titles {
+		if ti != "New name" {
+			t.Errorf("prompt title %q must follow the caller", ti)
+		}
+	}
+}
+
+func TestPromptProfileNameAbortsOnReadFailure(t *testing.T) {
+	if _, ok := promptProfileName("New name", func(string) (string, error) {
+		return "", io.EOF
+	}); ok {
+		t.Fatal("a failed read must abort, not re-prompt forever")
 	}
 }

@@ -58,7 +58,7 @@ var importCmd = &cobra.Command{
 			if err := requireInteractive("profile name"); err != nil {
 				return err
 			}
-			n, ok := promptProfileName()
+			n, ok := promptProfileName("Profile name", ui.Input)
 			if !ok {
 				return nil
 			}
