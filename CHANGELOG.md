@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.9.2 - 2026-09-09
+
 - **New:** `add` and `enver edit` compose multi-parent `extends`
   interactively. The picker preserves selection order — parents are ranked as
   picked (`1`, `2`, …), `<`/`>` or `←`/`→` move the cursor row within the
