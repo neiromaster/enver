@@ -508,7 +508,9 @@ func TestWriteKeyCacheTightensExistingMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
+	// Windows has no POSIX mode bits — Go maps chmod onto the read-only
+	// attribute — so the 0600 contract is a unix-only assertion.
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("key cache mode = %v, want 0600 over a looser existing file", fi.Mode().Perm())
 	}
 }

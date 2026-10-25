@@ -200,8 +200,12 @@ func TestShouldEncryptMatchesSecretSelection(t *testing.T) {
 }
 
 func TestGlobalPath(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/xdg")
-	if got, want := GlobalPath(""), filepath.Join("/xdg", "enver", "config.yaml"); got != want {
+	// Absolute on every platform: a "/xdg" literal is not filepath.IsAbs on
+	// Windows, so the spec-mandated ignore would kick in and test the wrong
+	// branch.
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if got, want := GlobalPath(""), filepath.Join(xdg, "enver", "config.yaml"); got != want {
 		t.Fatalf("XDG path = %q, want %q", got, want)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
