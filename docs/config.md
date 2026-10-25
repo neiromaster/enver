@@ -40,7 +40,9 @@ profiles:
       ANTHROPIC_MODEL: claude-opus-5   # override just the model
 ```
 
-Merge rules: `default` is overridden when set; profiles union; per-profile env
+Merge rules: `default` is overridden when set; an empty local `default:` never
+clears the global default — clear it in the layer that set it with
+`enver default --clear`; profiles union; per-profile env
 keys are overridden per-key; when both layers carry a profile's `unset` list it
 stays the overriding layer's verbatim rather than merging; `extends` lists merge
 as `[global…, local…]`, so a local parent takes priority over a global parent on
