@@ -125,10 +125,11 @@ func newCheckedMultiModel(title string, options []Option, checked []string) *sel
 
 // MultiSelectChecked is a checkbox multi-select with pre-checked rows (matched
 // by Value). Confirming reports (values, true, nil) where values are the
-// still-checked Values in option order. Leaving without confirming — esc/ctrl+c
-// or enter on an Action row such as Back — reports (state, false, nil), state
-// being the checkbox layout at that moment, so callers can tell a bare exit
-// from a session that had toggles pending. Action rows never appear in values.
+// still-checked Values in option order. Enter on an Action row such as Back
+// reports (state, false, nil), state being the checkbox layout at that
+// moment, so callers can tell a bare exit from a session that had toggles
+// pending; esc/ctrl+c instead cancels with ErrCanceled and discards the
+// state. Action rows never appear in values.
 func MultiSelectChecked(title string, options []Option, checked []string) ([]string, bool, error) {
 	out, err := run(newCheckedMultiModel(title, options, checked))
 	if err != nil {
@@ -141,9 +142,10 @@ func MultiSelectChecked(title string, options []Option, checked []string) ([]str
 // MultiSelectOrdered is a multi-select that preserves selection order: ranks
 // seed from order (matched by Value, in the sequence given), picking appends
 // to the end, </>/←→ move rows within the order. Confirming reports the
-// selected Values in rank order; leaving without confirming — esc/ctrl+c or
-// enter on an Action row such as Back — reports the current order and false,
-// so callers can tell a bare exit from a session with pending changes.
+// selected Values in rank order. Enter on an Action row such as Back reports
+// the current order and false, so callers can tell a bare exit from a
+// session with pending changes; esc/ctrl+c instead cancels with ErrCanceled
+// and discards the order.
 func MultiSelectOrdered(title string, options []Option, order []string) ([]string, bool, error) {
 	out, err := run(newOrderedMultiModel(title, options, order))
 	if err != nil {
