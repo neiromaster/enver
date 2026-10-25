@@ -62,6 +62,42 @@ func TestCompleteListsProfiles(t *testing.T) {
 	}
 }
 
+// TestCompleteFormatFlagsNoFileComp pins the fixed-enum --format flags to
+// NoFileComp: their candidates are a closed set, so letting the shell also
+// offer filenames only adds noise.
+func TestCompleteFormatFlagsNoFileComp(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n")
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"show", "--format", ""}, "json"},
+		{[]string{"list", "--format", ""}, "json"},
+		{[]string{"export", "--format", ""}, "powershell"},
+	}
+	for _, c := range cases {
+		r := s.run(append([]string{"__complete"}, c.args...)...)
+		if r.ExitCode != 0 {
+			t.Fatalf("%s: exit = %d, stderr: %s", c.args, r.ExitCode, r.Stderr)
+		}
+		lines := strings.Split(strings.TrimRight(r.Stdout, "\n"), "\n")
+		if lines[len(lines)-1] != ":4" {
+			t.Errorf("%s: directive %q, want :4 (NoFileComp)", c.args, lines[len(lines)-1])
+		}
+		var tokens []string
+		for _, line := range lines {
+			token, _, _ := strings.Cut(line, "\t")
+			if token != "" && !strings.HasPrefix(token, ":") {
+				tokens = append(tokens, token)
+			}
+		}
+		if !slices.Contains(tokens, c.want) {
+			t.Errorf("%s: candidates %v miss %q", c.args, tokens, c.want)
+		}
+	}
+}
+
 // TestShowPipedOutputStaysEscapeFree pins the documented pipe contract end to
 // end: text show through a pipe never emits ANSI escapes, even in a
 // color-capable environment with NO_COLOR absent.
