@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.9.3 - 2026-11-08
+
 - **Security:** `ENVER_KEY` no longer reaches the child environment. `enver x`
   used to copy `os.Environ()` wholesale, so anything it ran — the documented
   CI pattern hands the key over as an env var — could read the master key and
