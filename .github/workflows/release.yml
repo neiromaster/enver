@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  # Republish npm for an already-released tag. Publishing is bound to this
+  # workflow file for the OIDC trusted-publisher link, so it cannot live in a
+  # separate workflow — but it can be dispatched on its own, which is the only
+  # way to retry it: re-running the failed job of a tag build starts at
+  # goreleaser, which then fails on the assets it already uploaded.
+  workflow_dispatch:
+    inputs:
+      npm_version:
+        description: "Version to publish to npm, e.g. 0.9.4 (no v prefix)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +26,7 @@ concurrency:
 
 jobs:
   test:
+    if: github.event_name == 'push'
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -28,6 +40,7 @@ jobs:
 
   release:
     needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -54,10 +67,21 @@ jobs:
           # GitHub Release is still published; only the cask push is skipped.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+  npm:
+    needs: [test, release]
+    # always() so a dispatch — where both upstream jobs are skipped — still
+    # reaches npm; the explicit guard keeps a failed release from publishing.
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.release.result == 'success')
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Publish to npm
-        run: bash scripts/publish-npm.sh "${GITHUB_REF_NAME#v}"
+        env:
+          VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.npm_version || github.ref_name }}
+        run: bash scripts/publish-npm.sh "${VERSION#v}"
