@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Infra: the npm publish is retried across transient CDN errors when it fetches
+  the release assets, and it runs as its own release job that can be dispatched
+  for an already-published tag — re-running a failed tag build used to redo
+  goreleaser, which fails on the assets it already uploaded.
+
 ## v0.9.4 - 2026-11-08
 
 - The Homebrew cask is now generated with Homebrew's current
