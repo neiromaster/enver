@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.9.4 - 2026-11-08
+
+- The Homebrew cask is now generated with Homebrew's current
+  `postflight_steps` stanza. The deprecated `postflight` one it replaced made
+  every `brew` command print a deprecation warning for anyone with the tap
+  installed. Clearing the macOS quarantine attribute is also guarded to macOS
+  now — the cask serves Linux too, where `/usr/bin/xattr` does not exist.
+
 ## v0.9.3 - 2026-11-08
 
 - **Security:** `ENVER_KEY` no longer reaches the child environment. `enver x`
