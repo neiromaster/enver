@@ -22,6 +22,11 @@ REPO="neiromaster/enver"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 OUT_DIR="$(pwd)/dist-npm"
 
+# Release assets are served through a CDN that lags a few seconds behind the
+# upload, so a fresh release can still answer 503 here. Retry instead of
+# failing the publish: the assets are there, just not everywhere yet.
+CURL=(curl -fsSL --retry 8 --retry-all-errors --retry-delay 5)
+
 # platform-key:os_arch:ext:bin-name
 PLATFORMS=(
   "darwin-arm64:darwin_arm64:tar.gz:enver"
@@ -75,7 +80,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 [[ "$PACK_ONLY" == 1 ]] && mkdir -p "$OUT_DIR"
 
-curl -fsSL "${BASE_URL}/checksums.txt" -o "$WORK/checksums.txt"
+"${CURL[@]}" "${BASE_URL}/checksums.txt" -o "$WORK/checksums.txt"
 
 # 1. platform packages (before the meta, so the meta resolves cleanly)
 for entry in "${PLATFORMS[@]}"; do
@@ -86,7 +91,7 @@ for entry in "${PLATFORMS[@]}"; do
     continue
   fi
   archive="enver_${VERSION}_${os_arch}.${ext}"
-  curl -fsSL "${BASE_URL}/${archive}" -o "$WORK/$archive"
+  "${CURL[@]}" "${BASE_URL}/${archive}" -o "$WORK/$archive"
   expected="$(awk -v a="$archive" '$2==a {print $1}' "$WORK/checksums.txt")"
   actual="$(sha256 "$WORK/$archive")"
   if [[ "$actual" != "$expected" ]]; then
