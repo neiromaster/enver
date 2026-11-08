@@ -68,11 +68,17 @@ homebrew_casks:
       bash: completions/enver.bash
       zsh: completions/enver.zsh
       fish: completions/enver.fish
-    # Clear quarantine so the unsigned binary runs without manual Gatekeeper approval.
+    # Clear quarantine so the unsigned binary runs without manual Gatekeeper
+    # approval. install_steps renders Homebrew's declarative DSL; the raw-Ruby
+    # install hook it replaces renders the deprecated postflight stanza, which
+    # warns on every brew command. The macOS guard matters: the cask covers
+    # Linux too, where there is no /usr/bin/xattr.
     hooks:
       post:
-        install: |
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}"]
+          end
 
 gomod:
   proxy: true
