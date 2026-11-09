@@ -35,8 +35,8 @@ tools' control.
 **Homebrew** (macOS & Linux):
 
 ```sh
-brew tap neiromaster/enver
-brew trust neiromaster/enver     # required for third-party taps
+brew tap neiromaster/tap
+brew trust neiromaster/tap       # required for third-party taps
 brew install enver               # wires shell completions; strips Gatekeeper quarantine on macOS
 ```
 

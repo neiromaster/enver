@@ -61,7 +61,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with `repo` scope on neiromaster/homebrew-enver, so goreleaser
+          # PAT with `repo` scope on neiromaster/homebrew-tap, so goreleaser
           # can push the cask to the tap repo. Add as a repo secret named
           # HOMEBREW_TAP_GITHUB_TOKEN in neiromaster/enver. Without it, the
           # GitHub Release is still published; only the cask push is skipped.
