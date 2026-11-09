@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.9.5 - 2026-11-09
+
+- The Homebrew cask is published from the shared `neiromaster/homebrew-tap`
+  repository now instead of the enver-only tap, so the install snippet is
+  `brew tap neiromaster/tap` followed by `brew trust neiromaster/tap` and
+  `brew install enver`. The old `neiromaster/enver` name still redirects to the
+  moved repository.
 - Infra: the npm publish is retried across transient CDN errors when it fetches
   the release assets, and it runs as its own release job that can be dispatched
   for an already-published tag — re-running a failed tag build used to redo
