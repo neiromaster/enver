@@ -70,11 +70,13 @@ the menu:
 - **Secrets** — lists the profile's own variables (its marks open checked)
   plus the inherited ones it can take over. Selecting a parent's key
   materializes it as an own entry with its value, comment, and mark, and a mark
-  is cleared only here: the name field cannot express one, so typing the key
-  without `~` keeps it. Marks are staged like every other edit — they land on
-  **Done**, and Cancel discards them — and marked rows show their `~` while
-  encrypted values stay masked. One row, **Encrypt now**, schedules the encrypt
-  step to run once the commit has written the file; without a key it notes the
+  is cleared only here: a plain name carries no information, so typing the key
+  without `~` keeps the mark. Marks are staged like every other edit — they
+  land on **Done**, and Cancel discards them — and marked rows show their `~`.
+  An own encrypted value is masked in its row (and decrypted first when a key
+  resolves), while an inherited row carries no decryption state, so it may show
+  the stored ciphertext. One row, **Encrypt now**, schedules the encrypt step to
+  run once the commit has written the file; without a key it notes the
   plaintext and leaves the marks in place. The lifecycle and the local-override
   idiom live in
   [`secrets.md`](./secrets.md#marking-arbitrary-values).
