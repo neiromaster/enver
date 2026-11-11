@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/neiromaster/enver/internal/crypto"
 )
 
 func TestValidateFindsDanglingAndCycle(t *testing.T) {
@@ -72,6 +74,48 @@ func TestValidateGlobalReportsMalformedFile(t *testing.T) {
 	}
 	if _, err := ValidateGlobal(globalPath); err == nil {
 		t.Fatal("ValidateGlobal swallowed a parse error and reported the file valid")
+	}
+}
+
+// TestValidatePlaintextSecret pins the marked-but-unencrypted warning: the mark
+// promises encryption at rest, so a plaintext value under it is a health
+// finding — a warning, never an error, because the config still works.
+func TestValidatePlaintextSecret(t *testing.T) {
+	plain := Config{Profiles: map[string]Profile{
+		"p": {
+			Env:    map[string]string{"PROJECT_PATH": "/home/anna"},
+			Marked: map[string]bool{"PROJECT_PATH": true},
+		},
+	}}
+	issues := Validate(plain)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly one plaintext-secret warning", issues)
+	}
+	got := issues[0]
+	if got.Kind != KindPlaintextSecret || got.Severity != SeverityWarning || got.Target != "PROJECT_PATH" {
+		t.Fatalf("issue = %+v, want a plaintext-secret warning for PROJECT_PATH", got)
+	}
+	if want := `p: "PROJECT_PATH" is marked secret but stored in plaintext`; got.String() != want {
+		t.Errorf("issue text = %q, want %q", got.String(), want)
+	}
+
+	enc, err := crypto.EncryptValueWithParams("/home/anna", make([]byte, 32), []byte("0123456789abcdef"), crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted := Config{Profiles: map[string]Profile{
+		"p": {
+			Env:    map[string]string{"PROJECT_PATH": enc},
+			Marked: map[string]bool{"PROJECT_PATH": true},
+		},
+	}}
+	for _, is := range Validate(encrypted) {
+		if is.Kind == KindPlaintextSecret {
+			t.Fatalf("encrypted secret flagged as plaintext: %+v", is)
+		}
+		if is.Severity == SeverityError {
+			t.Fatalf("a marked profile must not raise errors: %+v", is)
+		}
 	}
 }
 

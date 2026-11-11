@@ -104,7 +104,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 		if _, ok := parentEnv[e.Key]; ok {
 			kind = ui.EntryOverride
 		}
-		out = append(out, ui.SummaryEntry{Key: e.Key, Value: config.MaskValue(e.Key, e.Value), Kind: kind})
+		out = append(out, ui.SummaryEntry{Key: e.Key, Value: config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, false, false)), Kind: kind})
 	}
 	inherited := make([]string, 0, len(parentEnv))
 	for k := range parentEnv {
@@ -114,7 +114,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 	}
 	slices.Sort(inherited)
 	for _, k := range inherited {
-		out = append(out, ui.SummaryEntry{Key: k, Value: config.MaskValue(k, parentEnv[k]), Kind: ui.EntryInherited})
+		out = append(out, ui.SummaryEntry{Key: k, Value: config.MaskValue(parentEnv[k], config.ShouldMask(k, parentEnv[k], false, false)), Kind: ui.EntryInherited})
 	}
 	return out
 }

@@ -3,7 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
+	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/envname"
 )
 
@@ -15,6 +18,7 @@ const (
 	KindCycle              IssueKind = "cycle"
 	KindEmpty              IssueKind = "empty"
 	KindContradictoryUnset IssueKind = "contradictory-unset"
+	KindPlaintextSecret    IssueKind = "plaintext-secret"
 )
 
 // Severity grades how loudly an Issue surfaces.
@@ -45,12 +49,14 @@ func (i Issue) String() string {
 		return fmt.Sprintf("%s: no env vars, no extends, and no unset", i.Profile)
 	case KindContradictoryUnset:
 		return fmt.Sprintf("%s: unsets %q which it also defines in env", i.Profile, i.Target)
+	case KindPlaintextSecret:
+		return fmt.Sprintf("%s: %q is marked secret but stored in plaintext", i.Profile, i.Target)
 	}
 	return fmt.Sprintf("%s: %s", i.Profile, i.Kind)
 }
 
-// Validate audits cfg for dangling extends, cycles, no-op profiles, and unset
-// contradictions.
+// Validate audits cfg for dangling extends, cycles, no-op profiles, unset
+// contradictions, and marked secrets still stored in plaintext.
 func Validate(cfg Config) []Issue {
 	exists := map[string]bool{}
 	for n := range cfg.Profiles {
@@ -73,6 +79,11 @@ func Validate(cfg Config) []Issue {
 		}
 		if len(p.Env) == 0 && len(p.Extends) == 0 && len(p.Unset) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: KindEmpty, Severity: SeverityWarning})
+		}
+		for _, k := range slices.Sorted(maps.Keys(p.Env)) {
+			if p.Marked[k] && !crypto.IsEncrypted(p.Env[k]) {
+				issues = append(issues, Issue{Profile: n, Kind: KindPlaintextSecret, Severity: SeverityWarning, Target: k})
+			}
 		}
 		for _, u := range p.Unset {
 			if !envname.Has(p.Env, u) {

@@ -33,7 +33,12 @@ var showCmd = &cobra.Command{
 		switch showFormat {
 		case "text":
 			out := cmd.OutOrStdout()
-			return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, envRender{unmasked: showNoMask, color: colorEnabled(out)})
+			return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, envRender{
+				unmasked:  showNoMask,
+				color:     colorEnabled(out),
+				marked:    r.Marked,
+				encrypted: r.Encrypted,
+			})
 		case "json":
 			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
 		default:
@@ -86,12 +91,22 @@ func init() {
 type envRender struct {
 	unmasked bool
 	color    bool
+	// marked and encrypted are the resolved secret marks and at-rest
+	// encryption state, both nil when empty.
+	marked    map[string]bool
+	encrypted map[string]bool
 }
 
+// markNote flags a row whose value carries the secret mark but still sits in
+// plaintext: the mark's promise of encryption is not kept yet.
+const markNote = "~ marked, not encrypted"
+
 // printEnv writes the resolved env to w as `K=V`, masked unless
-// opts.unmasked is set. When provenance is present, each line is annotated
-// with the defining profile and layer (`# from anth (global)`) so the chain
-// header stays a summary and the per-key winner is debuggable. Unset keys
+// opts.unmasked is set: a marked or at-rest-encrypted value masks whatever its
+// name looks like, and a marked row still in plaintext says so. When provenance
+// is present, each line is annotated with the defining profile and layer
+// (`# from anth (global)`) so the chain header stays a summary and the per-key
+// winner is debuggable. Unset keys
 // interleave in the same sort as comment rows (`# KEY — unset by "anth"`),
 // mirroring the dotenv export: the deliberately absent variables stay
 // visible next to the live ones. A live key wins its row — Resolved keeps
@@ -116,17 +131,22 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 			}
 			continue
 		}
+		marked, encrypted := opts.marked[k], opts.encrypted[k]
 		if !opts.unmasked {
-			v = config.MaskValue(k, v)
+			v = config.MaskValue(v, config.ShouldMask(k, v, marked, encrypted))
 		}
+		comment := ""
 		if s, ok := sources[k]; ok {
-			line := bold.Render(k) + "=" + v + "  " + dim.Render(fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer))
-			if _, err := fmt.Fprintln(w, line); err != nil {
-				return err
-			}
-			continue
+			comment = fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer)
 		}
-		if _, err := fmt.Fprintf(w, "%s=%s\n", bold.Render(k), v); err != nil {
+		if marked && !encrypted {
+			comment = strings.TrimSpace(comment + " " + markNote)
+		}
+		line := bold.Render(k) + "=" + v
+		if comment != "" {
+			line += "  " + dim.Render(comment)
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
 	}

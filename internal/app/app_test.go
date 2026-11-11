@@ -129,6 +129,50 @@ func TestResolveLazyKey(t *testing.T) {
 	}
 }
 
+// TestResolveRecordsEncrypted pins the at-rest report: resolve names the keys
+// that were ciphertext before decryption, and leaves the map nil for a profile
+// with none, matching the nil-when-empty convention of the other Resolved
+// side-maps.
+func TestResolveRecordsEncrypted(t *testing.T) {
+	dir := t.TempDir()
+	kpath := filepath.Join(dir, "key")
+	if err := crypto.GenerateKey(kpath, true); err != nil {
+		t.Fatal(err)
+	}
+	key, salt, err := crypto.LoadKey(kpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret-value", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"API_KEY": enc, "MODEL": "claude-sonnet-5"}},
+	}}
+	r, err := resolve(cfg, "p", Options{KeyPath: kpath})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if r.Env["API_KEY"] != "secret-value" {
+		t.Fatalf("decrypted = %q, want secret-value", r.Env["API_KEY"])
+	}
+	if !r.Encrypted["API_KEY"] || r.Encrypted["MODEL"] {
+		t.Fatalf("Encrypted = %v, want only API_KEY", r.Encrypted)
+	}
+
+	plain := config.Config{Profiles: map[string]config.Profile{
+		"p": {Env: map[string]string{"MODEL": "claude-sonnet-5"}},
+	}}
+	pr, err := resolve(plain, "p", Options{})
+	if err != nil {
+		t.Fatalf("plaintext resolve: %v", err)
+	}
+	if pr.Encrypted != nil {
+		t.Fatalf("Encrypted = %v, want nil for an all-plaintext profile", pr.Encrypted)
+	}
+}
+
 func TestResolveExpandsAndNoExpand(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"p": {Env: map[string]string{"HOST": "h", "URL": "$HOST/x", "SEC": "$S"}},
