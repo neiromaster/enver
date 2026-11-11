@@ -91,11 +91,12 @@ var importCmd = &cobra.Command{
 			return err
 		}
 		summary, err := app.ImportEnv(r, writeTarget(), name, importExtends, app.ImportOptions{
-			Replace:    importReplace,
-			Force:      importForce,
-			Confirm:    ui.Confirm,
-			Resolve:    effectiveResolve,
-			OtherLayer: &other,
+			Replace:        importReplace,
+			Force:          importForce,
+			Confirm:        ui.Confirm,
+			Resolve:        effectiveResolve,
+			OtherLayer:     &other,
+			TargetIsGlobal: globalFlags.global,
 		})
 		if err != nil {
 			return err

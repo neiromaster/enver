@@ -127,7 +127,14 @@ func addMarks(other *config.Config, target config.Config, name string, extends c
 	for _, e := range entries {
 		keys = append(keys, e.Key)
 	}
-	return app.WriteMarks(other, target, name, extends, false, keys)
+	return app.WriteMarks(app.WriteQuery{
+		Other:          other,
+		Target:         target,
+		TargetIsGlobal: globalFlags.global,
+		Name:           name,
+		Extends:        extends,
+		Keys:           keys,
+	})
 }
 
 // commitAdd writes the collected profile into the target file, carrying the

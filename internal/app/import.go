@@ -17,12 +17,15 @@ import (
 // tests). OtherLayer is the layer the write leaves untouched, the only place a
 // secret mark inherited from the other file can come from: nil leaves
 // Profile.Marked nil, so the writer keeps its own in-file fallback.
+// TargetIsGlobal says which of the two the target file is, because the layers
+// fold in reader order rather than in argument order.
 type ImportOptions struct {
-	Replace    bool
-	Force      bool
-	Confirm    func(msg string, def bool) (bool, error)
-	Resolve    func(profile string) (config.Resolved, error)
-	OtherLayer *config.Config
+	Replace        bool
+	Force          bool
+	Confirm        func(msg string, def bool) (bool, error)
+	Resolve        func(profile string) (config.Resolved, error)
+	OtherLayer     *config.Config
+	TargetIsGlobal bool
 }
 
 // ImportEnv parses .env data from r into profile name at target. Imported
@@ -82,7 +85,15 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	// Unset stays nil: a --replace clears the unset list like the profile's own
 	// env, because WriteProfile writes the field wholesale, while UpsertProfile
 	// never clears it.
-	marked := WriteMarks(opts.OtherLayer, existing, name, extendsToWrite, opts.Replace, keys)
+	marked := WriteMarks(WriteQuery{
+		Other:          opts.OtherLayer,
+		Target:         existing,
+		TargetIsGlobal: opts.TargetIsGlobal,
+		Name:           name,
+		Extends:        extendsToWrite,
+		ClearsFences:   opts.Replace,
+		Keys:           keys,
+	})
 	written := config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments, Marked: marked}
 
 	var mode string

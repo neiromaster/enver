@@ -136,7 +136,78 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if wroteMarked := strings.Contains(string(data), "~GH_TOKEN"); wroteMarked != tt.wantMarked {
+			// The imported line carries the value new, so this pins the spelling
+			// of the written entry rather than some parent's mark of its own.
+			if wroteMarked := strings.Contains(string(data), "~GH_TOKEN: new"); wroteMarked != tt.wantMarked {
+				t.Fatalf("file writes the mark = %t, want %t:\n%s", wroteMarked, tt.wantMarked, data)
+			}
+		})
+	}
+}
+
+// TestImportEnvFoldsLayersInReaderOrder pins the fold direction of a write into
+// the global layer. Readers fold the global file first and the local file over
+// it, and extends concatenate base-first, so the parent a later layer declares
+// wins a shared key's value and mark. Both cases below declare one parent in
+// each layer: the winner is the local layer's, whether that means the mark or
+// the plain entry, so an inverted fold fails the test in both directions.
+func TestImportEnvFoldsLayersInReaderOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		other      string
+		wantMarked bool
+	}{
+		{
+			name:       "the local parent folds last and marks the key",
+			target:     "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n",
+			other:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
+			wantMarked: true,
+		},
+		{
+			name:       "the local parent folds last and clears the mark",
+			target:     "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
+			other:      "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n",
+			wantMarked: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			targetPath := filepath.Join(dir, "global.yaml")
+			otherPath := filepath.Join(dir, ".enver.yaml")
+			writeFile(t, targetPath, tt.target)
+			writeFile(t, otherPath, tt.other)
+
+			otherCfg, err := config.LoadFile(otherPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), targetPath, "work", "", ImportOptions{
+				Force:          true,
+				OtherLayer:     &otherCfg,
+				TargetIsGlobal: true,
+			}); err != nil {
+				t.Fatalf("ImportEnv: %v", err)
+			}
+
+			got, err := config.LoadFile(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v := got.Profiles["work"].Env["GH_TOKEN"]; v != "new" {
+				t.Fatalf("GH_TOKEN = %q, want new", v)
+			}
+			if marked := got.Profiles["work"].Marked["GH_TOKEN"]; marked != tt.wantMarked {
+				t.Fatalf("GH_TOKEN marked = %t, want %t (%#v)", marked, tt.wantMarked, got.Profiles["work"].Marked)
+			}
+			data, err := os.ReadFile(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The imported line carries the value new, so this pins the spelling
+			// of the written entry rather than some parent's mark of its own.
+			if wroteMarked := strings.Contains(string(data), "~GH_TOKEN: new"); wroteMarked != tt.wantMarked {
 				t.Fatalf("file writes the mark = %t, want %t:\n%s", wroteMarked, tt.wantMarked, data)
 			}
 		})
