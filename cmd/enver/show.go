@@ -117,16 +117,14 @@ const markNote = "~ marked, not encrypted"
 // masking or revealing it would both pretend to know what it holds. When
 // provenance is present, each line is annotated with the defining profile and
 // layer (`# from anth (global)`) so the chain header stays a summary and the
-// per-key
-// winner is debuggable. Unset keys
-// interleave in the same sort as comment rows (`# KEY — unset by "anth"`),
-// mirroring the dotenv export: the deliberately absent variables stay
-// visible next to the live ones. A live key wins its row — Resolved keeps
-// env and unsets disjoint, and the sorted union collapses any violation
-// rather than rendering it. With opts.color set, keys render bold and every
-// comment (header, provenance suffix, tombstones) renders dim; the caller
-// gates styling on the destination being a terminal (never under NO_COLOR or
-// TERM=dumb) so pipes stay clean.
+// per-key winner is debuggable. Unset keys interleave in the same sort as
+// comment rows (`# KEY — unset by "anth"`), mirroring the dotenv export: the
+// deliberately absent variables stay visible next to the live ones. A live key
+// wins its row — Resolved keeps env and unsets disjoint, and the sorted union
+// collapses any violation rather than rendering it. With opts.color set, keys
+// render bold and every comment (header, provenance suffix, tombstones) renders
+// dim; the caller gates styling on the destination being a terminal (never
+// under NO_COLOR or TERM=dumb) so pipes stay clean.
 func printEnv(w io.Writer, env map[string]string, chain []string, sources, unsets map[string]config.Source, opts envRender) error {
 	var dim, bold lipgloss.Style
 	if opts.color {

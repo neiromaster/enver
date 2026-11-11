@@ -80,7 +80,7 @@ var encryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		key, salt, err := requireKey()
+		key, salt, err := requireKey(profile)
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ var decryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		key, _, err := requireKey()
+		key, _, err := requireKey(profile)
 		if err != nil {
 			return err
 		}
@@ -125,11 +125,43 @@ var decryptCmd = &cobra.Command{
 
 // requireKey resolves the key for encrypt/decrypt, recovering it from a
 // passphrase when no key is configured. The recovery salt and KDF parameters
-// come from the write target, the same file the commands rewrite.
-func requireKey() ([]byte, []byte, error) {
-	return app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, crypto.Argon2Params, string, error) {
-		return config.FirstSaltAndSample(writeTarget())
+// come from the write target, the same file the commands rewrite. A missing key
+// names the ciphertext it blocked, like the read paths do; an unreadable target
+// leaves the bare sentinel, which callers still recognize.
+func requireKey(profile string) ([]byte, []byte, error) {
+	path := writeTarget()
+	key, salt, err := app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, crypto.Argon2Params, string, error) {
+		return config.FirstSaltAndSample(path)
 	})
+	if errors.Is(err, app.ErrNoKey) {
+		return nil, nil, app.WithEncryptedKeys(err, encryptedKeys(path, profile))
+	}
+	return key, salt, err
+}
+
+// encryptedKeys names the ciphertext in the write target for profile, or across
+// every profile when it is empty — the same set EncryptFile and DecryptFile
+// touch. Nil when the target cannot be read: a config problem must not replace
+// the key error.
+func encryptedKeys(path, profile string) []string {
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var keys []string
+	for name, p := range cfg.Profiles {
+		if profile != "" && name != profile {
+			continue
+		}
+		for k, v := range p.Env {
+			if crypto.IsEncrypted(v) && !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
 }
 
 func init() {

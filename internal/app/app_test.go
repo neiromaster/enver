@@ -181,8 +181,24 @@ func TestResolveRecordsEncrypted(t *testing.T) {
 	}
 }
 
-// noKeyFixture writes a config holding one encrypted value plus two plaintext
-// ones and removes every key source, so resolve reaches the real no-key path.
+// encV3 encrypts value under a throwaway key and returns the ciphertext.
+func encV3(t *testing.T, value string) string {
+	t.Helper()
+	salt := []byte("0123456789abcdef")
+	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValueWithParams(value, key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	return enc
+}
+
+// noKeyFixture writes a config holding one encrypted value plus plaintext ones,
+// one of which interpolates the encrypted key, and removes every key source so
+// resolve reaches the real no-key path.
 func noKeyFixture(t *testing.T) string {
 	t.Helper()
 	t.Setenv("ENVER_KEY", "")
@@ -193,17 +209,8 @@ func noKeyFixture(t *testing.T) string {
 	Interactive = func() bool { return false }
 	t.Cleanup(func() { Interactive = restoreInteractive })
 
-	salt := []byte("0123456789abcdef")
-	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
-	if err != nil {
-		t.Fatalf("derive: %v", err)
-	}
-	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n      DERIVED: '$PLAIN/x'\n", enc)
+	body := fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n      DERIVED: '$PLAIN/x'\n      AUTH: 'Bearer $TOKEN'\n", encV3(t, "secret"))
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -215,6 +222,7 @@ func noKeyFixture(t *testing.T) string {
 // values it can read.
 func TestResolveToleratesMissingKey(t *testing.T) {
 	cfgPath := noKeyFixture(t)
+	t.Setenv("TOKEN", "from-shell")
 	_, r, err := ResolveDefault(Options{ConfigPath: cfgPath, NoLocal: true, TolerateMissingKey: true}, "work")
 	if err != nil {
 		t.Fatalf("tolerant resolve must not fail: %v", err)
@@ -230,6 +238,26 @@ func TestResolveToleratesMissingKey(t *testing.T) {
 	}
 	if r.Env["DERIVED"] != "kept/x" {
 		t.Fatalf("DERIVED = %q, want kept/x: readable values still expand", r.Env["DERIVED"])
+	}
+	if r.Env["AUTH"] != "Bearer " {
+		t.Fatalf("AUTH = %q, want %q: the unreadable key must not borrow the shell's value", r.Env["AUTH"], "Bearer ")
+	}
+}
+
+// TestResolveToleranceDoesNotSwallowForeignEra pins the ordering: a value from
+// an older era is rejected before key resolution, so tolerating a missing key
+// never turns a foreign prefix into a degraded row.
+func TestResolveToleranceDoesNotSwallowForeignEra(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      LEGACY: enc:v2:YWJj\n", encV3(t, "secret"))
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := Options{ConfigPath: path, NoLocal: true, TolerateMissingKey: true}
+	if _, _, err := ResolveDefault(opts, "work"); err == nil || errors.Is(err, ErrNoKey) {
+		t.Fatalf("a foreign era must stay a hard error, got %v", err)
+	} else if !strings.Contains(err.Error(), "unsupported encrypted value") {
+		t.Fatalf("err = %v, want unsupported encrypted value", err)
 	}
 }
 

@@ -100,6 +100,22 @@ func TestShowWiresSecretMarks(t *testing.T) {
 	}
 }
 
+// ciphertextV3 encrypts value under a throwaway key so a fixture can carry an
+// enc:v3 value no test key can read.
+func ciphertextV3(t *testing.T, value string) string {
+	t.Helper()
+	salt := []byte("0123456789abcdef")
+	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValueWithParams(value, key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	return enc
+}
+
 // TestShowDegradesWithoutKey pins the display/execution split end to end: text
 // show names the key it cannot read and still exits 0, while the JSON contract
 // keeps failing loudly rather than handing machines ciphertext.
@@ -113,17 +129,8 @@ func TestShowDegradesWithoutKey(t *testing.T) {
 	savedFormat, savedNoMask := showFormat, showNoMask
 	t.Cleanup(func() { showFormat, showNoMask = savedFormat, savedNoMask })
 
-	salt := []byte("0123456789abcdef")
-	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
-	if err != nil {
-		t.Fatalf("derive: %v", err)
-	}
-	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
 	cfgPath := filepath.Join(dir, "config.yaml")
-	writeDoc(t, cfgPath, fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n", enc))
+	writeDoc(t, cfgPath, fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n", ciphertextV3(t, "secret")))
 
 	out, err := runCommand(t, "--config", cfgPath, "--chdir", dir, "show", "work")
 	if err != nil {
