@@ -891,6 +891,58 @@ func TestEditOverrideInheritsMark(t *testing.T) {
 	}
 }
 
+// TestEditAddKeepsInheritedMark pins the Add row's half of the carry: adding a
+// key that shadows a marked inherited variable with a freshly typed value must
+// not declassify it, since the working copy's authoritative mark map leaves the
+// writer no fallback to the ancestor.
+func TestEditAddKeepsInheritedMark(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "base", config.Profile{
+		Env:    map[string]string{"GH_TOKEN": "from-base"},
+		Marked: map[string]bool{"GH_TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertProfile(path, "work", config.Profile{
+		Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "1"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	base, _, _, err := config.ReadProfile(path, "base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, _, err := config.ReadProfile(path, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{"base": base, "work": prof}}
+	s := newEditState("work", prof, prof.Comments, isDefault)
+
+	s.addEntry(ui.EnvEntry{Key: "GH_TOKEN", Value: "typed"}, listedInheritedForState(cfg, s))
+	if err := commitEdit(path, cfg, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), "~GH_TOKEN"); got != 2 {
+		t.Fatalf("the added override was written unmarked (%d marked entries):\n%s", got, raw)
+	}
+	got, _, _, err := config.ReadProfile(path, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Marked["GH_TOKEN"] {
+		t.Fatalf("added key lost the inherited mark: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+	if got.Env["GH_TOKEN"] != "typed" {
+		t.Fatalf("added value did not land: %#v", got.Env)
+	}
+}
+
 // TestEditDeleteMatchesMarkedKey pins that entries hold the runtime name, so a
 // deletion matches a key the file spells with a mark and takes the mark with it.
 func TestEditDeleteMatchesMarkedKey(t *testing.T) {
@@ -929,6 +981,9 @@ func TestEditDeleteMatchesMarkedKey(t *testing.T) {
 	}
 	if _, has := got.Env["GH_TOKEN"]; has {
 		t.Fatalf("deleted key still resolves: %#v", got.Env)
+	}
+	if got.Env["KEEP"] != "1" {
+		t.Fatalf("the surviving key did not make it through the commit: %#v", got.Env)
 	}
 }
 

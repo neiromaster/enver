@@ -114,7 +114,7 @@ func (s editState) envMap() map[string]string {
 	m := make(map[string]string, len(s.entries))
 	for _, e := range s.entries {
 		if e.Key != "" {
-			m[e.Key] = e.Value
+			envname.Set(m, e.Key, e.Value)
 		}
 	}
 	return m
@@ -226,6 +226,23 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 		seed.Comment = c
 	}
 	return seed
+}
+
+// addEntry commits one collected Add entry into the working copy, carrying the
+// secret mark of the inherited variable it shadows: the working copy's mark map
+// is authoritative at write time, so an unmarked Add would declassify the key
+// rather than let the writer fall back to the ancestor.
+func (s *editState) addEntry(entry ui.EnvEntry, inherited []ui.EnvEntry) {
+	if _, own := s.find(entry.Key); !own {
+		for _, e := range inherited {
+			if envname.Equal(e.Key, entry.Key) {
+				entry.Secret = e.Secret
+				break
+			}
+		}
+	}
+	settleDefineFence(s, entry.Key)
+	s.upsert(entry)
 }
 
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
@@ -559,8 +576,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				if entry.Key = strings.TrimSpace(entry.Key); entry.Key == "" {
 					continue
 				}
-				settleDefineFence(&s, entry.Key)
-				s.upsert(entry)
+				s.addEntry(entry, inherited)
 			case actionExtends:
 				opts := append(seedOptions(s.extends, profileOptions(pickerCfg, name)), pickerTail()...)
 				picked, confirmed, err := ui.MultiSelectOrdered("Edit extends for "+name, opts, s.extends)
@@ -727,8 +743,10 @@ func inheritedEntries(resolved map[string]string, marked map[string]bool, own ma
 
 // probeConfig returns a copy of cfg with profile s.name carrying the working
 // extends, working own env, and working marks, so resolution reflects
-// uncommitted edits. Used by inheritedForState (values and marks) and the
-// override path (comments) so all track the same working copy.
+// uncommitted edits. Used by inheritedForState (values) and the override path
+// (comments) so both track the same working extends. Inherited rows take their
+// marks from the ancestors and own keys are dropped from that set, so the marks
+// carried here answer only a consumer reading own-key marks.
 func probeConfig(cfg config.Config, s editState) config.Config {
 	return probeWith(cfg, s.name, func(p *config.Profile) {
 		p.Extends = s.extends
