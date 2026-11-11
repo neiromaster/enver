@@ -538,8 +538,12 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		if err != nil {
 			return envFold{}, err
 		}
+		// The mark fold is dense like the value fold: every key this parent
+		// defines takes its mark from this parent alone, so a later unmarked
+		// entry clears the mark an earlier sibling put there.
 		for k, v := range pf.env {
 			envname.Set(out.env, k, v)
+			envname.Delete(out.marked, k)
 		}
 		for k, v := range pf.comments {
 			envname.Set(out.comments, k, v)

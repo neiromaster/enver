@@ -1184,6 +1184,9 @@ func TestMergeLocalPlainKeyClearsInheritedMark(t *testing.T) {
 	if got.Marked["TOKEN"] {
 		t.Fatal("local unmarked override must clear the mark")
 	}
+	if got.Marked != nil {
+		t.Fatalf("a merged profile left with no marks must hold nil Marked: %#v", got.Marked)
+	}
 }
 
 func TestResolveCloserOverrideClearsMark(t *testing.T) {
@@ -1198,6 +1201,9 @@ func TestResolveCloserOverrideClearsMark(t *testing.T) {
 	if r.Marked["TOKEN"] {
 		t.Fatal("own unmarked entry must clear the inherited mark")
 	}
+	if r.Marked != nil {
+		t.Fatalf("a resolution left with no marks must hold nil Marked: %#v", r.Marked)
+	}
 }
 
 func TestResolveInheritsMarkWhenUntouched(t *testing.T) {
@@ -1205,7 +1211,10 @@ func TestResolveInheritsMarkWhenUntouched(t *testing.T) {
 		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
 		"work": {Extends: Extends{"base"}},
 	}}
-	r, _ := cfg.ResolveProfile("work")
+	r, err := cfg.ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !r.Marked["TOKEN"] {
 		t.Fatal("an untouched inherited mark must survive")
 	}
@@ -1216,7 +1225,10 @@ func TestUnsetFenceDropsMark(t *testing.T) {
 		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
 		"work": {Extends: Extends{"base"}, Unset: Unsets{"TOKEN"}},
 	}}
-	r, _ := cfg.ResolveProfile("work")
+	r, err := cfg.ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if r.Marked["TOKEN"] {
 		t.Fatal("a fenced key keeps no mark")
 	}
@@ -1236,5 +1248,55 @@ func TestResolveCaseVariantClearsMarkOnWindows(t *testing.T) {
 	}
 	if marked, _ := envname.Get(r.Marked, "PATH"); marked {
 		t.Fatal("a case-variant override must clear the mark on Windows")
+	}
+}
+
+func TestResolveSiblingParentUnmarkedOverrideClearsMark(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"a":    {Env: map[string]string{"TOKEN": "x"}, Marked: map[string]bool{"TOKEN": true}},
+		"b":    {Env: map[string]string{"TOKEN": "y"}},
+		"work": {Extends: Extends{"a", "b"}},
+	}}
+	r, err := cfg.ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Env["TOKEN"] != "y" {
+		t.Fatalf("later parent must win the value: %#v", r.Env)
+	}
+	if r.Marked != nil {
+		t.Fatalf("a later parent's unmarked entry must clear the mark: %#v", r.Marked)
+	}
+}
+
+func TestCarriedFenceDropsMark(t *testing.T) {
+	global := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}, Unset: Unsets{"TOKEN"}},
+	}}
+	local := profileConfig("work", map[string]string{"OTHER": "b"}, "")
+	r, err := Merge(global, local).ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Env["TOKEN"]; ok {
+		t.Fatalf("the carried fence must strip the inherited value: %#v", r.Env)
+	}
+	if r.Marked["TOKEN"] {
+		t.Fatalf("a fenced key keeps no mark: %#v", r.Marked)
+	}
+}
+
+func TestMergeFencedOwnKeyDropsMark(t *testing.T) {
+	base := Config{Profiles: map[string]Profile{
+		"work": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}, Unset: Unsets{"TOKEN"}},
+	}}
+	local := profileConfig("work", map[string]string{"OTHER": "b"}, "")
+	got := Merge(base, local).Profiles["work"]
+	if _, ok := got.Env["TOKEN"]; ok {
+		t.Fatalf("the fence must strip the profile's own value: %#v", got.Env)
+	}
+	if got.Marked["TOKEN"] {
+		t.Fatalf("a fenced key keeps no mark: %#v", got.Marked)
 	}
 }
