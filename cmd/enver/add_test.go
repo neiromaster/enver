@@ -179,6 +179,27 @@ func TestParentEnvForResolvesThroughMergedParents(t *testing.T) {
 	}
 }
 
+// TestAddMarksInheritAcrossLayers pins add's half of the write-side mark rule:
+// an entry the picked chain marks is written marked, a key marked nowhere is
+// not, and the target file's own unmarked entry outranks the inherited mark.
+func TestAddMarksInheritAcrossLayers(t *testing.T) {
+	merged := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"GH_TOKEN": "parent"}, Marked: map[string]bool{"GH_TOKEN": true}},
+	}}
+	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "p"}}
+
+	marks := addMarks(merged, config.Config{}, "work", config.Extends{"base"}, entries)
+	if !marks["GH_TOKEN"] || marks["PLAIN"] {
+		t.Fatalf("marks = %#v, want GH_TOKEN marked and PLAIN not", marks)
+	}
+	own := config.Config{Profiles: map[string]config.Profile{
+		"work": {Env: map[string]string{"GH_TOKEN": "old"}},
+	}}
+	if marks := addMarks(merged, own, "work", config.Extends{"base"}, entries); marks["GH_TOKEN"] {
+		t.Fatalf("the target's own unmarked entry must win: %#v", marks)
+	}
+}
+
 // TestAddCompletesExistingProfiles pins that add offers existing profile
 // names like every other profile-argument mutator: an existing name is a
 // valid re-seed for the extends/env flow.

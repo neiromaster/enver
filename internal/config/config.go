@@ -631,6 +631,33 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	return out, nil
 }
 
+// MarksForWrite answers the secret-mark question for a caller writing keys into
+// profile from another layer, where the writers cannot see the ancestry
+// themselves: the profile's own entry decides first — an unmarked own entry
+// outranks an inherited mark, exactly as resolution folds it — the resolved
+// chain supplies the keys the profile does not define, and a key marked nowhere
+// is false. The result is non-nil and covers every requested key, so a writer
+// takes it as authoritative, which is why a profile this config cannot resolve
+// (cycle, dangling parent, unknown name) is no mark rather than an error.
+func MarksForWrite(cfg Config, profile string, keys []string) map[string]bool {
+	own := cfg.Profiles[profile]
+	var chain map[string]bool
+	if slices.ContainsFunc(keys, func(k string) bool { return !envname.Has(own.Env, k) }) {
+		if r, err := cfg.ResolveProfile(profile); err == nil {
+			chain = r.Marked
+		}
+	}
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if envname.Has(own.Env, k) {
+			out[k], _ = envname.Get(own.Marked, k)
+			continue
+		}
+		out[k], _ = envname.Get(chain, k)
+	}
+	return out
+}
+
 // appendUniq appends entries not already present by envname.Equal semantics —
 // on Windows a case-variant counts as present, keeping one entry per real
 // variable.

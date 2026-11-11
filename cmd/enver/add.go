@@ -119,6 +119,19 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 	return out
 }
 
+// addMarks answers the secret marks for the entries add writes: the profile the
+// write leaves behind, with the picked extends, judged over both layers with
+// the target file's own entries on top. The writer cannot resolve this itself —
+// a parent in the other layer is invisible to the file it rewrites.
+func addMarks(merged, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
+	keys := make([]string, 0, len(entries))
+	for _, e := range entries {
+		keys = append(keys, e.Key)
+	}
+	view := probeWith(config.Merge(merged, target), name, func(p *config.Profile) { p.Extends = extends })
+	return config.MarksForWrite(view, name, keys)
+}
+
 // upsertEntry appends entry, or replaces the existing entry with the same key.
 func upsertEntry(entries []ui.EnvEntry, e ui.EnvEntry) []ui.EnvEntry {
 	for i := range entries {
@@ -228,6 +241,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 
 	profile, comments := buildProfile(extends, entries)
 	profile.Comments = comments
+	profile.Marked = addMarks(merged, targetCfg, name, extends, entries)
 	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, true); err != nil {
 		return err
 	}

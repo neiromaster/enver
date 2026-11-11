@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -14,12 +15,15 @@ import (
 // ImportOptions carries the import knobs the CLI layer binds flags to.
 // Confirm gates destructive --replace removals; Resolve computes the
 // post-write effective resolution for fence reporting (nil disables it,
-// tests).
+// tests). Config is the merged two-layer view the secret marks come from:
+// the target file alone cannot see an ancestor in the other layer, so a nil
+// Config leaves Profile.Marked nil and the writer keeps its in-file fallback.
 type ImportOptions struct {
 	Replace bool
 	Force   bool
 	Confirm func(msg string, def bool) (bool, error)
 	Resolve func(profile string) (config.Resolved, error)
+	Config  *config.Config
 }
 
 // ImportEnv parses .env data from r into profile name at target. Imported
@@ -39,8 +43,10 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	}
 	imported := make(map[string]string, len(entries))
 	comments := map[string]string{}
+	keys := make([]string, 0, len(entries))
 	for _, e := range entries {
 		imported[e.Key] = e.Value
+		keys = append(keys, e.Key)
 		if e.Comment != "" {
 			comments[e.Key] = e.Comment
 		}
@@ -74,6 +80,12 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	}
 	d := computeImportDiff(oldEnv, imported)
 
+	// Unset stays nil: a --replace clears the unset list like the profile's own
+	// env, because WriteProfile writes the field wholesale, while UpsertProfile
+	// never clears it.
+	marked := importMarks(opts.Config, existing, name, extendsFlag != "", extendsToWrite, opts.Replace, keys)
+	written := config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments, Marked: marked}
+
 	var mode string
 	if exists && opts.Replace {
 		d.removed = removedKeys(oldEnv, imported)
@@ -87,14 +99,12 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 				return "", nil
 			}
 		}
-		// Unset stays nil: --replace clears the unset list like the profile's
-		// own env, because WriteProfile writes the field wholesale.
-		if err := config.WriteProfile(target, name, config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments}, false, false); err != nil {
+		if err := config.WriteProfile(target, name, written, false, false); err != nil {
 			return "", err
 		}
 		mode = "replaced"
 	} else {
-		if err := config.UpsertProfile(target, name, config.Profile{Extends: extendsToWrite, Env: imported, Comments: comments}, false, false); err != nil {
+		if err := config.UpsertProfile(target, name, written, false, false); err != nil {
 			return "", err
 		}
 		mode = "created"
@@ -104,6 +114,28 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	}
 	summary := formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends, fencedImportedKeys(opts.Resolve, name, imported))
 	return summary + skippedLineNote(skips), nil
+}
+
+// importMarks answers the secret-mark question for the keys an import writes.
+// The target file's own entries ride on top of the merged view, since those are
+// the entries being rewritten, and the extends is previewed as the write leaves
+// it: a --replace or an --extends flag sets the field outright, while a merge
+// without the flag leaves the layered value in place. A nil merged view (tests,
+// callers without one) answers nil, keeping the writer's in-file fallback.
+func importMarks(merged *config.Config, existing config.Config, name string, setsExtends bool, extends config.Extends, replace bool, keys []string) map[string]bool {
+	if merged == nil {
+		return nil
+	}
+	view := config.Merge(*merged, existing)
+	if setsExtends || replace {
+		probe := view
+		probe.Profiles = maps.Clone(view.Profiles)
+		p := probe.Profiles[name]
+		p.Extends = extends
+		probe.Profiles[name] = p
+		view = probe
+	}
+	return config.MarksForWrite(view, name, keys)
 }
 
 // SplitExtends parses a comma-separated --extends value, dropping empties.

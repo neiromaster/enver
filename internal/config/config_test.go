@@ -1333,3 +1333,44 @@ func TestMergeFencedOwnKeyDropsMark(t *testing.T) {
 		t.Fatalf("a fenced key keeps no mark: %#v", got.Marked)
 	}
 }
+
+func TestMarksForWritePrefersOwnEntry(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}, Env: map[string]string{"TOKEN": "b"}},
+	}}
+	if MarksForWrite(cfg, "work", []string{"TOKEN"})["TOKEN"] {
+		t.Fatal("the profile's own unmarked entry must outrank the inherited mark")
+	}
+}
+
+func TestMarksForWriteFallsBackToChain(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}},
+	}}
+	if !MarksForWrite(cfg, "work", []string{"TOKEN"})["TOKEN"] {
+		t.Fatal("a key the profile does not define must take the chain's mark")
+	}
+}
+
+// TestMarksForWriteAnswersEveryKey pins the map contract writers rely on: one
+// non-nil entry per requested key, false for a key no chain marks, and a
+// profile it cannot resolve (cycle, unknown name) answering false rather than
+// failing.
+func TestMarksForWriteAnswersEveryKey(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}},
+		"loop": {Extends: Extends{"loop"}},
+	}}
+	got := MarksForWrite(cfg, "work", []string{"TOKEN", "PLAIN"})
+	if !got["TOKEN"] || got["PLAIN"] {
+		t.Fatalf("marks = %#v, want TOKEN marked and PLAIN not", got)
+	}
+	for _, name := range []string{"loop", "absent"} {
+		if got := MarksForWrite(cfg, name, []string{"TOKEN"}); got == nil || got["TOKEN"] {
+			t.Fatalf("MarksForWrite(%q) = %#v, want a non-nil false answer", name, got)
+		}
+	}
+}
