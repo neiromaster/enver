@@ -229,20 +229,30 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 }
 
 // addEntry commits one collected Add entry into the working copy, carrying the
-// secret mark of the inherited variable it shadows: the working copy's mark map
-// is authoritative at write time, so an unmarked Add would declassify the key
-// rather than let the writer fall back to the ancestor.
+// secret mark the copy already holds for that key. The working copy's mark map is
+// authoritative at write time, so an unmarked Add would declassify the key
+// rather than let the writer fall back to the file or an ancestor.
 func (s *editState) addEntry(entry ui.EnvEntry, inherited []ui.EnvEntry) {
-	if _, own := s.find(entry.Key); !own {
-		for _, e := range inherited {
-			if envname.Equal(e.Key, entry.Key) {
-				entry.Secret = e.Secret
-				break
-			}
-		}
-	}
+	entry.Secret = s.carriedMark(entry.Key, inherited)
 	settleDefineFence(s, entry.Key)
 	s.upsert(entry)
+}
+
+// carriedMark is the mark already in play for key: the own entry's, which is the
+// closer authority, or else the inherited variable's. Same precedence
+// MarksForWrite answers with, so adding a key never flips its mark.
+func (s *editState) carriedMark(key string, inherited []ui.EnvEntry) bool {
+	for _, e := range s.entries {
+		if envname.Equal(e.Key, key) {
+			return e.Secret
+		}
+	}
+	for _, e := range inherited {
+		if envname.Equal(e.Key, key) {
+			return e.Secret
+		}
+	}
+	return false
 }
 
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
