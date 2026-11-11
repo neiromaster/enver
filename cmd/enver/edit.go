@@ -345,10 +345,12 @@ func (s *editState) carriedMark(key string, inherited []ui.EnvEntry) bool {
 	return false
 }
 
-// maskedLabel renders one variable row: the value masked exactly as the menu
-// listing masks it, so no picker reveals a value another surface hides.
+// maskedLabel renders one variable row: the key spelled with the mark it
+// carries, and the value masked exactly as the menu listing masks it, so no
+// picker reveals a value another surface hides. The mask lookup keeps the
+// runtime name; the mark is display syntax only.
 func maskedLabel(e ui.EnvEntry) string {
-	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, e.Encrypted)))
+	return fmt.Sprintf("%s = %s", envname.JoinMarked(e.Key, e.Secret), config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, e.Encrypted)))
 }
 
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
@@ -651,14 +653,15 @@ func settleDefineFence(s *editState, key string) {
 func deleteVarOptions(s editState, overrideKeys map[string]bool) []ui.Option {
 	own := make([]ui.Option, 0, len(s.entries)+2)
 	for _, e := range s.entries {
-		opt := ui.Option{Value: e.Key, Label: e.Key}
+		label := envname.JoinMarked(e.Key, e.Secret)
+		opt := ui.Option{Value: e.Key, Label: label}
 		switch {
 		case envname.MatchesAny(s.unset, e.Key):
 			opt.Icon = ui.IconUnset
-			opt.Label += " · unset"
+			opt.Label = label + " · unset"
 		case overrideKeys[e.Key]:
 			opt.Icon = ui.IconOverride
-			opt.Label = e.Key + " (→ inherited)"
+			opt.Label = label + " (→ inherited)"
 		}
 		own = append(own, opt)
 	}

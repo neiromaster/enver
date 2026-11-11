@@ -69,8 +69,11 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// never emits a key the write boundary would reject, so no
 				// caller needs a post-hoc check and a doomed session cannot
 				// accumulate. Blank still finishes via the name field above.
-				name := strings.TrimSpace(m.fields[0].Value())
-				if !envname.Valid(name) {
+				// One leading mark is the field's own syntax: it names a secret
+				// candidate, never part of the runtime name. A doubled mark is
+				// not a name, and neither is the mark alone.
+				name, typedMark := envname.SplitMarked(strings.TrimSpace(m.fields[0].Value()))
+				if !envname.Valid(name) || envname.IsMarked(name) {
 					m.keyErr = true
 					for i := range m.fields {
 						m.fields[i].Blur()
@@ -79,6 +82,10 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.fields[0].Focus()
 					return m, nil
 				}
+				// OR, not assignment: a plain name carries no information about
+				// the mark, so retyping a key must never silently unmark it.
+				// Clearing the mark is the Secrets menu's job.
+				m.secret = m.secret || typedMark
 				m.fields[0].SetValue(name)
 				m.submitted = true
 				return m, tea.Quit

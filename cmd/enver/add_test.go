@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -59,13 +60,37 @@ func TestBuildProfileExtendsPassesThrough(t *testing.T) {
 	}
 }
 
+// TestBuildProfileSplitsMark pins the profile composer's half of the mark: a key
+// typed with one leading ~ writes its runtime name and a mark, and the marked
+// form never reaches the env map. The card strips the ~ and flags the entry
+// instead, so both spellings must land the same way.
+func TestBuildProfileSplitsMark(t *testing.T) {
+	p, _ := buildProfile(nil, []ui.EnvEntry{
+		{Key: "~K", Value: "v"},
+		{Key: "FLAGGED", Value: "f", Secret: true},
+		{Key: "PLAIN", Value: "p"},
+	})
+	if p.Env["K"] != "v" || p.Env["FLAGGED"] != "f" || p.Env["PLAIN"] != "p" {
+		t.Fatalf("env = %v, want the runtime names", p.Env)
+	}
+	if _, ok := p.Env["~K"]; ok {
+		t.Fatalf("env = %v, the mark must never key the map", p.Env)
+	}
+	if !p.Marked["K"] || !p.Marked["FLAGGED"] {
+		t.Fatalf("marked = %v, want K and FLAGGED", p.Marked)
+	}
+	if p.Marked["PLAIN"] {
+		t.Fatalf("marked = %v, PLAIN must stay unmarked", p.Marked)
+	}
+}
+
 func TestParentEnvForResolvesChain(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"A": "1"}},
 		"ci":   {Env: map[string]string{"A": "2", "B": "3"}},
 		"dev":  {Env: map[string]string{"A": "own", "C": "own"}, Unset: config.Unsets{"A"}},
 	}}
-	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	got, _, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
 	if len(warns) != 0 {
 		t.Fatalf("healthy chain must not warn: %v", warns)
 	}
@@ -84,7 +109,7 @@ func TestParentEnvForEmptyExtendsIsEmpty(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"dev": {Env: map[string]string{"A": "own"}},
 	}}
-	got, warns := parentEnvFor(cfg, "dev", nil)
+	got, _, warns := parentEnvFor(cfg, "dev", nil)
 	if len(got) != 0 || len(warns) != 0 {
 		t.Fatalf("parentEnv = %v, warns = %v, want empty", got, warns)
 	}
@@ -95,7 +120,7 @@ func TestParentEnvForCycleIsEmpty(t *testing.T) {
 		"base": {Extends: config.Extends{"dev"}, Env: map[string]string{"A": "1"}},
 		"dev":  {},
 	}}
-	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base"})
+	got, _, warns := parentEnvFor(cfg, "dev", config.Extends{"base"})
 	if len(got) != 0 {
 		t.Fatalf("parentEnv = %v, want empty (pending cycle)", got)
 	}
@@ -111,7 +136,7 @@ func TestParentEnvForSkipsBrokenBranch(t *testing.T) {
 		"base": {Extends: config.Extends{"ghost"}, Env: map[string]string{"A": "1"}},
 		"ci":   {Env: map[string]string{"B": "3"}},
 	}}
-	got, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	got, _, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
 	if got["B"] != "3" {
 		t.Fatalf("parentEnv = %v, want ci's B=3 to survive base's broken ancestry", got)
 	}
@@ -123,13 +148,56 @@ func TestParentEnvForSkipsBrokenBranch(t *testing.T) {
 	}
 }
 
+// TestParentEnvForCarriesMarks pins the backdrop's mark set: the same probe that
+// yields the inherited values yields their marks, on the whole-chain path and on
+// the per-parent fallback, where a broken branch contributes neither and a later
+// parent's unmarked definition clears an earlier one's mark.
+func TestParentEnvForCarriesMarks(t *testing.T) {
+	cfg := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"TOKEN": "t"}, Marked: map[string]bool{"TOKEN": true}},
+		"ci":   {Env: map[string]string{"PLAIN": "p"}},
+		"dev":  {},
+	}}
+	env, marked, warns := parentEnvFor(cfg, "dev", config.Extends{"base", "ci"})
+	if len(warns) != 0 {
+		t.Fatalf("healthy chain must not warn: %v", warns)
+	}
+	if env["TOKEN"] != "t" || env["PLAIN"] != "p" {
+		t.Fatalf("env = %v", env)
+	}
+	if !marked["TOKEN"] || marked["PLAIN"] {
+		t.Fatalf("marked = %v, want TOKEN marked and PLAIN not", marked)
+	}
+
+	broken := config.Config{Profiles: map[string]config.Profile{
+		"base": {Extends: config.Extends{"ghost"}, Env: map[string]string{"A": "1", "K": "1"}, Marked: map[string]bool{"A": true, "K": true}},
+		"ci":   {Env: map[string]string{"B": "3", "K": "2"}, Marked: map[string]bool{"B": true}},
+	}}
+	env2, marked2, warns2 := parentEnvFor(broken, "dev", config.Extends{"base", "ci"})
+	if len(warns2) != 1 {
+		t.Fatalf("warns = %v, want exactly the broken branch", warns2)
+	}
+	if env2["B"] != "3" || env2["K"] != "2" {
+		t.Fatalf("env = %v, want the healthy parent's values", env2)
+	}
+	if !marked2["B"] {
+		t.Fatalf("marked = %v, the healthy parent's mark must survive", marked2)
+	}
+	if marked2["A"] {
+		t.Fatalf("marked = %v, a broken branch contributes no marks", marked2)
+	}
+	if marked2["K"] {
+		t.Fatalf("marked = %v, ci defines K unmarked, so the nearer mention clears the mark", marked2)
+	}
+}
+
 func TestBuildSummary(t *testing.T) {
 	entries := []ui.EnvEntry{
 		{Key: "PORT", Value: "5432"},
 		{Key: "API_TOKEN", Value: "sk-abcdefghijklmnopqrstuvwxyz"},
 	}
 	parent := map[string]string{"API_TOKEN": "sk-old", "LOG_LEVEL": "info"}
-	got := buildSummary(entries, parent)
+	got := buildSummary(entries, parent, nil)
 
 	if got[0].Key != "PORT" || got[0].Kind != ui.EntryAdded {
 		t.Fatalf("got[0] = %+v, want PORT/Added", got[0])
@@ -148,6 +216,31 @@ func TestBuildSummary(t *testing.T) {
 	}
 	if entries[1].Value != "sk-abcdefghijklmnopqrstuvwxyz" {
 		t.Fatal("buildSummary must not mutate its input entries")
+	}
+}
+
+// TestBuildSummaryMasksByMark pins the summary's mask source: a typed mark masks
+// its own row, an inherited mark masks the inherited row, and neither value
+// trips the name/value heuristic, so only the mark can be doing the masking.
+func TestBuildSummaryMasksByMark(t *testing.T) {
+	const ownValue, inheritedValue = "plain-own-value", "plain-inherited-value"
+	entries := []ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue, Secret: true}}
+	parent := map[string]string{"INHERITED_MARKED": inheritedValue}
+
+	got := buildSummary(entries, parent, map[string]bool{"INHERITED_MARKED": true})
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2: %+v", len(got), got)
+	}
+	if strings.Contains(got[0].Value, ownValue) {
+		t.Fatalf("a typed mark must mask its own row: %+v", got[0])
+	}
+	if strings.Contains(got[1].Value, inheritedValue) {
+		t.Fatalf("an inherited mark must mask the inherited row: %+v", got[1])
+	}
+
+	plain := buildSummary([]ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue}}, parent, nil)
+	if plain[0].Value != ownValue || plain[1].Value != inheritedValue {
+		t.Fatalf("unmarked values must stay readable: %+v", plain)
 	}
 }
 
@@ -172,7 +265,7 @@ func TestParentEnvForResolvesThroughMergedParents(t *testing.T) {
 		"child": {Extends: config.Extends{"base"}},
 		"base":  {Env: map[string]string{"B": "1"}},
 	}}
-	env, warns := parentEnvFor(merged, "newkid", config.Extends{"child"})
+	env, _, warns := parentEnvFor(merged, "newkid", config.Extends{"child"})
 	if len(warns) != 0 {
 		t.Fatalf("unexpected warns: %v", warns)
 	}
@@ -230,6 +323,83 @@ func TestCommitAddWritesInheritedMark(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "~GH_TOKEN") {
 		t.Fatalf("file does not write the mark:\n%s", data)
+	}
+}
+
+// TestCommitAddMergesTypedMarks pins the two mark answers as a merge, not a
+// choice: a typed mark outranks a file that implies none, while an inherited
+// mark survives an entry the user typed plainly — a plain entry carries no
+// information, so it can neither mark nor unmark.
+func TestCommitAddMergesTypedMarks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".enver.yaml")
+	other := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"GH_TOKEN": "parent"}, Marked: map[string]bool{"GH_TOKEN": true}},
+	}}
+	entries := []ui.EnvEntry{
+		{Key: "GH_TOKEN", Value: "typed"},
+		{Key: "PROJECT_PATH", Value: "/tmp", Secret: true},
+		{Key: "~SECOND", Value: "s"},
+	}
+	if err := commitAdd(path, "work", config.Extends{"base"}, entries, other, config.Config{}, false); err != nil {
+		t.Fatalf("commitAdd: %v", err)
+	}
+	got, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Profiles["work"].Marked["GH_TOKEN"] {
+		t.Fatalf("the inherited mark must survive: %#v", got.Profiles["work"].Marked)
+	}
+	if !got.Profiles["work"].Marked["PROJECT_PATH"] {
+		t.Fatalf("the typed mark must reach the file: %#v", got.Profiles["work"].Marked)
+	}
+	if !got.Profiles["work"].Marked["SECOND"] {
+		t.Fatalf("a key typed with ~ must reach the file marked: %#v", got.Profiles["work"].Marked)
+	}
+	if _, ok := got.Profiles["work"].Env["~SECOND"]; ok {
+		t.Fatalf("env = %#v, the mark must never key the map", got.Profiles["work"].Env)
+	}
+}
+
+// TestAddRefusesToClobberCiphertextWithoutKey pins the missing-key gate: writing
+// a typed value over a value only a key can read destroys that secret, so the add
+// refuses and names the keys instead of overwriting them.
+func TestAddRefusesToClobberCiphertextWithoutKey(t *testing.T) {
+	dir := t.TempDir()
+	kpath := filepath.Join(dir, "key")
+	if err := crypto.GenerateKey(kpath, true); err != nil {
+		t.Fatal(err)
+	}
+	key, salt, err := crypto.LoadKey(kpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := crypto.EncryptValueWithParams("hunter2", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := config.Config{Profiles: map[string]config.Profile{
+		"work": {Env: map[string]string{"TOKEN": sealed, "PLAIN": "old"}},
+	}}
+	entries := []ui.EnvEntry{{Key: "TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "typed"}}
+
+	t.Setenv("ENVER_KEY", "")
+	savedKeyPath := globalFlags.keyPath
+	t.Cleanup(func() { globalFlags.keyPath = savedKeyPath })
+	globalFlags.keyPath = ""
+	savedKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "absent") }
+	t.Cleanup(func() { crypto.KeyFilePath = savedKeyFile })
+
+	err = ciphertextClobberError(target, "work", entries)
+	const want = "refusing to overwrite the encrypted value of TOKEN: no key is available (`enver decrypt`, or set --key/ENVER_KEY)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+
+	globalFlags.keyPath = kpath
+	if err := ciphertextClobberError(target, "work", entries); err != nil {
+		t.Fatalf("with a key available the typed overwrite proceeds: %v", err)
 	}
 }
 

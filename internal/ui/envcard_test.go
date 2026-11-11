@@ -224,6 +224,50 @@ func TestEnvCardCarriesSecretFlag(t *testing.T) {
 	}
 }
 
+// TestEnvCardAcceptsMarkedName pins the name field's mark: one leading ~ submits
+// the runtime name and turns the entry secret, so the mark is typable.
+func TestEnvCardAcceptsMarkedName(t *testing.T) {
+	m := fillCard("~PROJECT_PATH")
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatalf("a marked name must submit, keyErr=%v", m.keyErr)
+	}
+	r := m.result()
+	if r.Key != "PROJECT_PATH" || !r.Secret {
+		t.Fatalf("result = %+v, want Key=PROJECT_PATH Secret=true", r)
+	}
+}
+
+// TestEnvCardRejectsBareMark pins that the mark alone is not a name, so a stray
+// ~ cannot reach the write boundary as an empty key.
+func TestEnvCardRejectsBareMark(t *testing.T) {
+	for _, key := range []string{"~", "~~K", "~ "} {
+		m := updCard(fillCard(key), tea.KeyPressMsg{Code: tea.KeyEnter})
+		if m.submitted {
+			t.Fatalf("key %q must not submit", key)
+		}
+		if !m.keyErr || m.cursor != 0 {
+			t.Fatalf("key %q: keyErr=%v cursor=%d, want the name field flagged", key, m.keyErr, m.cursor)
+		}
+	}
+}
+
+// TestEnvCardTypedPlainNameKeepsCarriedMark pins the OR rule: retyping a plain
+// name over a marked entry keeps the mark, so a card pass can never unmark.
+func TestEnvCardTypedPlainNameKeepsCarriedMark(t *testing.T) {
+	m := typeChars(newEnvCardModel(EnvEntry{Secret: true}), "KEY")
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Text: "V"})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("setup: card should submit")
+	}
+	if r := m.result(); !r.Secret {
+		t.Fatalf("result = %+v, typing a plain name must keep the carried mark", r)
+	}
+}
+
 func TestEnvCardCollectingSharesTheRule(t *testing.T) {
 	m := newCollectingEnvCardModel(EnvEntry{}, nil)
 	m = typeChars(m, "A;B")

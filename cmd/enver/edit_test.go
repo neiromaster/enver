@@ -188,6 +188,37 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 	}
 }
 
+// TestMarkedRowsShowTheMark pins the label half of the mark: every picker that
+// lists a variable spells a marked one ~KEY, while the row value stays the
+// runtime name the commit writes.
+func TestMarkedRowsShowTheMark(t *testing.T) {
+	s := plainState(t, "p", config.Profile{
+		Env:    map[string]string{"K": "hunter2hunter2", "PLAIN": "visible"},
+		Marked: map[string]bool{"K": true},
+	}, nil, false)
+
+	for name, opts := range map[string][]ui.Option{
+		"menu":    s.menuOptions(nil, nil),
+		"secrets": secretsOptions(s, nil),
+	} {
+		row := findOption(t, opts, "K")
+		if !strings.HasPrefix(row.Label, "~K = ") {
+			t.Fatalf("%s row = %q, want the marked spelling", name, row.Label)
+		}
+		if plain := findOption(t, opts, "PLAIN"); strings.HasPrefix(plain.Label, "~") {
+			t.Fatalf("%s row = %q, an unmarked key must not carry the mark", name, plain.Label)
+		}
+	}
+
+	del := deleteVarOptions(s, nil)
+	if got := findOption(t, del, "K"); got.Label != "~K" {
+		t.Fatalf("delete row = %q, want ~K", got.Label)
+	}
+	if got := findOption(t, del, "PLAIN"); got.Label != "PLAIN" {
+		t.Fatalf("delete row = %q, want PLAIN", got.Label)
+	}
+}
+
 func TestParseMenuChoice(t *testing.T) {
 	s := plainState(t, "p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	if kind, key := parseMenuChoice("OWN", s); kind != "own" || key != "OWN" {
