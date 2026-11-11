@@ -18,11 +18,14 @@ func findIndex(mapping *yaml.Node, key string) int {
 
 // findEnvIndex locates an env entry by the runtime name the decoder exposes,
 // whatever secret mark the key was written with: a writer that appends a plain
-// sibling to a marked entry would leave the file unreadable.
+// sibling to a marked entry would leave the file unreadable. Names match by
+// envname.Equal — the decoder's own rule — because a byte-exact writer on
+// Windows appends a second spelling of the variable the loader then rejects as
+// a duplicate.
 func findEnvIndex(mapping *yaml.Node, name string) int {
 	return findIndexWhere(mapping, func(literal string) bool {
 		existing, _ := envname.SplitMarked(literal)
-		return existing == name
+		return envname.Equal(existing, name)
 	})
 }
 
@@ -123,19 +126,22 @@ func newMarkResolver(root *yaml.Node, name string, known map[string]bool) *markR
 // rewritten decides: the profile's own entry first, then an ancestor inside this
 // same file, as the chain stood before the write and then as it stands after. A
 // cross-layer ancestor is invisible here, which is why callers holding the
-// merged config pass their marks.
+// merged config pass their marks. Every map is read by envname.Get, so a mark
+// written for a case variant still reaches the key it belongs to on Windows.
 func (m *markResolver) writeMark(k string, env *yaml.Node) bool {
 	if m.known != nil {
-		return m.known[k]
+		marked, _ := envname.Get(m.known, k)
+		return marked
 	}
 	if idx := findEnvIndex(env, k); idx >= 0 {
 		_, marked := envname.SplitMarked(env.Content[idx-1].Value)
 		return marked
 	}
-	if m.before[k] {
+	if marked, ok := envname.Get(m.before, k); ok && marked {
 		return true
 	}
-	return m.afterMarks()[k]
+	marked, _ := envname.Get(m.afterMarks(), k)
+	return marked
 }
 
 func (m *markResolver) afterMarks() map[string]bool {

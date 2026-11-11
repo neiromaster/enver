@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -750,4 +751,70 @@ func TestUpsertProfileBoolSpelledEnvKey(t *testing.T) {
 	if got := cfg.Profiles["p"].Env["TRUE"]; got != "new" {
 		t.Fatalf("TRUE = %q, want new (duplicate key or lost update)", got)
 	}
+}
+
+// TestUpsertFoldsEnvKeyCaseOnWindows pins the writer to the loader's key
+// semantics: on Windows a case variant is the same variable, so writing PATH
+// over an entry spelled Path must rewrite it — one entry, the written value —
+// instead of appending a second spelling the decoder rejects as a duplicate.
+func TestUpsertFoldsEnvKeyCaseOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("env names are case-sensitive elsewhere")
+	}
+	write := func(t *testing.T, original string, p Profile) (cfg Config) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := UpsertProfile(path, "work", p, false, false); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		if got := len(envMappingNode(t, path, "work").Content); got != 2 {
+			t.Fatalf("env mapping has %d content nodes, want 2 (one key/value pair)", got)
+		}
+		cfg, err := LoadFile(path)
+		if err != nil {
+			t.Fatalf("reload after upsert: %v", err)
+		}
+		return cfg
+	}
+
+	t.Run("own entry", func(t *testing.T) {
+		work := write(t, "profiles:\n  work:\n    env:\n      Path: old\n",
+			Profile{Env: map[string]string{"PATH": "new"}}).Profiles["work"]
+		if len(work.Env) != 1 || work.Env["PATH"] != "new" {
+			t.Fatalf("env = %#v, want exactly {PATH: new}", work.Env)
+		}
+		if work.Marked != nil {
+			t.Fatalf("a plain rewrite must not mark the key: %#v", work.Marked)
+		}
+	})
+
+	t.Run("own marked entry", func(t *testing.T) {
+		work := write(t, "profiles:\n  work:\n    env:\n      ~Path: old\n",
+			Profile{Env: map[string]string{"PATH": "new"}}).Profiles["work"]
+		if len(work.Env) != 1 || work.Env["PATH"] != "new" {
+			t.Fatalf("env = %#v, want exactly {PATH: new}", work.Env)
+		}
+		if !work.Marked["PATH"] {
+			t.Fatalf("mark dropped on a case-variant rewrite: %#v", work.Marked)
+		}
+	})
+
+	t.Run("ancestor mark", func(t *testing.T) {
+		// The mark lives on an ancestor in the same file and is spelled there
+		// as Path: the resolver must still hand it to the PATH being written,
+		// or the override silently declassifies the variable.
+		cfg := write(t, "profiles:\n  base:\n    env:\n      ~Path: old\n  work:\n    extends: base\n    env: {}\n",
+			Profile{Env: map[string]string{"PATH": "new"}})
+		work := cfg.Profiles["work"]
+		if len(work.Env) != 1 || work.Env["PATH"] != "new" || !work.Marked["PATH"] {
+			t.Fatalf("work = env %#v marked %#v, want a marked PATH override", work.Env, work.Marked)
+		}
+		base := cfg.Profiles["base"]
+		if len(base.Env) != 1 || base.Env["Path"] != "old" || !base.Marked["Path"] {
+			t.Fatalf("ancestor disturbed: env %#v marked %#v", base.Env, base.Marked)
+		}
+	})
 }

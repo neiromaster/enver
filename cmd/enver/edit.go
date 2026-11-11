@@ -113,19 +113,24 @@ func editCardBlocked(e ui.EnvEntry, crypter *valueCrypter) bool {
 	return e.Encrypted && crypter == nil
 }
 
+// find returns the working copy's entry for key, matched by envname.Equal: on
+// Windows a case variant is the same variable, exactly as the loader sees it.
 func (s *editState) find(key string) (ui.EnvEntry, bool) {
 	for _, e := range s.entries {
-		if e.Key == key {
+		if envname.Equal(e.Key, key) {
 			return e, true
 		}
 	}
 	return ui.EnvEntry{}, false
 }
 
+// upsert replaces the entry key denotes, by envname.Equal — a byte-exact match
+// on Windows would leave both spellings of one variable in the working copy,
+// and the commit would then write a file the decoder rejects as a duplicate.
 func (s *editState) upsert(e ui.EnvEntry) {
 	e.Key = strings.TrimSpace(e.Key)
 	for i := range s.entries {
-		if s.entries[i].Key == e.Key {
+		if envname.Equal(s.entries[i].Key, e.Key) {
 			s.entries[i] = e
 			return
 		}
@@ -133,9 +138,12 @@ func (s *editState) upsert(e ui.EnvEntry) {
 	s.entries = append(s.entries, e)
 }
 
+// deleteKey drops the entry key denotes, by envname.Equal, so a case-variant
+// rename or delete does not leave the old spelling behind to be written as a
+// second entry of the same variable.
 func (s *editState) deleteKey(key string) {
 	for i, e := range s.entries {
-		if e.Key == key {
+		if envname.Equal(e.Key, key) {
 			s.entries = append(s.entries[:i], s.entries[i+1:]...)
 			return
 		}
