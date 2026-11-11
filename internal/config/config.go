@@ -66,7 +66,15 @@ func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	}
 	p.Env = nil
-	return p.applyEnvMapping(env)
+	if err := p.applyEnvMapping(env); err != nil {
+		return err
+	}
+	// A merge override can clear the only mark the walk recorded; the field's
+	// contract is nil when no mark survives, not an empty map.
+	if len(p.Marked) == 0 {
+		p.Marked = nil
+	}
+	return nil
 }
 
 // applyEnvMapping records one env mapping's entries, merge keys included: `<<`
