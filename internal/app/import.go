@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"io"
-	"maps"
 	"slices"
 	"strings"
 
@@ -15,15 +14,15 @@ import (
 // ImportOptions carries the import knobs the CLI layer binds flags to.
 // Confirm gates destructive --replace removals; Resolve computes the
 // post-write effective resolution for fence reporting (nil disables it,
-// tests). Config is the merged two-layer view the secret marks come from:
-// the target file alone cannot see an ancestor in the other layer, so a nil
-// Config leaves Profile.Marked nil and the writer keeps its in-file fallback.
+// tests). OtherLayer is the layer the write leaves untouched, the only place a
+// secret mark inherited from the other file can come from: nil leaves
+// Profile.Marked nil, so the writer keeps its own in-file fallback.
 type ImportOptions struct {
-	Replace bool
-	Force   bool
-	Confirm func(msg string, def bool) (bool, error)
-	Resolve func(profile string) (config.Resolved, error)
-	Config  *config.Config
+	Replace    bool
+	Force      bool
+	Confirm    func(msg string, def bool) (bool, error)
+	Resolve    func(profile string) (config.Resolved, error)
+	OtherLayer *config.Config
 }
 
 // ImportEnv parses .env data from r into profile name at target. Imported
@@ -83,7 +82,7 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	// Unset stays nil: a --replace clears the unset list like the profile's own
 	// env, because WriteProfile writes the field wholesale, while UpsertProfile
 	// never clears it.
-	marked := WriteMarks(opts.Config, existing, name, extendsToWrite, extendsFlag != "" || opts.Replace, opts.Replace, keys)
+	marked := WriteMarks(opts.OtherLayer, existing, name, extendsToWrite, opts.Replace, keys)
 	written := config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments, Marked: marked}
 
 	var mode string
@@ -114,38 +113,6 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	}
 	summary := formatImportSummary(name, len(imported), mode, d, extendsToWrite, oldExtends, fencedImportedKeys(opts.Resolve, name, imported))
 	return summary + skippedLineNote(skips), nil
-}
-
-// WriteMarks answers the secret-mark question for the keys of a whole-env write
-// into profile, which the writers cannot answer themselves when an ancestor
-// lives in the other layer. The target file's own entries ride on top of the
-// merged view, since those are the entries being rewritten, and the profile is
-// projected as the write leaves it: setsExtends replaces the extends with
-// extends, clearsFences drops the unsets a wholesale replace wipes. A merging
-// write that sets no extends leaves the layered value in place, because the
-// extends already in the target file is part of that value. A nil merged view
-// (callers without one, tests) answers nil, keeping the writer's own in-file
-// fallback.
-func WriteMarks(merged *config.Config, target config.Config, name string, extends config.Extends, setsExtends, clearsFences bool, keys []string) map[string]bool {
-	if merged == nil {
-		return nil
-	}
-	view := config.Merge(*merged, target)
-	if !setsExtends && !clearsFences {
-		return config.MarksForWrite(view, name, keys)
-	}
-	probe := view
-	probe.Profiles = maps.Clone(view.Profiles)
-	p := probe.Profiles[name]
-	if setsExtends {
-		p.Extends = extends
-	}
-	if clearsFences {
-		p.Unset = nil
-		p.Carried = nil
-	}
-	probe.Profiles[name] = p
-	return config.MarksForWrite(probe, name, keys)
 }
 
 // SplitExtends parses a comma-separated --extends value, dropping empties.

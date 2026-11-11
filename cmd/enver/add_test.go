@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -183,20 +185,51 @@ func TestParentEnvForResolvesThroughMergedParents(t *testing.T) {
 // an entry the picked chain marks is written marked, a key marked nowhere is
 // not, and the target file's own unmarked entry outranks the inherited mark.
 func TestAddMarksInheritAcrossLayers(t *testing.T) {
-	merged := config.Config{Profiles: map[string]config.Profile{
+	other := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"GH_TOKEN": "parent"}, Marked: map[string]bool{"GH_TOKEN": true}},
 	}}
 	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "p"}}
 
-	marks := addMarks(merged, config.Config{}, "work", config.Extends{"base"}, entries)
+	marks := addMarks(&other, config.Config{}, "work", config.Extends{"base"}, entries)
 	if !marks["GH_TOKEN"] || marks["PLAIN"] {
 		t.Fatalf("marks = %#v, want GH_TOKEN marked and PLAIN not", marks)
 	}
 	own := config.Config{Profiles: map[string]config.Profile{
 		"work": {Env: map[string]string{"GH_TOKEN": "old"}},
 	}}
-	if marks := addMarks(merged, own, "work", config.Extends{"base"}, entries); marks["GH_TOKEN"] {
+	if marks := addMarks(&other, own, "work", config.Extends{"base"}, entries); marks["GH_TOKEN"] {
 		t.Fatalf("the target's own unmarked entry must win: %#v", marks)
+	}
+}
+
+// TestCommitAddWritesInheritedMark pins add's wiring at the file level, not just
+// the helper: the profile the command commits carries the mark its picked parent
+// supplies from the other layer, and a key nothing marks stays plain.
+func TestCommitAddWritesInheritedMark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".enver.yaml")
+	other := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"GH_TOKEN": "parent"}, Marked: map[string]bool{"GH_TOKEN": true}},
+	}}
+	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "p"}}
+	if err := commitAdd(path, "work", config.Extends{"base"}, entries, other, config.Config{}, false); err != nil {
+		t.Fatalf("commitAdd: %v", err)
+	}
+	got, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Profiles["work"].Marked["GH_TOKEN"] {
+		t.Fatalf("the inherited mark must reach the file: %#v", got.Profiles["work"])
+	}
+	if got.Profiles["work"].Marked["PLAIN"] {
+		t.Fatalf("a key nothing marks must stay plain: %#v", got.Profiles["work"])
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "~GH_TOKEN") {
+		t.Fatalf("file does not write the mark:\n%s", data)
 	}
 }
 

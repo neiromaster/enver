@@ -1344,6 +1344,31 @@ func TestMarksForWritePrefersOwnEntry(t *testing.T) {
 	}
 }
 
+func TestMarksForWriteKeepsOwnMark(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}},
+		"work": {Extends: Extends{"base"}, Env: map[string]string{"TOKEN": "b"}, Marked: map[string]bool{"TOKEN": true}},
+	}}
+	if !MarksForWrite(cfg, "work", []string{"TOKEN"})["TOKEN"] {
+		t.Fatal("the profile's own marked entry must answer true, no ancestor mark needed")
+	}
+}
+
+// TestMarksForWriteFoldsCaseOnWindows pins that a requested spelling reaches the
+// entry resolution knows, the way the writer's own key lookup does.
+func TestMarksForWriteFoldsCaseOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("env names are case-sensitive elsewhere")
+	}
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}},
+		"work": {Extends: Extends{"base"}, Env: map[string]string{"Token": "b"}, Marked: map[string]bool{"Token": true}},
+	}}
+	if !MarksForWrite(cfg, "work", []string{"token"})["token"] {
+		t.Fatal("a case-variant request must find the own marked entry on Windows")
+	}
+}
+
 func TestMarksForWriteFallsBackToChain(t *testing.T) {
 	cfg := Config{Profiles: map[string]Profile{
 		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},

@@ -120,14 +120,24 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 }
 
 // addMarks answers the secret marks for the entries add writes: the shared
-// write-mark helper under add's writer mode, which sets the picked extends
-// outright and keeps the working fences.
-func addMarks(merged, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
+// write-mark helper with add's picked extends, which the write sets outright,
+// and the working fences, which an upsert never clears.
+func addMarks(other *config.Config, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
 	keys := make([]string, 0, len(entries))
 	for _, e := range entries {
 		keys = append(keys, e.Key)
 	}
-	return app.WriteMarks(&merged, target, name, extends, true, false, keys)
+	return app.WriteMarks(other, target, name, extends, false, keys)
+}
+
+// commitAdd writes the collected profile into the target file, carrying the
+// marks its picked chain supplies from the other layer so an inherited secret
+// stays a secret.
+func commitAdd(cfgPath, name string, extends config.Extends, entries []ui.EnvEntry, other, target config.Config, setDefault bool) error {
+	profile, comments := buildProfile(extends, entries)
+	profile.Comments = comments
+	profile.Marked = addMarks(&other, target, name, extends, entries)
+	return config.UpsertProfile(cfgPath, name, profile, setDefault, true)
 }
 
 // upsertEntry appends entry, or replaces the existing entry with the same key.
@@ -158,6 +168,10 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	pickerCfg, err := pickerConfig()
+	if err != nil {
+		return err
+	}
+	other, err := otherLayer()
 	if err != nil {
 		return err
 	}
@@ -237,10 +251,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		setDefault = ans
 	}
 
-	profile, comments := buildProfile(extends, entries)
-	profile.Comments = comments
-	profile.Marked = addMarks(merged, targetCfg, name, extends, entries)
-	if err := config.UpsertProfile(cfgPath, name, profile, setDefault, true); err != nil {
+	if err := commitAdd(cfgPath, name, extends, entries, other, targetCfg, setDefault); err != nil {
 		return err
 	}
 	fmt.Printf("\n✓ wrote profile %q to %s\n", name, cfgPath)
