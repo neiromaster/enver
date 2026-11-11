@@ -172,6 +172,21 @@ func writeTarget() string {
 	return config.LocalPath()
 }
 
+// otherLayer reads the layer a write leaves untouched: the global file when the
+// write targets the local one, the local file when it targets the global one,
+// and nothing under --no-local, where reads ignore the local file entirely. A
+// secret mark inherited from that layer cannot be guessed, so its read errors
+// surface here rather than as a quietly unmarked key.
+func otherLayer() (config.Config, error) {
+	if !globalFlags.global {
+		return config.LoadFile(config.GlobalPath(globalFlags.configPath))
+	}
+	if globalFlags.noLocal {
+		return config.Config{}, nil
+	}
+	return config.LoadFile(config.LocalPath())
+}
+
 // loadTarget reads the file mutators rewrite: local by default, global under
 // --global. Existence is judged against this file, never the merged view — a
 // profile visible through extends but absent here is not a write target.

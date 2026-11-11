@@ -83,11 +83,14 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 			wantMarked: true,
 		},
 		{
-			name:       "replace clears an extends the target does not declare",
+			// The target file declares no extends of its own, so nothing in it
+			// would keep the parent alive: the mark survives only because the
+			// other layer still declares that parent after the rewrite.
+			name:       "replace keeps the extends only the other layer declares",
 			global:     globalWithParent,
 			target:     "profiles:\n  work:\n    env:\n      OTHER: x\n",
 			replace:    true,
-			wantMarked: false,
+			wantMarked: true,
 		},
 		{
 			// The replace wipes the fence, so the key comes back into the
@@ -111,15 +114,10 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			targetCfg, err := config.LoadFile(targetPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			merged := config.Merge(globalCfg, targetCfg)
 			if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), targetPath, "work", "", ImportOptions{
-				Replace: tt.replace,
-				Force:   true,
-				Config:  &merged,
+				Replace:    tt.replace,
+				Force:      true,
+				OtherLayer: &globalCfg,
 			}); err != nil {
 				t.Fatalf("ImportEnv: %v", err)
 			}
