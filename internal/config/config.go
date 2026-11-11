@@ -449,9 +449,9 @@ type Source struct {
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
 // per-key source provenance, the secret marks whose winning entry carried one,
-// the unset tombstones, and the self-first lineage chain. Whether a value was
-// encrypted is not known here — ResolveProfile sees the file as written but
-// only the caller decrypts — so Encrypted is filled in by the run layer.
+// the unset tombstones, and the self-first lineage chain. Encrypted is filled in
+// by the run layer, not by resolution: config recognizes ciphertext but never
+// decrypts, so the at-rest report belongs to the caller that does.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
