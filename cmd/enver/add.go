@@ -140,9 +140,13 @@ func mergeMarks(implied, typed map[string]bool) map[string]bool {
 // (marked Override when they shadow an inherited key) in insertion order, then the
 // inherited keys not defined as own (sorted). Values are masked via config.MaskValue
 // under the mark in play for the key — the typed one for an own entry, else the
-// inherited one — so the summary hides what the finished profile would hide.
-// entries is not mutated.
-func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMarked map[string]bool) []ui.SummaryEntry {
+// one the write keeps (writeMarks) or, for an inherited row, the parent's — so the
+// summary hides what the finished profile would hide. An own row's untyped half
+// comes from writeMarks, the answer the commit itself uses: the target profile's
+// stored mark for a key it already holds, the picked chain's for a new one.
+// Reading it from the write rather than re-deriving it is what keeps the preview
+// from disagreeing with the file, in either direction. entries is not mutated.
+func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMarked, writeMarks map[string]bool) []ui.SummaryEntry {
 	out := make([]ui.SummaryEntry, 0, len(entries)+len(parentEnv))
 	own := make(map[string]bool, len(entries))
 	for _, e := range entries {
@@ -151,7 +155,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 		if _, ok := parentEnv[e.Key]; ok {
 			kind = ui.EntryOverride
 		}
-		marked := e.Secret || parentMarked[e.Key]
+		marked := e.Secret || writeMarks[e.Key]
 		out = append(out, ui.SummaryEntry{
 			Key:   envname.JoinMarked(e.Key, marked),
 			Value: config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, marked, crypto.IsEncrypted(e.Value))),
@@ -317,7 +321,8 @@ func doAdd(cmd *cobra.Command, args []string) error {
 
 	var entries []ui.EnvEntry
 	for {
-		entry, err := ui.EnvCardCollecting(ui.EnvEntry{}, buildSummary(entries, parentEnv, parentMarked))
+		entry, err := ui.EnvCardCollecting(ui.EnvEntry{},
+			buildSummary(entries, parentEnv, parentMarked, addMarks(&other, targetCfg, name, extends, entries)))
 		if err != nil {
 			return nil
 		}
