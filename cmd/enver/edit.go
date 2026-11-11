@@ -938,7 +938,7 @@ func commitEdit(path string, cfg config.Config, s editState, wasDefault bool, cr
 	if keys := s.plaintextSecrets(); len(keys) > 0 {
 		switch {
 		case crypter == nil:
-			return fmt.Errorf("refusing to write %s in plaintext: no key is available (set --key or ENVER_KEY)",
+			return fmt.Errorf("refusing to write %s in plaintext: no key is available (run `enver keygen`, or set --key/ENVER_KEY)",
 				strings.Join(keys, ", "))
 		case crypter.Salt == nil:
 			return errSaltlessCrypter
