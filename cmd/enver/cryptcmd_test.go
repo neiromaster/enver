@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,6 +41,39 @@ func TestCompleteProfileForCryptAndDefault(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: got %v, want %v", c.Use, got, want)
 		}
+	}
+}
+
+// TestEncryptWithoutKeyNamesWhatItBlocked pins the fail-loudly row for the crypt
+// commands: they reach app.ResolveKeyOrPrompt without resolve, so requireKey has
+// to name the blocked keys itself, scoped to the profile the run rewrites.
+func TestEncryptWithoutKeyNamesWhatItBlocked(t *testing.T) {
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	prevKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "missing-key") }
+	t.Cleanup(func() { crypto.KeyFilePath = prevKeyFile })
+	t.Setenv("ENVER_KEY", "")
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return false }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+
+	writeDoc(t, config.LocalPath(), fmt.Sprintf(
+		"profiles:\n  work:\n    env:\n      TOKEN: %s\n      OTHER: %s\n  extra:\n    env:\n      HIDDEN: %s\n",
+		ciphertextV3(t, "a"), ciphertextV3(t, "b"), ciphertextV3(t, "c")))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("all", false, "")
+	err := encryptCmd.RunE(cmd, []string{"work"})
+	if !errors.Is(err, app.ErrNoKey) {
+		t.Fatalf("want app.ErrNoKey, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "encrypted: OTHER, TOKEN") {
+		t.Fatalf("the failure must name the blocked keys sorted, got: %v", err)
+	}
+
+	if err := encryptCmd.RunE(cmd, nil); !strings.Contains(err.Error(), "HIDDEN, OTHER, TOKEN") {
+		t.Fatalf("an all-profile run must name every blocked key, got: %v", err)
 	}
 }
 

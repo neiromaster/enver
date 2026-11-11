@@ -30,10 +30,23 @@ type Options struct {
 	TolerateMissingKey bool
 }
 
-// ErrNoKey reports that encrypted values are present and no key source
-// resolved. It is the absence of a key, not an unusable one: a wrong key is a
-// misconfiguration and never matches.
+// ErrNoKey reports that a key is needed and none was found: encrypted values
+// are in play, but no --key, ENVER_KEY, or key file resolved one, and a
+// passphrase cannot be recovered without a prompt. It is the absence of a key,
+// not an unusable one — a wrong key is a misconfiguration and never matches.
+// Callers add the keys that stayed unread (WithEncryptedKeys) so the failure
+// says what it blocked.
 var ErrNoKey = errors.New("no key found — run `enver keygen` or set --key/ENVER_KEY")
+
+// WithEncryptedKeys annotates a missing-key error with the sorted names of the
+// values that stayed unread. Any other error, and an empty key list, pass
+// through unchanged; the annotated result still matches ErrNoKey via errors.Is.
+func WithEncryptedKeys(err error, keys []string) error {
+	if !errors.Is(err, ErrNoKey) || len(keys) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (encrypted: %s)", err, strings.Join(slices.Sorted(slices.Values(keys)), ", "))
+}
 
 // noKeyReason is the short per-key explanation the display paths render.
 const noKeyReason = "no key — run enver keygen"
@@ -115,8 +128,7 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 			return config.Resolved{}, err
 		}
 		if !opts.TolerateMissingKey {
-			keys := slices.Sorted(maps.Keys(r.Encrypted))
-			return config.Resolved{}, fmt.Errorf("%w (encrypted: %s)", err, strings.Join(keys, ", "))
+			return config.Resolved{}, WithEncryptedKeys(err, slices.Collect(maps.Keys(r.Encrypted)))
 		}
 		// Only an absent key degrades: the ciphertext stays for the renderer to
 		// annotate, and the values a key could read still expand.
@@ -125,7 +137,7 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 			r.Undecryptable[k] = noKeyReason
 		}
 		if !opts.NoExpand {
-			r.Env = expandReadable(r.Env, r.Undecryptable)
+			r.Env = expandReadable(r.Env, r.Encrypted)
 		}
 		return r, nil
 	}
@@ -313,19 +325,24 @@ func foreignEncPrefix(env map[string]string) string {
 	return ""
 }
 
-// expandReadable expands the values a key could read and leaves the unreadable
-// ones — ciphertext nobody can decrypt — exactly as they sit at rest.
-func expandReadable(env, unreadable map[string]string) map[string]string {
-	readable := make(map[string]string, len(env))
+// expandReadable expands the values a key could read and restores the
+// unreadable ciphertext exactly as it sits at rest. Each unreadable key is
+// seeded empty so a plaintext value depending on it resolves to nothing instead
+// of borrowing the process environment's same-named variable: the profile's own
+// entry wins, unreadable or not.
+func expandReadable(env map[string]string, unreadable map[string]bool) map[string]string {
+	seed := make(map[string]string, len(env))
 	for k, v := range env {
-		if _, skip := unreadable[k]; !skip {
-			readable[k] = v
+		if unreadable[k] {
+			v = ""
 		}
+		seed[k] = v
 	}
-	for k, v := range varsubst.Expand(readable, osEnvMap()) {
-		env[k] = v
+	out := varsubst.Expand(seed, osEnvMap())
+	for k := range unreadable {
+		out[k] = env[k]
 	}
-	return env
+	return out
 }
 
 func fileExists(p string) bool {
