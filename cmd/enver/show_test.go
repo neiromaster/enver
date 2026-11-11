@@ -333,28 +333,37 @@ func TestPrintEnvLiveBeatsTombstone(t *testing.T) {
 }
 
 // TestPrintEnvColor pins the styling contract of the colored text output:
-// keys are bold, every comment (header, provenance suffix, tombstone rows)
-// is dim, and values stay plain so they read and copy cleanly.
+// keys are bold, every comment (header, provenance suffix, tombstone rows, the
+// marked-but-plaintext note) is dim, and values stay plain so they read and
+// copy cleanly.
 func TestPrintEnvColor(t *testing.T) {
 	const (
 		ansiBold  = "\x1b[1m"
 		ansiDim   = "\x1b[2m"
 		ansiReset = "\x1b[m"
 	)
-	env := map[string]string{"API_KEY": "sk-ant-secret"}
+	env := map[string]string{"API_KEY": "sk-ant-secret", "PROJECT_PATH": "/home/anna"}
 	chain := []string{"dev", "anth"}
-	sources := map[string]config.Source{"API_KEY": {Profile: "dev", Layer: "local"}}
+	sources := map[string]config.Source{
+		"API_KEY":      {Profile: "dev", Layer: "local"},
+		"PROJECT_PATH": {Profile: "dev", Layer: "local"},
+	}
 	unsets := map[string]config.Source{"LEGACY_URL": {Profile: "anth", Layer: "local"}}
 
 	var out bytes.Buffer
-	if err := printEnv(&out, env, chain, sources, unsets, envRender{unmasked: true, color: true}); err != nil {
+	if err := printEnv(&out, env, chain, sources, unsets, envRender{
+		unmasked: true,
+		color:    true,
+		marked:   map[string]bool{"PROJECT_PATH": true},
+	}); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	s := out.String()
 	for name, want := range map[string]string{
-		"header":    ansiDim + "# profile: dev → anth" + ansiReset,
-		"live row":  ansiBold + "API_KEY" + ansiReset + "=sk-ant-secret  " + ansiDim + "# from dev (local)" + ansiReset,
-		"tombstone": ansiDim + `# LEGACY_URL — unset by "anth"` + ansiReset,
+		"header":      ansiDim + "# profile: dev → anth" + ansiReset,
+		"live row":    ansiBold + "API_KEY" + ansiReset + "=sk-ant-secret  " + ansiDim + "# from dev (local)" + ansiReset,
+		"tombstone":   ansiDim + `# LEGACY_URL — unset by "anth"` + ansiReset,
+		"marked note": ansiBold + "PROJECT_PATH" + ansiReset + "=/home/anna  " + ansiDim + "# from dev (local) ~ marked, not encrypted" + ansiReset,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("colored output missing %s row:\nwant %q\ngot  %q", name, want, s)
