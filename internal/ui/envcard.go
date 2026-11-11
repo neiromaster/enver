@@ -20,10 +20,11 @@ type envCardModel struct {
 	canceled  bool
 	prior     []SummaryEntry
 	keyErr    bool
+	secret    bool // carries EnvEntry.Secret: no text field can express it
 }
 
 func newEnvCardModel(e EnvEntry) *envCardModel {
-	m := &envCardModel{theme: defaultTheme()}
+	m := &envCardModel{theme: defaultTheme(), secret: e.Secret}
 	seeds := []string{e.Key, e.Value, e.Comment}
 	for i := 0; i < 3; i++ {
 		ti := textinput.New()
@@ -134,11 +135,14 @@ func (m *envCardModel) View() tea.View {
 
 func (m *envCardModel) Canceled() bool { return m.canceled }
 
+// result rebuilds the entry from the text fields plus the secret mark they
+// cannot express, so a pass through the card never drops it.
 func (m *envCardModel) result() EnvEntry {
 	return EnvEntry{
 		Key:     m.fields[0].Value(),
 		Value:   m.fields[1].Value(),
 		Comment: m.fields[2].Value(),
+		Secret:  m.secret,
 	}
 }
 

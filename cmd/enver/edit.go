@@ -65,7 +65,8 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 	keys := slices.Sorted(maps.Keys(prof.Env))
 	entries := make([]ui.EnvEntry, 0, len(keys))
 	for _, k := range keys {
-		entries = append(entries, ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k]})
+		secret, _ := envname.Get(prof.Marked, k)
+		entries = append(entries, ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k], Secret: secret})
 	}
 	return editState{
 		name:          name,
@@ -124,6 +125,19 @@ func (s editState) commentsMap() map[string]string {
 	for _, e := range s.entries {
 		if e.Key != "" && e.Comment != "" {
 			m[e.Key] = e.Comment
+		}
+	}
+	return m
+}
+
+// markMap is the working copy's secret-mark set, authoritative for every key it
+// writes. It is non-nil even when empty: nil would tell the writer to fall back
+// to the file, and the working copy has already decided.
+func (s editState) markMap() map[string]bool {
+	m := make(map[string]bool, len(s.entries))
+	for _, e := range s.entries {
+		if e.Key != "" && e.Secret {
+			envname.Set(m, e.Key, true)
 		}
 	}
 	return m
@@ -197,12 +211,14 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 
 // overrideSeed builds the EnvEntry used to seed EnvCard when overriding an
 // inherited variable: the inherited value (drawn from the menu's inherited set)
-// plus its resolved comment, so the user sees what they are deviating from.
+// plus its resolved comment, so the user sees what they are deviating from, and
+// its secret mark, so deviating does not silently declassify the variable.
 func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key string) ui.EnvEntry {
 	seed := ui.EnvEntry{Key: key}
 	for _, e := range inherited {
 		if e.Key == key {
 			seed.Value = e.Value
+			seed.Secret = e.Secret
 			break
 		}
 	}
@@ -215,7 +231,7 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
-		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, false, false)))}
+		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))}
 		// Fence state outranks the override mark and reads as a faded row: the
 		// variable stays listed so its suppression is visible where it happens.
 		switch {
@@ -227,7 +243,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
-		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, false, false)))}
+		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))}
 		if envname.MatchesAny(s.unset, e.Key) {
 			opt.Dim = true
 		}
@@ -664,8 +680,8 @@ func applyExtendsPick(cfg config.Config, name string, s *editState, picked []str
 
 // commitEdit commits the working copy: a pending delete is honored first;
 // otherwise it validates (extends cycle, non-empty invariant) and writes the
-// profile. setDefault/clearDefault are derived from wasDefault vs the toggled
-// state.
+// profile, secret marks included as the working copy decided them.
+// setDefault/clearDefault are derived from wasDefault vs the toggled state.
 func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) error {
 	if s.deleteProfile {
 		return config.DeleteProfile(path, s.name)
@@ -673,7 +689,7 @@ func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) er
 	if err := commitValidate(cfg, s); err != nil {
 		return err
 	}
-	p := config.Profile{Extends: s.extends, Unset: s.unset, Env: s.envMap(), Comments: s.commentsMap()}
+	p := config.Profile{Extends: s.extends, Unset: s.unset, Env: s.envMap(), Comments: s.commentsMap(), Marked: s.markMap()}
 	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault)
 }
 
@@ -695,12 +711,14 @@ func editTitle(s editState) string {
 }
 
 // inheritedEntries returns resolved env keys that the profile does not define
-// itself, for read-only display, sorted.
-func inheritedEntries(resolved map[string]string, own map[string]string) []ui.EnvEntry {
+// itself, for read-only display, sorted, each with the secret mark its winning
+// entry carried.
+func inheritedEntries(resolved map[string]string, marked map[string]bool, own map[string]string) []ui.EnvEntry {
 	var out []ui.EnvEntry
 	for k, v := range resolved {
 		if !envname.Has(own, k) {
-			out = append(out, ui.EnvEntry{Key: k, Value: v})
+			secret, _ := envname.Get(marked, k)
+			out = append(out, ui.EnvEntry{Key: k, Value: v, Secret: secret})
 		}
 	}
 	slices.SortFunc(out, func(a, b ui.EnvEntry) int { return cmp.Compare(a.Key, b.Key) })
@@ -708,13 +726,14 @@ func inheritedEntries(resolved map[string]string, own map[string]string) []ui.En
 }
 
 // probeConfig returns a copy of cfg with profile s.name carrying the working
-// extends and working own env, so resolution reflects uncommitted edits. Used by
-// inheritedForState (values) and the override path (comments) so both track the
-// same working extends.
+// extends, working own env, and working marks, so resolution reflects
+// uncommitted edits. Used by inheritedForState (values and marks) and the
+// override path (comments) so all track the same working copy.
 func probeConfig(cfg config.Config, s editState) config.Config {
 	return probeWith(cfg, s.name, func(p *config.Profile) {
 		p.Extends = s.extends
 		p.Env = s.envMap()
+		p.Marked = s.markMap()
 		p.Unset = s.unset
 	})
 }
@@ -750,5 +769,5 @@ func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.En
 	if err != nil {
 		return nil
 	}
-	return inheritedEntries(r.Env, s.envMap())
+	return inheritedEntries(r.Env, r.Marked, s.envMap())
 }
