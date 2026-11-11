@@ -170,6 +170,17 @@ func TestImportEnvFoldsLayersInReaderOrder(t *testing.T) {
 			other:      "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n",
 			wantMarked: false,
 		},
+		{
+			// The target layer fences the key its own profile also extends a
+			// plain parent for. Folding it as the base layer turns that fence
+			// into a carried one tagged with a layer the marking parent does not
+			// live in, so the gate silences it and the mark stands; folding it as
+			// the override layer would make the fence declared and strip the key.
+			name:       "the local parent outranks a carried fence in the target layer",
+			target:     "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n    unset: [GH_TOKEN]\n",
+			other:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
+			wantMarked: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
