@@ -25,7 +25,9 @@
 //     takes --yes to skip its confirmation).
 //   - import converts a .env file into a profile; dotenv prints the
 //     profile back in .env form.
-//   - encrypt, decrypt and keygen manage encryption of secret values.
+//   - encrypt, decrypt and keygen manage encryption of secret values; a key
+//     written with a leading ~ mark is an encrypt candidate whatever its
+//     name, and the mark stays in the file across encrypt and decrypt.
 //   - update updates the enver binary to the latest release; --check only
 //     reports whether an update is available.
 //

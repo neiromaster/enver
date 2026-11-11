@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **New:** a leading `~` on an env key marks the variable a secret candidate —
+  `~PROJECT_PATH: /home/anna/enver` is encrypted by `enver encrypt` and masked
+  by `enver show` even though its name matches no secret heuristic. The mark is
+  file and display syntax only: `x`, `export`, `dotenv` and `show --format
+  json` keep the bare name, the mark survives `encrypt` and `decrypt` so the
+  variable stays a candidate, and a closer unmarked definition (a local
+  `.enver.yaml` overriding a shared global entry) makes it plaintext for that
+  resolution only. Marking never encrypts on its own: a marked value still in
+  plaintext is masked and annotated `~ marked, not encrypted`, and `enver
+  validate` warns `plaintext-secret`. `add` and `edit` accept `~` in the
+  variable-name field, and `edit` gains a **Secrets…** menu that stages marks
+  for own and inherited variables, with an **Encrypt now** step that runs after
+  the commit.
+- `enver edit` decrypts encrypted values when a key resolves and re-encrypts
+  them on save under the file's own KDF era, so editing a sealed value no
+  longer needs `enver decrypt` first and its plaintext can no longer land in
+  the file. Without a key the ciphertext is left untouched and its card stays
+  shut; under `ENVER_KEY`, which carries no salt, a profile holding encrypted
+  values cannot be saved at all, and Encrypt now saves the marks without
+  encrypting and says so.
+- Writers no longer drop a mark they were not told about: `import`, `add` and
+  `duplicate` keep an existing `~KEY` entry's mark, including a mark only an
+  ancestor profile carries, and `edit` seeds the inherited mark into any
+  override it materializes. Previously an upsert appended `K` beside `~K` —
+  which the loader rejects — or silently declassified the key for the next
+  `encrypt`.
+- `enver show` in text mode degrades when no key source resolves: an unreadable
+  value prints `KEY=(cannot decrypt: no key — run enver keygen)` and the
+  command exits 0, while `--format json`, `export`, `dotenv` and `x` still fail
+  and name the keys that blocked them. `add` refuses to overwrite an encrypted
+  value without a key, and a mutating command now fails on a corrupt other
+  layer instead of writing the key unmarked.
+
 ## v0.9.5 - 2026-11-09
 
 - The Homebrew cask is published from the shared `neiromaster/homebrew-tap`
