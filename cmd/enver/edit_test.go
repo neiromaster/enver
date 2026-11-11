@@ -943,6 +943,55 @@ func TestEditAddKeepsInheritedMark(t *testing.T) {
 	}
 }
 
+// TestEditAddKeepsOwnMark pins the other door an Add can declassify through:
+// collecting a name the working copy already defines marked replaces that entry,
+// so the own entry's mark — the closer authority — must ride into the collected
+// one. The inherited set is nil here on purpose: nothing outside the copy can
+// supply the answer.
+func TestEditAddKeepsOwnMark(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"K": "old", "OTHER": "1"},
+		Marked: map[string]bool{"K": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newEditState("p", prof, prof.Comments, isDefault)
+	if cur, ok := s.find("K"); !ok || !cur.Secret {
+		t.Fatalf("setup: own entry should load marked: %+v", s.entries)
+	}
+
+	s.addEntry(ui.EnvEntry{Key: "K", Value: "typed"}, nil)
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "~K") {
+		t.Fatalf("re-adding an own marked key wrote it unmarked:\n%s", raw)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Marked["K"] {
+		t.Fatalf("own mark lost on re-add: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+	if got.Env["K"] != "typed" {
+		t.Fatalf("the typed value did not land: %#v", got.Env)
+	}
+	if got.Env["OTHER"] != "1" {
+		t.Fatalf("an unrelated key did not survive: %#v", got.Env)
+	}
+}
+
 // TestEditDeleteMatchesMarkedKey pins that entries hold the runtime name, so a
 // deletion matches a key the file spells with a mark and takes the mark with it.
 func TestEditDeleteMatchesMarkedKey(t *testing.T) {
