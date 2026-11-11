@@ -83,7 +83,7 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	// Unset stays nil: a --replace clears the unset list like the profile's own
 	// env, because WriteProfile writes the field wholesale, while UpsertProfile
 	// never clears it.
-	marked := importMarks(opts.Config, existing, name, extendsFlag != "", extendsToWrite, opts.Replace, keys)
+	marked := WriteMarks(opts.Config, existing, name, extendsToWrite, extendsFlag != "" || opts.Replace, opts.Replace, keys)
 	written := config.Profile{Extends: extendsToWrite, Unset: nil, Env: imported, Comments: comments, Marked: marked}
 
 	var mode string
@@ -116,26 +116,36 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	return summary + skippedLineNote(skips), nil
 }
 
-// importMarks answers the secret-mark question for the keys an import writes.
-// The target file's own entries ride on top of the merged view, since those are
-// the entries being rewritten, and the extends is previewed as the write leaves
-// it: a --replace or an --extends flag sets the field outright, while a merge
-// without the flag leaves the layered value in place. A nil merged view (tests,
-// callers without one) answers nil, keeping the writer's in-file fallback.
-func importMarks(merged *config.Config, existing config.Config, name string, setsExtends bool, extends config.Extends, replace bool, keys []string) map[string]bool {
+// WriteMarks answers the secret-mark question for the keys of a whole-env write
+// into profile, which the writers cannot answer themselves when an ancestor
+// lives in the other layer. The target file's own entries ride on top of the
+// merged view, since those are the entries being rewritten, and the profile is
+// projected as the write leaves it: setsExtends replaces the extends with
+// extends, clearsFences drops the unsets a wholesale replace wipes. A merging
+// write that sets no extends leaves the layered value in place, because the
+// extends already in the target file is part of that value. A nil merged view
+// (callers without one, tests) answers nil, keeping the writer's own in-file
+// fallback.
+func WriteMarks(merged *config.Config, target config.Config, name string, extends config.Extends, setsExtends, clearsFences bool, keys []string) map[string]bool {
 	if merged == nil {
 		return nil
 	}
-	view := config.Merge(*merged, existing)
-	if setsExtends || replace {
-		probe := view
-		probe.Profiles = maps.Clone(view.Profiles)
-		p := probe.Profiles[name]
-		p.Extends = extends
-		probe.Profiles[name] = p
-		view = probe
+	view := config.Merge(*merged, target)
+	if !setsExtends && !clearsFences {
+		return config.MarksForWrite(view, name, keys)
 	}
-	return config.MarksForWrite(view, name, keys)
+	probe := view
+	probe.Profiles = maps.Clone(view.Profiles)
+	p := probe.Profiles[name]
+	if setsExtends {
+		p.Extends = extends
+	}
+	if clearsFences {
+		p.Unset = nil
+		p.Carried = nil
+	}
+	probe.Profiles[name] = p
+	return config.MarksForWrite(probe, name, keys)
 }
 
 // SplitExtends parses a comma-separated --extends value, dropping empties.

@@ -89,6 +89,15 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 			replace:    true,
 			wantMarked: false,
 		},
+		{
+			// The replace wipes the fence, so the key comes back into the
+			// resolved env and with it the parent's mark.
+			name:       "replace clears a fence over the inherited key",
+			global:     globalWithParent,
+			target:     "profiles:\n  work:\n    extends: base\n    unset: [GH_TOKEN]\n    env:\n      OTHER: x\n",
+			replace:    true,
+			wantMarked: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,6 +142,25 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 				t.Fatalf("file writes the mark = %t, want %t:\n%s", wroteMarked, tt.wantMarked, data)
 			}
 		})
+	}
+}
+
+// TestImportEnvNilConfigKeepsWriterFallback pins the nil-Config contract: a
+// caller without a merged view hands the writer no marks at all, so the
+// writer's own in-file chain still supplies an inherited mark — unchanged
+// behavior for every caller that has no view to offer.
+func TestImportEnvNilConfigKeepsWriterFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeFile(t, path, "profiles:\n  base:\n    env:\n      ~GH_TOKEN: parent\n  work:\n    extends: base\n")
+	if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), path, "work", "", ImportOptions{}); err != nil {
+		t.Fatalf("ImportEnv: %v", err)
+	}
+	got, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Profiles["work"].Marked["GH_TOKEN"] {
+		t.Fatalf("the writer's in-file chain must still mark the key: %#v", got.Profiles["work"])
 	}
 }
 
