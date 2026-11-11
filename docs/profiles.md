@@ -67,6 +67,17 @@ the menu:
   picker cannot offer (other layer, deleted) show as dimmed `(external)`
   rows you keep or drop explicitly.
 - **Toggle default** — set or clear this profile as the default.
+- **Secrets** — lists the profile's own variables (its marks open checked)
+  plus the inherited ones it can take over. Selecting a parent's key
+  materializes it as an own entry with its value, comment, and mark, and a mark
+  is cleared only here: the name field cannot express one, so typing the key
+  without `~` keeps it. Marks are staged like every other edit — they land on
+  **Done**, and Cancel discards them — and marked rows show their `~` while
+  encrypted values stay masked. One row, **Encrypt now**, schedules the encrypt
+  step to run once the commit has written the file; without a key it notes the
+  plaintext and leaves the marks in place. The lifecycle and the local-override
+  idiom live in
+  [`secrets.md`](./secrets.md#marking-arbitrary-values).
 - **Delete variable** — remove one or more of the profile's own variables.
   Keys whose fence would outlive them carry a `· unset` mark on their row, and
   deleting one says so before you leave the screen.
@@ -113,7 +124,8 @@ an `extends`, or an `unset`, so **Done** is rejected on an empty profile.
 
 `enver validate` audits config health: dangling `extends` and `extends`
 cycles (errors); profiles with nothing to contribute — no env, no extends, no
-unset (warning); and a profile that both defines and unsets the same key in
-one layer (`contradictory-unset`, warning). It also checks the global file in
+unset (warning); a profile that both defines and unsets the same key in
+one layer (`contradictory-unset`, warning); and a `~`-marked key still stored in
+plaintext (`plaintext-secret`, warning). It also checks the global file in
 isolation and flags a global profile that extends a local-only name (fine in
 this directory, broken elsewhere). Exits non-zero if any error is found.
