@@ -65,16 +65,24 @@ $ enver show work
 PROJECT_PATH=/hom…(len=16)  # from work (global) ~ marked, not encrypted
 ```
 
-`enver encrypt` seals marked keys under their marked spelling
-(`~PROJECT_PATH: enc:v3:…`), under the same key and KDF-era rules as any other
-value, and the annotation disappears once the value is ciphertext. `enver
-decrypt` restores the plaintext and **keeps the mark**, so a marked variable
-stays a candidate and the next `encrypt` picks it up again. Remove the `~` to
-drop the key from the candidate set for good — a value that is already sealed
-stays sealed and masked until you `decrypt` it, so un-marking is not
-un-encrypting. While a marked key is stored in plaintext, `enver validate`
+`enver encrypt` seals a marked key the profile spells out itself under its
+marked spelling (`~PROJECT_PATH: enc:v3:…`), under the same key and KDF-era
+rules as any other value, and the annotation disappears once the value is
+ciphertext. `enver decrypt` restores the plaintext and **keeps the mark**, so a
+marked variable stays a candidate and the next `encrypt` picks it up again.
+Remove the `~` to drop the key from the candidate set for good — a value that is
+already sealed stays sealed and masked until you `decrypt` it, so un-marking is
+not un-encrypting. While a marked key is stored in plaintext, `enver validate`
 reports a warning (`"PROJECT_PATH" is marked secret but stored in plaintext`);
 warnings do not change its exit code.
+
+An entry that only reaches a profile through an env-level merge key
+(`env: {<<: *anchor}`) is outside that scope: `enver encrypt` walks the entries
+the profile spells out, so it leaves the merged value plaintext and counts it as
+no work, while `enver validate` keeps warning about the marked key. Write such a
+value as the profile's own env entry when it has to be encrypted — sealing it
+where it stands would rewrite a definition other profiles read through the same
+anchor, which is a different decision than encrypting this profile.
 
 ### The mark follows the winning entry
 

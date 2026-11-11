@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1085,6 +1086,53 @@ func TestEditDeleteMatchesMarkedKey(t *testing.T) {
 	if got.Env["KEEP"] != "1" {
 		t.Fatalf("the surviving key did not make it through the commit: %#v", got.Env)
 	}
+}
+
+// TestEditFoldsKeyCaseOnWindows pins the working copy to the loader's key
+// semantics: on Windows a case variant is the same variable, so editing PATH
+// over an entry spelled Path rewrites that entry — and the commit writes one
+// env entry per variable, not two spellings the decoder refuses.
+func TestEditFoldsKeyCaseOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("env names are case-sensitive elsewhere")
+	}
+	t.Run("write", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      Path: old\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		prof, isDefault, ok, err := config.ReadProfile(path, "p")
+		if err != nil || !ok {
+			t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+		}
+		s := plainState(t, "p", prof, prof.Comments, isDefault)
+		s.upsert(ui.EnvEntry{Key: "PATH", Value: "new"})
+		if len(s.entries) != 1 {
+			t.Fatalf("working copy holds %d entries, want one: %+v", len(s.entries), s.entries)
+		}
+		if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
+			t.Fatalf("commitEdit: %v", err)
+		}
+		got, _, _, err := config.ReadProfile(path, "p")
+		if err != nil {
+			t.Fatalf("re-read after commit: %v", err)
+		}
+		if len(got.Env) != 1 || got.Env["PATH"] != "new" {
+			t.Fatalf("env after commit = %#v, want exactly {PATH: new}", got.Env)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		s := plainState(t, "p", config.Profile{Env: map[string]string{"Path": "old"}}, nil, false)
+		if _, ok := s.find("PATH"); !ok {
+			t.Fatalf("find misses the case variant: %+v", s.entries)
+		}
+		s.deleteKey("PATH")
+		if len(s.entries) != 0 {
+			t.Fatalf("deleting the case variant left %+v behind", s.entries)
+		}
+	})
 }
 
 // TestMenuErrorAction pins how a failed menu Select is classified: real
