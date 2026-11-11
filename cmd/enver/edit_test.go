@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -160,6 +161,27 @@ func TestMenuOptionsMaskSecretValues(t *testing.T) {
 	}
 	if !strings.Contains(labels, "visible") {
 		t.Fatalf("non-secret value missing: %s", labels)
+	}
+}
+
+// TestMenuOptionsMasksMarkedValue pins the mark's display half: a value whose
+// key carries the secret mark masks even when neither the name nor the value
+// trips the sensitivity heuristic, on own and inherited rows alike — and the
+// same value stays visible without the mark.
+func TestMenuOptionsMasksMarkedValue(t *testing.T) {
+	marked := newEditState("p", config.Profile{
+		Env:    map[string]string{"K": "hunter2"},
+		Marked: map[string]bool{"K": true},
+	}, nil, false)
+	labels := optionLabels(marked.menuOptions([]ui.EnvEntry{{Key: "GH", Value: "hunter2", Secret: true}}, nil))
+	if strings.Contains(labels, "hunter2") {
+		t.Fatalf("menu leaked a marked value: %s", labels)
+	}
+
+	plain := newEditState("p", config.Profile{Env: map[string]string{"K": "hunter2"}}, nil, false)
+	plainLabels := optionLabels(plain.menuOptions([]ui.EnvEntry{{Key: "GH", Value: "hunter2"}}, nil))
+	if !strings.Contains(plainLabels, "hunter2") {
+		t.Fatalf("an unmarked value must stay visible: %s", plainLabels)
 	}
 }
 
@@ -733,6 +755,7 @@ func TestCommitEditRoundTripsUnset(t *testing.T) {
 func TestInheritedEntriesSortedByKey(t *testing.T) {
 	out := inheritedEntries(
 		map[string]string{"ZED": "1", "ALPHA": "2", "MID": "3"},
+		nil,
 		map[string]string{"MID": "own"},
 	)
 	if len(out) != 2 || out[0].Key != "ALPHA" || out[1].Key != "ZED" {
@@ -744,7 +767,7 @@ func TestInheritedEntriesExcludesOwnKeys(t *testing.T) {
 	resolved := map[string]string{"A": "1", "B": "2", "C": "3"}
 	own := map[string]string{"B": "over"}
 
-	got := inheritedEntries(resolved, own)
+	got := inheritedEntries(resolved, nil, own)
 
 	keys := make([]string, 0, len(got))
 	for _, e := range got {
@@ -752,6 +775,160 @@ func TestInheritedEntriesExcludesOwnKeys(t *testing.T) {
 	}
 	if !slices.Equal(keys, []string{"A", "C"}) {
 		t.Errorf("inheritedEntries keys = %v, want [A C]", keys)
+	}
+}
+
+// TestEditMarkMapAuthoritative pins the map handed to the writer: non-nil even
+// when no entry is marked — nil would mean "no information" and hand the
+// decision back to the file — and keyed by runtime name, never by the marked
+// spelling.
+func TestEditMarkMapAuthoritative(t *testing.T) {
+	s := newEditState("p", config.Profile{
+		Env:    map[string]string{"A": "1", "B": "2"},
+		Marked: map[string]bool{"B": true},
+	}, nil, false)
+	m := s.markMap()
+	if m == nil {
+		t.Fatal("a profile with a mark must still hand the writer a non-nil map")
+	}
+	if !m["B"] || m["A"] || len(m) != 1 {
+		t.Fatalf("markMap = %#v, want exactly the runtime name B", m)
+	}
+	if _, has := m["~B"]; has {
+		t.Fatalf("markMap is keyed by the marked spelling: %#v", m)
+	}
+	empty := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false).markMap()
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("unmarked working copy = %#v, want a non-nil empty map", empty)
+	}
+}
+
+// TestEditStateMarksSurviveCommit pins the carry end to end: a mark spelled on a
+// key in the file reaches the working copy and comes back out of a commit that
+// rewrites the whole env mapping.
+func TestEditStateMarksSurviveCommit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"K": "v", "PLAIN": "x"},
+		Marked: map[string]bool{"K": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	s := newEditState("p", prof, prof.Comments, isDefault)
+	if !s.entries[0].Secret {
+		t.Fatalf("mark lost on load: %+v", s.entries)
+	}
+	if s.entries[1].Secret {
+		t.Fatalf("unmarked key read as marked: %+v", s.entries)
+	}
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "~K") {
+		t.Fatalf("the secret mark did not survive the commit:\n%s", raw)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Marked["K"] || got.Marked["PLAIN"] {
+		t.Fatalf("marks after commit = %#v", got.Marked)
+	}
+}
+
+// TestEditOverrideInheritsMark pins the seed half of the transaction: overriding
+// an inherited marked key starts from its value and its mark, and the commit
+// writes the override with that mark so the child does not silently declassify
+// the variable.
+func TestEditOverrideInheritsMark(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "base", config.Profile{
+		Env:    map[string]string{"GH_TOKEN": "from-base"},
+		Marked: map[string]bool{"GH_TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.UpsertProfile(path, "work", config.Profile{
+		Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "1"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	base, _, _, err := config.ReadProfile(path, "base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, _, err := config.ReadProfile(path, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Profiles: map[string]config.Profile{"base": base, "work": prof}}
+	s := newEditState("work", prof, prof.Comments, isDefault)
+	seed := overrideSeed(inheritedForState(cfg, s), nil, "GH_TOKEN")
+	if !seed.Secret || seed.Value != "from-base" {
+		t.Fatalf("override seed = %+v, want the inherited value and its mark", seed)
+	}
+
+	s.upsert(seed)
+	if err := commitEdit(path, cfg, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Marked["GH_TOKEN"] {
+		t.Fatalf("override written without its inherited mark: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+}
+
+// TestEditDeleteMatchesMarkedKey pins that entries hold the runtime name, so a
+// deletion matches a key the file spells with a mark and takes the mark with it.
+func TestEditDeleteMatchesMarkedKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"GH_TOKEN": "secret", "KEEP": "1"},
+		Marked: map[string]bool{"GH_TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newEditState("p", prof, prof.Comments, isDefault)
+	entry, ok := s.find("GH_TOKEN")
+	if !ok || !entry.Secret {
+		t.Fatalf("the runtime name does not carry the mark: %+v", s.entries)
+	}
+
+	s.deleteKey("GH_TOKEN")
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "GH_TOKEN") {
+		t.Fatalf("deleted marked key survived, marked or not:\n%s", raw)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got.Env["GH_TOKEN"]; has {
+		t.Fatalf("deleted key still resolves: %#v", got.Env)
 	}
 }
 

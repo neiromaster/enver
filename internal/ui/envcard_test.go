@@ -208,6 +208,22 @@ func TestEnvCardSubmitTrimsName(t *testing.T) {
 	}
 }
 
+// TestEnvCardCarriesSecretFlag pins the carry: the three text fields cannot
+// express the secret mark, so it has to ride on the model and come back out of
+// result — otherwise every pass through the card strips it from the entry.
+func TestEnvCardCarriesSecretFlag(t *testing.T) {
+	m := newEnvCardModel(EnvEntry{Key: "K", Value: "v", Secret: true})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.submitted {
+		t.Fatal("setup: card should submit")
+	}
+	if r := m.result(); !r.Secret || r.Key != "K" || r.Value != "v" {
+		t.Fatalf("result = %+v, want the seeded entry with Secret kept", r)
+	}
+}
+
 func TestEnvCardCollectingSharesTheRule(t *testing.T) {
 	m := newCollectingEnvCardModel(EnvEntry{}, nil)
 	m = typeChars(m, "A;B")

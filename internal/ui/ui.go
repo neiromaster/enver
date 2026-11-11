@@ -7,6 +7,9 @@ type EnvEntry struct {
 	Key     string
 	Value   string
 	Comment string
+	// Secret reports that the entry carries the secret mark. Key stays the
+	// runtime name: the mark is file syntax, never part of the name.
+	Secret bool
 }
 
 // Option is one selectable item in a Select prompt.
