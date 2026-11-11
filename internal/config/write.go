@@ -72,6 +72,7 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) e
 	body := root.Content[0]
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
+	marks := newMarkResolver(root, name, p.Marked)
 
 	writeExtendsNode(prof, p.Extends)
 	writeUnsetNode(prof, p.Unset)
@@ -88,13 +89,13 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) e
 		slices.Sort(keys)
 		// Every mark is resolved against the entries still in place; clearing
 		// the mapping first would erase the only record of them.
-		marks := make(map[string]bool, len(keys))
+		keyMarks := make(map[string]bool, len(keys))
 		for _, k := range keys {
-			marks[k] = writeMark(root, name, k, p, env)
+			keyMarks[k] = marks.writeMark(k, env)
 		}
 		env.Content = nil
 		for _, k := range keys {
-			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: envname.JoinMarked(k, marks[k]), Tag: "!!str"}
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: envname.JoinMarked(k, keyMarks[k]), Tag: "!!str"}
 			valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: p.Env[k], Tag: "!!str"}
 			if c := p.Comments[k]; c != "" {
 				keyNode.HeadComment = c

@@ -91,30 +91,74 @@ func setEnvScalar(mapping *yaml.Node, name string, marked bool, val string) {
 	)
 }
 
-// writeMark reports whether env key k of profile name must be written with the
-// secret mark. An authoritative p.Marked (non-nil) answers directly. Given no
-// mark information, the file being rewritten decides: the profile's own entry
-// first, then an ancestor inside this same file. A cross-layer ancestor is
-// invisible here, which is why callers holding the merged config pass Marked.
-// The chain lookup is best effort: a dangling extends or a cycle yields no
-// mark, never a write failure.
-func writeMark(root *yaml.Node, name, k string, p Profile, env *yaml.Node) bool {
-	if p.Marked != nil {
-		return p.Marked[k]
+// markResolver answers the secret-mark question for one writer call, so the
+// in-file chain is resolved at most twice no matter how many keys are written.
+type markResolver struct {
+	// known is the caller's authoritative answer, nil when it has none.
+	known map[string]bool
+	name  string
+	root  *yaml.Node
+	// before is the chain as it stood before the writer rewrote extends: the
+	// mark it holds belongs to the profile even when the ancestor that supplied
+	// it is about to be removed.
+	before map[string]bool
+	// after is the chain as it stands now, decoded on first use: an ancestor
+	// this write declares is the only place a new key's mark can come from.
+	after         map[string]bool
+	afterResolved bool
+}
+
+// newMarkResolver snapshots the chain before the caller mutates the profile,
+// unless the caller already knows every mark.
+func newMarkResolver(root *yaml.Node, name string, known map[string]bool) *markResolver {
+	m := &markResolver{known: known, name: name, root: root}
+	if known == nil {
+		m.before = chainMarks(root, name)
+	}
+	return m
+}
+
+// writeMark reports whether env key k must be written with the secret mark. An
+// authoritative map answers directly. Given no mark information, the file being
+// rewritten decides: the profile's own entry first, then an ancestor inside this
+// same file, as the chain stood before the write and then as it stands after. A
+// cross-layer ancestor is invisible here, which is why callers holding the
+// merged config pass their marks.
+func (m *markResolver) writeMark(k string, env *yaml.Node) bool {
+	if m.known != nil {
+		return m.known[k]
 	}
 	if idx := findEnvIndex(env, k); idx >= 0 {
 		_, marked := envname.SplitMarked(env.Content[idx-1].Value)
 		return marked
 	}
+	if m.before[k] {
+		return true
+	}
+	return m.afterMarks()[k]
+}
+
+func (m *markResolver) afterMarks() map[string]bool {
+	if !m.afterResolved {
+		m.after = chainMarks(m.root, m.name)
+		m.afterResolved = true
+	}
+	return m.after
+}
+
+// chainMarks resolves a profile's in-file extends chain to the marks it folds
+// in. Best effort: an unreadable document, a dangling extends, or a cycle is no
+// mark, never a write failure.
+func chainMarks(root *yaml.Node, name string) map[string]bool {
 	var c Config
 	if err := root.Decode(&c); err != nil {
-		return false
+		return nil
 	}
 	resolved, err := c.ResolveProfile(name)
 	if err != nil {
-		return false
+		return nil
 	}
-	return resolved.Marked[k]
+	return resolved.Marked
 }
 
 // UpsertProfile merges profile `name` into the config file at path, preserving
@@ -144,6 +188,7 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 	body := root.Content[0]
 
 	prof := ensureMappingEntry(ensureMappingEntry(body, "profiles"), name)
+	marks := newMarkResolver(root, name, p.Marked)
 
 	// forceExtends writes extends even when empty: the explicit (none) choice.
 	// Without it, an empty p.Extends preserves the existing extends (import
@@ -164,7 +209,7 @@ func UpsertProfile(path, name string, p Profile, setDefault, forceExtends bool) 
 		}
 		slices.Sort(keys)
 		for _, k := range keys {
-			setEnvScalar(env, k, writeMark(root, name, k, p, env), p.Env[k])
+			setEnvScalar(env, k, marks.writeMark(k, env), p.Env[k])
 			if c := p.Comments[k]; c != "" {
 				// idx is the value node's position; idx-1 is the key node.
 				// Attaching HeadComment to the key node renders the comment on
