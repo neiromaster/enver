@@ -303,3 +303,92 @@ func TestEditDecryptsAndReencrypts(t *testing.T) {
 		t.Fatalf("the sealed value does not read back: exit %d, %q, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
 	}
 }
+
+// TestAddRefusesToClobberSealedValueWithoutKey pins the missing-key gate at its
+// call site: with no key available, typing a new value for a key the profile
+// already holds sealed must fail the run and leave the ciphertext untouched. The
+// gate lives in doAdd, so only driving the command reaches it.
+func TestAddRefusesToClobberSealedValueWithoutKey(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("default: work\nprofiles:\n  base:\n    env:\n      PLAIN: b\n  work:\n    env:\n      TOKEN: plainvalue1\n")
+	requireKeygen(t, s)
+	if r := s.run("encrypt", "work"); r.ExitCode != 0 {
+		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	before := s.readLocal()
+	sealed := ""
+	for _, line := range strings.Split(before, "\n") {
+		if strings.Contains(line, "TOKEN:") {
+			sealed = strings.TrimSpace(line)
+		}
+	}
+	if sealed == "" || !strings.Contains(sealed, "enc:v3:") {
+		t.Fatalf("setup: TOKEN is not sealed: %s", before)
+	}
+	// No key source: the generated key goes away, and the sandbox never set
+	// ENVER_KEY.
+	if err := os.Remove(s.keyPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pty available: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+	defer func() { _ = tty.Close() }()
+	if err := pty.Setsize(ptmx, &pty.Winsize{Rows: 40, Cols: 120}); err != nil {
+		t.Skipf("cannot size the pty: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, enverBin, "add", "work")
+	cmd.Dir = s.project
+	cmd.Env = s.env
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	screen := &syncBuffer{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(screen, ptmx)
+	}()
+
+	waitForScreen(t, screen, "Extends")
+	typeKeys(t, ptmx, "\r") // confirm the empty extends pick
+	waitForScreen(t, screen, "blank name finishes")
+	for _, c := range "TOKEN" {
+		typeKeys(t, ptmx, string(c))
+	}
+	typeKeys(t, ptmx, "\t")
+	for _, c := range "typed" {
+		typeKeys(t, ptmx, string(c))
+	}
+	typeKeys(t, ptmx, "\t")
+	typeKeys(t, ptmx, "\r") // submit the card
+	waitForScreen(t, screen, "Added (1)")
+	typeKeys(t, ptmx, "\r") // blank name finishes the collection
+
+	werr := cmd.Wait()
+	_ = tty.Close()
+	<-done
+	if werr == nil || ctx.Err() != nil {
+		t.Fatalf("add did not fail: err=%v ctx=%v\n%s", werr, ctx.Err(), screen.String())
+	}
+	out := screen.String()
+	for _, want := range []string{"refusing to overwrite the encrypted value of TOKEN", "no key is available"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("add did not report %q:\n%s", want, out)
+		}
+	}
+	after := s.readLocal()
+	if !strings.Contains(after, sealed) {
+		t.Fatalf("the sealed value was overwritten; want line %q, got:\n%s", sealed, after)
+	}
+	if strings.Contains(after, "typed") {
+		t.Fatalf("the typed value reached the file:\n%s", after)
+	}
+}

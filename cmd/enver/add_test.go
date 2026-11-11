@@ -219,28 +219,69 @@ func TestBuildSummary(t *testing.T) {
 	}
 }
 
-// TestBuildSummaryMasksByMark pins the summary's mask source: a typed mark masks
-// its own row, an inherited mark masks the inherited row, and neither value
-// trips the name/value heuristic, so only the mark can be doing the masking.
+// TestBuildSummaryMasksByMark pins the summary's display rule: a marked row is
+// spelled ~KEY and masked, an inherited mark does the same for the inherited row,
+// and neither value trips the name/value heuristic, so only the mark can be doing
+// either. The override lookup and the own-key set keep the runtime name.
 func TestBuildSummaryMasksByMark(t *testing.T) {
 	const ownValue, inheritedValue = "plain-own-value", "plain-inherited-value"
-	entries := []ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue, Secret: true}}
-	parent := map[string]string{"INHERITED_MARKED": inheritedValue}
+	entries := []ui.EnvEntry{
+		{Key: "OWN_MARKED", Value: ownValue, Secret: true},
+		{Key: "SHADOWED", Value: "mine"},
+		{Key: "SHADOWED_MARKED", Value: "mine", Secret: true},
+	}
+	parent := map[string]string{
+		"INHERITED_MARKED": inheritedValue,
+		"SHADOWED":         "theirs",
+		"SHADOWED_MARKED":  "theirs",
+	}
 
 	got := buildSummary(entries, parent, map[string]bool{"INHERITED_MARKED": true})
-	if len(got) != 2 {
-		t.Fatalf("got %d entries, want 2: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d entries, want 4: %+v", len(got), got)
 	}
-	if strings.Contains(got[0].Value, ownValue) {
-		t.Fatalf("a typed mark must mask its own row: %+v", got[0])
+	if got[0].Key != "~OWN_MARKED" || strings.Contains(got[0].Value, ownValue) {
+		t.Fatalf("a typed mark must spell and mask its own row: %+v", got[0])
 	}
-	if strings.Contains(got[1].Value, inheritedValue) {
-		t.Fatalf("an inherited mark must mask the inherited row: %+v", got[1])
+	if got[1].Kind != ui.EntryOverride || got[1].Key != "SHADOWED" {
+		t.Fatalf("a shadowed row must stay an override under its runtime name: %+v", got[1])
+	}
+	if got[2].Kind != ui.EntryOverride || got[2].Key != "~SHADOWED_MARKED" {
+		t.Fatalf("a marked shadowed row keeps both the mark and the override kind: %+v", got[2])
+	}
+	if got[3].Key != "~INHERITED_MARKED" || strings.Contains(got[3].Value, inheritedValue) {
+		t.Fatalf("an inherited mark must spell and mask the inherited row: %+v", got[3])
+	}
+	if got[3].Kind != ui.EntryInherited {
+		t.Fatalf("inherited row kind = %v: %+v", got[3].Kind, got[3])
 	}
 
-	plain := buildSummary([]ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue}}, parent, nil)
+	plain := buildSummary(
+		[]ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue}},
+		map[string]string{"INHERITED_MARKED": inheritedValue}, nil)
+	if plain[0].Key != "OWN_MARKED" || plain[1].Key != "INHERITED_MARKED" {
+		t.Fatalf("an unmarked row must stay bare: %+v", plain)
+	}
 	if plain[0].Value != ownValue || plain[1].Value != inheritedValue {
 		t.Fatalf("unmarked values must stay readable: %+v", plain)
+	}
+}
+
+// TestBuildSummaryMasksCiphertext pins the at-rest half: a value already sealed
+// masks in the summary exactly as show masks it, own row and inherited row alike,
+// whether or not the key carries a mark.
+func TestBuildSummaryMasksCiphertext(t *testing.T) {
+	sealed := "enc:v3:argon2id$m=65536,t=3,p=2$c2FsdA==$Y2lwaGVy"
+	got := buildSummary(
+		[]ui.EnvEntry{{Key: "OWN_SEALED", Value: sealed}},
+		map[string]string{"INHERITED_SEALED": sealed}, nil)
+	for _, row := range got {
+		if strings.Contains(row.Value, sealed) {
+			t.Fatalf("a sealed value must never print raw: %+v", row)
+		}
+		if !strings.HasPrefix(row.Value, "enc:…") {
+			t.Fatalf("a sealed value must mask like show masks it: %+v", row)
+		}
 	}
 }
 
@@ -378,10 +419,11 @@ func TestAddRefusesToClobberCiphertextWithoutKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := config.Config{Profiles: map[string]config.Profile{
-		"work": {Env: map[string]string{"TOKEN": sealed, "PLAIN": "old"}},
-	}}
-	entries := []ui.EnvEntry{{Key: "TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "typed"}}
+	path := filepath.Join(dir, ".enver.yaml")
+	if err := config.UpsertProfile(path, "work", config.Profile{Env: map[string]string{"PLAIN": "old"}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	entries := []ui.EnvEntry{{Key: "TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "typed"}, {Key: "~MARKED", Value: "typed"}}
 
 	t.Setenv("ENVER_KEY", "")
 	savedKeyPath := globalFlags.keyPath
@@ -391,15 +433,28 @@ func TestAddRefusesToClobberCiphertextWithoutKey(t *testing.T) {
 	crypto.KeyFilePath = func() string { return filepath.Join(dir, "absent") }
 	t.Cleanup(func() { crypto.KeyFilePath = savedKeyFile })
 
-	err = ciphertextClobberError(target, "work", entries)
+	if err := ciphertextClobberError(path, "work", entries); err != nil {
+		t.Fatalf("a profile holding no ciphertext has nothing to clobber: %v", err)
+	}
+	// The file gains the sealed value after the command loaded it: the gate
+	// answers from the file as it stands, not from the load snapshot.
+	if err := config.UpsertProfile(path, "work", config.Profile{Env: map[string]string{"TOKEN": sealed}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	err = ciphertextClobberError(path, "work", entries)
 	const want = "refusing to overwrite the encrypted value of TOKEN: no key is available (`enver decrypt`, or set --key/ENVER_KEY)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want %q", err, want)
 	}
 
 	globalFlags.keyPath = kpath
-	if err := ciphertextClobberError(target, "work", entries); err != nil {
+	if err := ciphertextClobberError(path, "work", entries); err != nil {
 		t.Fatalf("with a key available the typed overwrite proceeds: %v", err)
+	}
+
+	globalFlags.keyPath = ""
+	if err := ciphertextClobberError(path, "missing", entries); err != nil {
+		t.Fatalf("a profile the file does not hold has nothing to clobber: %v", err)
 	}
 }
 

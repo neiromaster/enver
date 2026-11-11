@@ -152,7 +152,11 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 			kind = ui.EntryOverride
 		}
 		marked := e.Secret || parentMarked[e.Key]
-		out = append(out, ui.SummaryEntry{Key: e.Key, Value: config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, marked, false)), Kind: kind})
+		out = append(out, ui.SummaryEntry{
+			Key:   envname.JoinMarked(e.Key, marked),
+			Value: config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, marked, crypto.IsEncrypted(e.Value))),
+			Kind:  kind,
+		})
 	}
 	inherited := make([]string, 0, len(parentEnv))
 	for k := range parentEnv {
@@ -162,7 +166,11 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 	}
 	slices.Sort(inherited)
 	for _, k := range inherited {
-		out = append(out, ui.SummaryEntry{Key: k, Value: config.MaskValue(parentEnv[k], config.ShouldMask(k, parentEnv[k], parentMarked[k], false)), Kind: ui.EntryInherited})
+		out = append(out, ui.SummaryEntry{
+			Key:   envname.JoinMarked(k, parentMarked[k]),
+			Value: config.MaskValue(parentEnv[k], config.ShouldMask(k, parentEnv[k], parentMarked[k], crypto.IsEncrypted(parentEnv[k]))),
+			Kind:  ui.EntryInherited,
+		})
 	}
 	return out
 }
@@ -200,16 +208,24 @@ func commitAdd(cfgPath, name string, extends config.Extends, entries []ui.EnvEnt
 // ciphertextClobberError refuses an add that would write a typed value over one
 // only a key can read: without a key the file cannot reproduce that secret, so
 // the typed value would destroy it. With a key available the overwrite proceeds —
-// the user typed the value on purpose.
-func ciphertextClobberError(target config.Config, name string, entries []ui.EnvEntry) error {
+// the user typed the value on purpose. It reads the file as it stands at the
+// gate, not as the command found it, since the collection can run for minutes.
+func ciphertextClobberError(cfgPath, name string, entries []ui.EnvEntry) error {
 	if app.KeyAvailable(appOpts()) {
 		return nil
 	}
-	existing := target.Profiles[name].Env
+	prof, _, ok, err := config.ReadProfile(cfgPath, name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
 	var keys []string
 	for _, e := range entries {
-		if v, ok := envname.Get(existing, e.Key); ok && crypto.IsEncrypted(v) {
-			keys = append(keys, e.Key)
+		key, _ := envname.SplitMarked(e.Key)
+		if v, exists := envname.Get(prof.Env, key); exists && crypto.IsEncrypted(v) {
+			keys = append(keys, key)
 		}
 	}
 	if len(keys) == 0 {
@@ -314,7 +330,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	if len(entries) == 0 && len(extends) == 0 {
 		return fmt.Errorf("a profile needs at least one env var or an extends")
 	}
-	if err := ciphertextClobberError(targetCfg, name, entries); err != nil {
+	if err := ciphertextClobberError(cfgPath, name, entries); err != nil {
 		return err
 	}
 

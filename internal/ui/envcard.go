@@ -26,7 +26,7 @@ type envCardModel struct {
 
 func newEnvCardModel(e EnvEntry) *envCardModel {
 	m := &envCardModel{theme: defaultTheme(), secret: e.Secret, encrypted: e.Encrypted}
-	seeds := []string{e.Key, e.Value, e.Comment}
+	seeds := []string{envname.JoinMarked(e.Key, e.Secret), e.Value, e.Comment}
 	for i := 0; i < 3; i++ {
 		ti := textinput.New()
 		ti.Prompt = ""
@@ -70,10 +70,11 @@ func (m *envCardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// caller needs a post-hoc check and a doomed session cannot
 				// accumulate. Blank still finishes via the name field above.
 				// One leading mark is the field's own syntax: it names a secret
-				// candidate, never part of the runtime name. A doubled mark is
-				// not a name, and neither is the mark alone.
+				// candidate, never part of the runtime name. What is left after
+				// it must pass the identifier rule, so the mark alone and a
+				// doubled mark both fail here.
 				name, typedMark := envname.SplitMarked(strings.TrimSpace(m.fields[0].Value()))
-				if !envname.Valid(name) || envname.IsMarked(name) {
+				if !envname.Valid(name) {
 					m.keyErr = true
 					for i := range m.fields {
 						m.fields[i].Blur()
@@ -134,7 +135,7 @@ func (m *envCardModel) View() tea.View {
 	b.WriteString("\n")
 	if m.keyErr {
 		b.WriteString("\n")
-		b.WriteString(m.theme.help.Render("invalid name: want [A-Za-z_][A-Za-z0-9_]* (blank finishes)"))
+		b.WriteString(m.theme.help.Render("invalid name: want [A-Za-z_][A-Za-z0-9_]* or ~NAME (blank finishes)"))
 		b.WriteString("\n")
 	}
 	b.WriteString(m.theme.help.Render("tab next · shift+tab prev · enter submit · blank name finishes · esc cancel"))

@@ -172,8 +172,11 @@ func TestEnvCardSubmitRejectsInvalidKey(t *testing.T) {
 		if m.cursor != 0 {
 			t.Fatalf("key %q: cursor = %d, want 0 back on the name field", key, m.cursor)
 		}
-		if !strings.Contains(stripAnsi(m.View().Content), "[A-Za-z_][A-Za-z0-9_]*") {
-			t.Fatalf("key %q: view must state the identifier rule, got:\n%s", key, stripAnsi(m.View().Content))
+		view := stripAnsi(m.View().Content)
+		for _, want := range []string{"[A-Za-z_][A-Za-z0-9_]*", "~NAME"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("key %q: view must state %q, got:\n%s", key, want, view)
+			}
 		}
 	}
 }
@@ -252,12 +255,29 @@ func TestEnvCardRejectsBareMark(t *testing.T) {
 	}
 }
 
+// TestEnvCardSeedsMarkedName pins the card's half of the display rule: a carried
+// mark is spelled in the name field, so the state the OR rule preserves is
+// visible where it is preserved.
+func TestEnvCardSeedsMarkedName(t *testing.T) {
+	m := newEnvCardModel(EnvEntry{Key: "K", Value: "v", Secret: true})
+	if got := m.fields[0].Value(); got != "~K" {
+		t.Fatalf("seeded name = %q, want ~K", got)
+	}
+	plain := newEnvCardModel(EnvEntry{Key: "K", Value: "v"})
+	if got := plain.fields[0].Value(); got != "K" {
+		t.Fatalf("seeded name = %q, want K", got)
+	}
+}
+
 // TestEnvCardTypedPlainNameKeepsCarriedMark pins the OR rule: retyping a plain
 // name over a marked entry keeps the mark, so a card pass can never unmark.
 func TestEnvCardTypedPlainNameKeepsCarriedMark(t *testing.T) {
-	m := typeChars(newEnvCardModel(EnvEntry{Secret: true}), "KEY")
+	m := newEnvCardModel(EnvEntry{Key: "K", Value: "v", Secret: true})
+	for range "~K" {
+		m = updCard(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	m = typeChars(m, "KEY")
 	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
-	m = updCard(m, tea.KeyPressMsg{Text: "V"})
 	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = updCard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.submitted {
