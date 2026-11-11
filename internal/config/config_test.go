@@ -1132,6 +1132,9 @@ profiles:
 	if plain.Marked["X"] {
 		t.Fatalf("a plain override must clear the merged mark: %#v", plain.Marked)
 	}
+	if plain.Marked != nil {
+		t.Fatalf("a profile left with no marks must hold nil Marked: %#v", plain.Marked)
+	}
 	marked := c.Profiles["marked"]
 	if marked.Env["Y"] != "2" || !marked.Marked["Y"] {
 		t.Fatalf("a marked override must win with its mark: env=%#v marks=%#v", marked.Env, marked.Marked)
@@ -1154,5 +1157,13 @@ func TestUnmarshalRejectsCaseVariantCollisionOnWindows(t *testing.T) {
 	err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~Path: a\n      PATH: b\n"), &c)
 	if err == nil || !strings.Contains(err.Error(), "same variable") {
 		t.Fatalf("want collision error, got %v", err)
+	}
+}
+
+func TestUnmarshalRejectsEnvKeyItCannotWalk(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte("e: &e env\nprofiles:\n  work:\n    *e:\n      A: 1\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "enver can read") {
+		t.Fatalf("want an unreadable-env error, got %v", err)
 	}
 }
