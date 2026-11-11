@@ -197,7 +197,7 @@ func TestBuildSummary(t *testing.T) {
 		{Key: "API_TOKEN", Value: "sk-abcdefghijklmnopqrstuvwxyz"},
 	}
 	parent := map[string]string{"API_TOKEN": "sk-old", "LOG_LEVEL": "info"}
-	got := buildSummary(entries, parent, nil)
+	got := buildSummary(entries, parent, nil, nil)
 
 	if got[0].Key != "PORT" || got[0].Kind != ui.EntryAdded {
 		t.Fatalf("got[0] = %+v, want PORT/Added", got[0])
@@ -236,7 +236,7 @@ func TestBuildSummaryMasksByMark(t *testing.T) {
 		"SHADOWED_MARKED":  "theirs",
 	}
 
-	got := buildSummary(entries, parent, map[string]bool{"INHERITED_MARKED": true})
+	got := buildSummary(entries, parent, map[string]bool{"INHERITED_MARKED": true}, nil)
 	if len(got) != 4 {
 		t.Fatalf("got %d entries, want 4: %+v", len(got), got)
 	}
@@ -258,7 +258,7 @@ func TestBuildSummaryMasksByMark(t *testing.T) {
 
 	plain := buildSummary(
 		[]ui.EnvEntry{{Key: "OWN_MARKED", Value: ownValue}},
-		map[string]string{"INHERITED_MARKED": inheritedValue}, nil)
+		map[string]string{"INHERITED_MARKED": inheritedValue}, nil, nil)
 	if plain[0].Key != "OWN_MARKED" || plain[1].Key != "INHERITED_MARKED" {
 		t.Fatalf("an unmarked row must stay bare: %+v", plain)
 	}
@@ -274,7 +274,7 @@ func TestBuildSummaryMasksCiphertext(t *testing.T) {
 	sealed := "enc:v3:argon2id$m=65536,t=3,p=2$c2FsdA==$Y2lwaGVy"
 	got := buildSummary(
 		[]ui.EnvEntry{{Key: "OWN_SEALED", Value: sealed}},
-		map[string]string{"INHERITED_SEALED": sealed}, nil)
+		map[string]string{"INHERITED_SEALED": sealed}, nil, nil)
 	for _, row := range got {
 		if strings.Contains(row.Value, sealed) {
 			t.Fatalf("a sealed value must never print raw: %+v", row)
@@ -282,6 +282,68 @@ func TestBuildSummaryMasksCiphertext(t *testing.T) {
 		if !strings.HasPrefix(row.Value, "enc:…") {
 			t.Fatalf("a sealed value must mask like show masks it: %+v", row)
 		}
+	}
+}
+
+// TestBuildSummaryMarksWhatTheWriteKeeps pins the preview to the write it
+// previews: an own row's mark is the one the commit keeps — the target profile's
+// stored mark when it already holds the key, else the picked chain's — so a
+// retype with a plain name can neither unmark a stored secret nor show a mark the
+// write drops.
+func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
+	// PROJECT_PATH trips neither half of the name/value heuristic, so only the
+	// mark can mask it.
+	const key, typed = "PROJECT_PATH", "plain-typed-value"
+	entries := []ui.EnvEntry{{Key: key, Value: typed}}
+	noOther := config.Config{}
+
+	// The target file already holds the key marked, as a previous add left it.
+	path := filepath.Join(t.TempDir(), ".enver.yaml")
+	if err := config.UpsertProfile(path, "work", config.Profile{
+		Env:    map[string]string{key: "old"},
+		Marked: map[string]bool{key: true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := buildSummary(entries, map[string]string{}, nil, addMarks(&noOther, stored, "work", nil, entries))
+	if len(sum) != 1 || sum[0].Key != "~"+key {
+		t.Fatalf("a stored mark must survive a plain retype in the preview: %+v", sum)
+	}
+	if strings.Contains(sum[0].Value, typed) {
+		t.Fatalf("the stored mark must mask the preview value: %+v", sum[0])
+	}
+
+	if err := commitAdd(path, "work", nil, entries, noOther, stored, false); err != nil {
+		t.Fatalf("commitAdd: %v", err)
+	}
+	got, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Profiles["work"].Marked[key] {
+		t.Fatalf("the committed file must keep the stored mark: %+v", got.Profiles["work"])
+	}
+
+	// Mirror: the chain marks the key, the target stores it plainly, and an own
+	// entry outranks an inherited mark — so the preview stays bare exactly as the
+	// write leaves it.
+	other := config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{key: "parent"}, Marked: map[string]bool{key: true}},
+	}}
+	own := config.Config{Profiles: map[string]config.Profile{
+		"work": {Extends: config.Extends{"base"}, Env: map[string]string{key: "old"}},
+	}}
+	sum = buildSummary(entries, map[string]string{key: "parent"}, map[string]bool{key: true},
+		addMarks(&other, own, "work", config.Extends{"base"}, entries))
+	if len(sum) != 1 || sum[0].Key != key {
+		t.Fatalf("an own entry outranks the inherited mark, so the preview must stay bare: %+v", sum)
+	}
+	if sum[0].Value != typed {
+		t.Fatalf("an unmarked preview keeps its value readable: %+v", sum[0])
 	}
 }
 
