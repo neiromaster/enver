@@ -186,6 +186,49 @@ profiles:
 	}
 }
 
+func TestWriteProfileNonNilMarkedClearsMark(t *testing.T) {
+	// A non-nil Marked map is authoritative: an empty one says the key is not a
+	// secret, so the mark the file carried must go.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      ~K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"K": "v"}, Marked: map[string]bool{}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	if got := cfg.Profiles["p"]; got.Env["K"] != "v" || got.Marked != nil {
+		t.Fatalf("entry = env %#v marked %#v, want K unmarked", got.Env, got.Marked)
+	}
+}
+
+func TestWriteProfileNilMarkedPreserves(t *testing.T) {
+	// No mark information: the mark already on the entry survives the rewrite.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      ~K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"K": "new"}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	got := cfg.Profiles["p"]
+	if got.Env["K"] != "new" {
+		t.Fatalf("env = %#v, want K: new", got.Env)
+	}
+	if !got.Marked["K"] {
+		t.Fatalf("mark dropped on rewrite: env=%#v marked=%#v", got.Env, got.Marked)
+	}
+}
+
 func TestWriteProfileRejectsInvalidNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"OK": "1"}}, false, false); err != nil {

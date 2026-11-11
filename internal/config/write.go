@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/neiromaster/enver/internal/envname"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,9 +56,11 @@ func removeKey(mapping *yaml.Node, key string) {
 // WriteProfile replaces a profile's own env wholesale (keys absent from p.Env are
 // deleted), sets extends when non-empty or clears it when empty, writes unset
 // with the same wholesale rule (an empty Unsets clears the field), and sets or
-// clears the top-level default. p.Comments[k] (non-empty) renders above that
-// entry; a key with no comment is written with no comment. Creates the file
-// (and parent dirs) if absent.
+// clears the top-level default. Each key's mark comes from p.Marked when that
+// map is non-nil, and otherwise from the entry the file already holds (see
+// writeMark). p.Comments[k] (non-empty) renders above that entry; a key with no
+// comment is written with no comment. Creates the file (and parent dirs) if
+// absent.
 func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) error {
 	if err := checkProfileEnvNames(name, p); err != nil {
 		return err
@@ -78,14 +81,20 @@ func WriteProfile(path, name string, p Profile, setDefault, clearDefault bool) e
 		removeKey(prof, "env")
 	default:
 		env := ensureMappingEntry(prof, "env")
-		env.Content = nil
 		keys := make([]string, 0, len(p.Env))
 		for k := range p.Env {
 			keys = append(keys, k)
 		}
 		slices.Sort(keys)
+		// Every mark is resolved against the entries still in place; clearing
+		// the mapping first would erase the only record of them.
+		marks := make(map[string]bool, len(keys))
 		for _, k := range keys {
-			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: k, Tag: "!!str"}
+			marks[k] = writeMark(root, name, k, p, env)
+		}
+		env.Content = nil
+		for _, k := range keys {
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: envname.JoinMarked(k, marks[k]), Tag: "!!str"}
 			valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: p.Env[k], Tag: "!!str"}
 			if c := p.Comments[k]; c != "" {
 				keyNode.HeadComment = c
