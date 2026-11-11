@@ -1103,6 +1103,7 @@ func TestSecretsMenuListsInheritedKeys(t *testing.T) {
 	s := newEditState("p", config.Profile{
 		Env:    map[string]string{"OWN": "x", "K": "hunter2hunter2"},
 		Marked: map[string]bool{"K": true},
+		Unset:  config.Unsets{"OWN", "REGION"},
 	}, nil, false)
 	inherited := []ui.EnvEntry{
 		{Key: "ZZZ", Value: "z"},
@@ -1136,6 +1137,14 @@ func TestSecretsMenuListsInheritedKeys(t *testing.T) {
 	}
 	if got := findOption(t, opts, "GH_TOKEN"); strings.Contains(got.Label, "from-base") {
 		t.Fatalf("the picker must mask what the menu listing masks: %q", got.Label)
+	}
+	for _, fenced := range []string{"OWN", "REGION"} {
+		if got := findOption(t, opts, fenced); !got.Dim {
+			t.Fatalf("a fenced key must read as dimmed, like the menu shows it: %+v", got)
+		}
+	}
+	if got := findOption(t, opts, "K"); got.Dim {
+		t.Fatalf("an unfenced key must not dim: %+v", got)
 	}
 
 	seed := secretsChecked(s)
@@ -1249,6 +1258,48 @@ func TestSecretsEncryptWithoutKeyKeepsMarks(t *testing.T) {
 	}
 	if got.Env["TOKEN"] != "plain-value" || !got.Marked["TOKEN"] {
 		t.Fatalf("the mark must stay saved with the value plaintext: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+}
+
+// TestSecretsEncryptCancelledPassphraseKeepsMarks pins that declining the
+// passphrase prompt is the same benign situation as having no key: recovery
+// needs a salt, so the fixture keeps an encrypted value, and the marked
+// plaintext plus its mark must come through untouched with no error.
+func TestSecretsEncryptCancelledPassphraseKeepsMarks(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", "")
+	prevKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "missing-key") }
+	t.Cleanup(func() { crypto.KeyFilePath = prevKeyFile })
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return true }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+	prevPrompt := app.PromptPassphrase
+	app.PromptPassphrase = func(string) (string, error) { return "", ui.ErrCanceled }
+	t.Cleanup(func() { app.PromptPassphrase = prevPrompt })
+
+	path := filepath.Join(dir, "config.yaml")
+	sealed := ciphertextV3(t, "old")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"TOKEN": "plain-value", "SEALED": sealed},
+		Marked: map[string]bool{"TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := encryptMarked(path, "p"); err != nil {
+		t.Fatalf("a declined passphrase must not fail the encrypt step: %v", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != "plain-value" || !got.Marked["TOKEN"] {
+		t.Fatalf("the mark must stay saved with the value plaintext: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+	if got.Env["SEALED"] != sealed {
+		t.Fatalf("the existing ciphertext must be left alone: %#v", got.Env)
 	}
 }
 

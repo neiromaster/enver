@@ -266,10 +266,16 @@ func (s *editState) carriedMark(key string, inherited []ui.EnvEntry) bool {
 	return false
 }
 
+// maskedLabel renders one variable row: the value masked exactly as the menu
+// listing masks it, so no picker reveals a value another surface hides.
+func maskedLabel(e ui.EnvEntry) string {
+	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))
+}
+
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
 	var opts []ui.Option
 	for _, e := range s.entries {
-		opt := ui.Option{Value: e.Key, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))}
+		opt := ui.Option{Value: e.Key, Label: maskedLabel(e)}
 		// Fence state outranks the override mark and reads as a faded row: the
 		// variable stays listed so its suppression is visible where it happens.
 		switch {
@@ -281,7 +287,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		opts = append(opts, opt)
 	}
 	for _, e := range inherited {
-		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))}
+		opt := ui.Option{Value: "inherited:" + e.Key, Icon: ui.IconInherited, Label: maskedLabel(e)}
 		if envname.MatchesAny(s.unset, e.Key) {
 			opt.Dim = true
 		}
@@ -438,11 +444,18 @@ func manageUnsets(s *editState, name string, inherited []ui.EnvEntry) {
 
 // secretsOptions builds the Secrets picker: own entries in working order, then
 // the inherited keys the copy does not own, sorted, then the Encrypt-now row and
-// the Back tail. Values are runtime names, so the mark never enters a key.
+// the Back tail. Values are runtime names, so the mark never enters a key. A
+// fenced key stays listed and fades, carrying the state the menu shows: marking
+// a value resolution suppresses must not look like marking a live one.
 func secretsOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 	opts := make([]ui.Option, 0, len(s.entries)+len(inherited)+4)
 	for _, e := range s.entries {
-		opts = append(opts, ui.Option{Value: e.Key, Icon: secretIcon(e.Secret), Label: secretLabel(e)})
+		opts = append(opts, ui.Option{
+			Value: e.Key,
+			Icon:  secretIcon(e.Secret),
+			Label: maskedLabel(e),
+			Dim:   envname.MatchesAny(s.unset, e.Key),
+		})
 	}
 	own := s.envMap()
 	rest := make([]ui.EnvEntry, 0, len(inherited))
@@ -457,19 +470,18 @@ func secretsOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 		if icon == "" {
 			icon = ui.IconInherited
 		}
-		opts = append(opts, ui.Option{Value: e.Key, Icon: icon, Label: secretLabel(e) + " (inherited)"})
+		opts = append(opts, ui.Option{
+			Value: e.Key,
+			Icon:  icon,
+			Label: maskedLabel(e) + " (inherited)",
+			Dim:   envname.MatchesAny(s.unset, e.Key),
+		})
 	}
 	opts = append(opts,
 		ui.Separator(),
-		ui.Option{Value: actionEncryptNow, Label: "Encrypt marked values now"},
+		ui.Option{Value: actionEncryptNow, Label: "Encrypt now"},
 	)
 	return append(opts, pickerTail()...)
-}
-
-// secretLabel renders one picker row through the same masking the menu listing
-// uses, so opening the picker never reveals a value the listing hides.
-func secretLabel(e ui.EnvEntry) string {
-	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))
 }
 
 // secretIcon is the mark's glyph: the picker shows the state it is about to
@@ -881,12 +893,13 @@ func crypterFor(path string) (*valueCrypter, error) {
 
 // encryptMarked runs the Secrets menu's Encrypt-now request against the file the
 // Done commit just wrote: the commit put the mark into the file, and the mark is
-// what ShouldEncrypt keys off. A key that cannot encrypt — none at all, or
-// ENVER_KEY's saltless one — leaves the marks in place and only notes the
-// plaintext, since the mark is a hint and never a condition for saving.
+// what ShouldEncrypt keys off. A key that cannot encrypt — none at all, a
+// declined passphrase prompt, or ENVER_KEY's saltless key — leaves the marks in
+// place and only notes the plaintext, since the mark is a hint and never a
+// condition for saving.
 func encryptMarked(path, profile string) error {
 	c, err := crypterFor(path)
-	if errors.Is(err, app.ErrNoKey) {
+	if errors.Is(err, app.ErrNoKey) || errors.Is(err, ui.ErrCanceled) {
 		fmt.Printf("  %s — no key to encrypt with; the marks are saved\n", markNote)
 		return nil
 	}
