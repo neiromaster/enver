@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/neiromaster/enver/internal/crypto"
+	"gopkg.in/yaml.v3"
 )
 
 func TestUpsertPreservesComments(t *testing.T) {
@@ -544,6 +545,122 @@ func TestFirstSaltAndSampleConflictingSalts(t *testing.T) {
 	}
 	if _, _, _, err := FirstSaltAndSample(path); err == nil || !strings.Contains(err.Error(), "disagree") {
 		t.Fatalf("FirstSaltAndSample must reject conflicting salts, got: %v", err)
+	}
+}
+
+// envMappingNode returns the env mapping node of one profile, the way a writer
+// reaches it, so a test can assert on the entry count a rewrite left behind.
+func envMappingNode(t *testing.T, path, profile string) *yaml.Node {
+	t.Helper()
+	root, err := loadOrInitRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := root.Content[0]
+	pi := findIndex(body, "profiles")
+	if pi < 0 {
+		t.Fatalf("no profiles mapping in %s", path)
+	}
+	pm := body.Content[pi]
+	si := findIndex(pm, profile)
+	if si < 0 {
+		t.Fatalf("profile %q missing from %s", profile, path)
+	}
+	prof := pm.Content[si]
+	ei := findIndex(prof, "env")
+	if ei < 0 {
+		t.Fatalf("profile %q has no env mapping", profile)
+	}
+	return prof.Content[ei]
+}
+
+func TestUpsertKeepsMarkOnPlainRewrite(t *testing.T) {
+	// A writer told nothing about marks rewrites the marked entry it finds
+	// instead of adding a plain sibling the decoder would reject as a duplicate.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  work:\n    env:\n      ~GH_TOKEN: enc:v3:x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "work", Profile{Env: map[string]string{"GH_TOKEN": "y"}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	p := cfg.Profiles["work"]
+	if len(p.Env) != 1 || p.Env["GH_TOKEN"] != "y" {
+		t.Fatalf("env = %#v, want exactly {GH_TOKEN: y}", p.Env)
+	}
+	if !p.Marked["GH_TOKEN"] {
+		t.Fatalf("mark dropped on rewrite: %#v", p.Marked)
+	}
+}
+
+func TestUpsertNeverAppendsPlainSibling(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  work:\n    env:\n      ~GH_TOKEN: enc:v3:x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "work", Profile{Env: map[string]string{"GH_TOKEN": "y"}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if got := len(envMappingNode(t, path, "work").Content); got != 2 {
+		t.Fatalf("env mapping has %d content nodes, want 2 (one key/value pair)", got)
+	}
+}
+
+func TestUpsertCommentLandsOnMarkedEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      ~K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "p",
+		Profile{Env: map[string]string{"K": "v"}, Comments: map[string]string{"K": "from vault"}},
+		false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	p := cfg.Profiles["p"]
+	if p.Comments["K"] != "from vault" {
+		t.Fatalf("comment = %q, want it attached to the marked entry", p.Comments["K"])
+	}
+	if !p.Marked["K"] {
+		t.Fatalf("mark lost while writing the comment: env=%#v marked=%#v", p.Env, p.Marked)
+	}
+}
+
+func TestUpsertNilMarkedFallsBackToChainInFile(t *testing.T) {
+	// The mark lives on an ancestor in the same file, so a writer told nothing
+	// about marks must still write the override marked.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    extends: base\n    env: {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "work", Profile{Env: map[string]string{"K": "y"}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if work.Env["K"] != "y" {
+		t.Fatalf("work env = %#v, want K: y", work.Env)
+	}
+	if !work.Marked["K"] {
+		t.Fatalf("inherited mark not written on the override: env=%#v marked=%#v", work.Env, work.Marked)
+	}
+	if base := cfg.Profiles["base"]; base.Env["K"] != "v" || !base.Marked["K"] {
+		t.Fatalf("ancestor entry disturbed: env=%#v marked=%#v", base.Env, base.Marked)
 	}
 }
 
