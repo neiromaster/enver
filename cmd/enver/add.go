@@ -119,17 +119,15 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string) []ui.Summa
 	return out
 }
 
-// addMarks answers the secret marks for the entries add writes: the profile the
-// write leaves behind, with the picked extends, judged over both layers with
-// the target file's own entries on top. The writer cannot resolve this itself —
-// a parent in the other layer is invisible to the file it rewrites.
+// addMarks answers the secret marks for the entries add writes: the shared
+// write-mark helper under add's writer mode, which sets the picked extends
+// outright and keeps the working fences.
 func addMarks(merged, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
 	keys := make([]string, 0, len(entries))
 	for _, e := range entries {
 		keys = append(keys, e.Key)
 	}
-	view := probeWith(config.Merge(merged, target), name, func(p *config.Profile) { p.Extends = extends })
-	return config.MarksForWrite(view, name, keys)
+	return app.WriteMarks(&merged, target, name, extends, true, false, keys)
 }
 
 // upsertEntry appends entry, or replaces the existing entry with the same key.
