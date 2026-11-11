@@ -33,11 +33,16 @@ type Profile struct {
 	Carried  []CarriedFence    `yaml:"-"`
 	Env      map[string]string `yaml:"env"`
 	Comments map[string]string `yaml:"-"` // env key → comment; filled at decode
+	// Marked holds the env keys written with a secret mark, by runtime name;
+	// nil when the decoded profile carries none. Filled at decode.
+	Marked map[string]bool `yaml:"-"`
 }
 
-// UnmarshalYAML decodes a profile and, in the same pass, lifts the HeadComment
-// of each env key into Comments — the single place that knows where comments
-// live in the YAML representation.
+// UnmarshalYAML decodes a profile and, in the same pass, rebuilds its env from
+// the YAML nodes — stripping the secret mark into Marked, rejecting a malformed
+// one, and keying each HeadComment by the stripped name. The plain map decode
+// cannot: it leaves the mark in the keys and drops a bare `~` key silently. The
+// unset list loses the mark too, so a fence spelled with it still bites.
 func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 	type raw Profile
 	var r raw
@@ -45,17 +50,50 @@ func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	*p = Profile(r)
+	var unset Unsets
+	for _, u := range p.Unset {
+		name, _ := envname.SplitMarked(u)
+		unset = appendUniq(unset, name)
+	}
+	p.Unset = unset
+	p.Env = nil
 	env := envMapping(value)
 	if env == nil {
 		return nil
 	}
+	authored := map[string]string{} // runtime name → key as written
 	for i := 0; i+1 < len(env.Content); i += 2 {
-		keyNode := env.Content[i]
+		keyNode, valNode := env.Content[i], env.Content[i+1]
+		name, marked := envname.SplitMarked(keyNode.Value)
+		if name == "" && marked {
+			return fmt.Errorf("env key %q carries the secret mark but no name", keyNode.Value)
+		}
+		if envname.IsMarked(name) {
+			return fmt.Errorf("env key %q has a doubled secret mark; write one `~`", keyNode.Value)
+		}
+		if prev, ok := envname.Get(authored, name); ok {
+			return fmt.Errorf("env keys %q and %q are the same variable; keep one", prev, keyNode.Value)
+		}
+		var v string
+		if err := valNode.Decode(&v); err != nil {
+			return err
+		}
+		envname.Set(authored, name, keyNode.Value)
+		if p.Env == nil {
+			p.Env = map[string]string{}
+		}
+		envname.Set(p.Env, name, v)
+		if marked {
+			if p.Marked == nil {
+				p.Marked = map[string]bool{}
+			}
+			envname.Set(p.Marked, name, true)
+		}
 		if c := keyNode.HeadComment; c != "" {
 			if p.Comments == nil {
 				p.Comments = map[string]string{}
 			}
-			p.Comments[keyNode.Value] = stripCommentPrefix(c)
+			p.Comments[name] = stripCommentPrefix(c)
 		}
 	}
 	return nil
@@ -263,6 +301,7 @@ func cloneProfiles(in map[string]Profile) map[string]Profile {
 		p.Carried = slices.Clone(p.Carried)
 		p.Env = maps.Clone(p.Env)
 		p.Comments = maps.Clone(p.Comments)
+		p.Marked = maps.Clone(p.Marked)
 		out[name] = p
 	}
 	return out
