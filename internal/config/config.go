@@ -713,9 +713,11 @@ func IsSensitive(k, v string) bool {
 // ShouldEncrypt reports whether a key/value pair should be stored encrypted.
 // It shares the secret heuristic with display masking on purpose, but is a
 // separate predicate: the security-side selection may grow stricter than the
-// display-side one without rewriting every mask call site.
+// display-side one without rewriting every mask call site. A key written with
+// the secret mark is a candidate whatever its name or value.
 func ShouldEncrypt(k, v string) bool {
-	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
+	name, marked := envname.SplitMarked(k)
+	return marked || secretRe.MatchString(name) || urlCredRe.MatchString(v)
 }
 
 // MaskValue redacts secret-looking values for display. A secret shows its

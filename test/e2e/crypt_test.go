@@ -31,6 +31,54 @@ func TestKeygenRandomCreatesKeyFile(t *testing.T) {
 	}
 }
 
+func TestEncryptMarkedKey(t *testing.T) {
+	s := newSandbox(t)
+	s.writeGlobal("profiles:\n  work:\n    env:\n      ~PROJECT_PATH: /home/anna/x\n      PLAIN: y\n")
+	requireKeygen(t, s)
+	if r := s.run("encrypt", "-g", "work"); r.ExitCode != 0 {
+		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	cfg := s.readFile(s.configPath())
+	if !strings.Contains(cfg, "~PROJECT_PATH: enc:v3:") {
+		t.Fatalf("a marked key must be encrypted under its marked spelling, got: %q", cfg)
+	}
+	if !strings.Contains(cfg, "PLAIN: y") {
+		t.Fatalf("an unmarked non-secret key must stay plaintext, got: %q", cfg)
+	}
+}
+
+func TestDecryptKeepsMarkThroughRoundTrip(t *testing.T) {
+	s := newSandbox(t)
+	s.writeGlobal("profiles:\n  work:\n    env:\n      ~PROJECT_PATH: /home/anna/x\n      PLAIN: y\n")
+	requireKeygen(t, s)
+	if r := s.run("encrypt", "-g", "work"); r.ExitCode != 0 {
+		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if cfg := s.readFile(s.configPath()); !strings.Contains(cfg, "~PROJECT_PATH: enc:v3:") {
+		t.Fatalf("encrypt must produce a value for the round trip to decrypt, got: %q", cfg)
+	}
+	if r := s.run("decrypt", "-g", "work"); r.ExitCode != 0 {
+		t.Fatalf("decrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	cfg := s.readFile(s.configPath())
+	if !strings.Contains(cfg, "~PROJECT_PATH: /home/anna/x") {
+		t.Fatalf("decrypt must restore the value under the marked key, got: %q", cfg)
+	}
+	if !strings.Contains(cfg, "PLAIN: y") {
+		t.Fatalf("an unmarked non-secret key must stay plaintext, got: %q", cfg)
+	}
+	if r := s.run("encrypt", "-g", "work"); r.ExitCode != 0 {
+		t.Fatalf("second encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	cfg = s.readFile(s.configPath())
+	if !strings.Contains(cfg, "~PROJECT_PATH: enc:v3:") {
+		t.Fatalf("re-encrypting must pick the marked key again, got: %q", cfg)
+	}
+	if !strings.Contains(cfg, "PLAIN: y") {
+		t.Fatalf("an unmarked non-secret key must stay plaintext, got: %q", cfg)
+	}
+}
+
 func TestEncryptShowDecryptLifecycle(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
