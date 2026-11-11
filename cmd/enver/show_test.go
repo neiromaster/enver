@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/crypto"
 )
 
 func TestPrintEnvMasking(t *testing.T) {
@@ -94,6 +97,50 @@ func TestShowWiresSecretMarks(t *testing.T) {
 	}
 	if !strings.Contains(out, "~ marked, not encrypted") {
 		t.Fatalf("show lost the plaintext annotation: %q", out)
+	}
+}
+
+// TestShowDegradesWithoutKey pins the display/execution split end to end: text
+// show names the key it cannot read and still exits 0, while the JSON contract
+// keeps failing loudly rather than handing machines ciphertext.
+func TestShowDegradesWithoutKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("ENVER_KEY", "")
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return false }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+	savedFormat, savedNoMask := showFormat, showNoMask
+	t.Cleanup(func() { showFormat, showNoMask = savedFormat, savedNoMask })
+
+	salt := []byte("0123456789abcdef")
+	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	writeDoc(t, cfgPath, fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n", enc))
+
+	out, err := runCommand(t, "--config", cfgPath, "--chdir", dir, "show", "work")
+	if err != nil {
+		t.Fatalf("text show must degrade instead of failing: %v", err)
+	}
+	if !strings.Contains(out, "TOKEN=(cannot decrypt: no key — run enver keygen)") {
+		t.Fatalf("degraded note missing:\n%s", out)
+	}
+	if strings.Contains(out, "enc:v3:") {
+		t.Fatalf("ciphertext reached the display:\n%s", out)
+	}
+	if !strings.Contains(out, "PLAIN=kept") {
+		t.Fatalf("plaintext row lost:\n%s", out)
+	}
+
+	if _, err := runCommand(t, "--config", cfgPath, "--chdir", dir, "show", "--format", "json", "work"); err == nil {
+		t.Fatal("JSON show must fail loudly when no key can decrypt")
 	}
 }
 
