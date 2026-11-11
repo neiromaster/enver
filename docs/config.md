@@ -100,11 +100,12 @@ remove a key your shell already exports: `enver x bare -- claude` leaves a
 live `ANTHROPIC_API_KEY` untouched, and `eval "$(enver export bare)"` assigns
 nothing for it. To actually delete a variable, remove it from your shell before
 running enver. Env key and unset names must be valid identifiers
-(`[A-Za-z_][A-Za-z0-9_]*`, the same rule `.env` import applies), optionally
-preceded by one `~` marking the variable a secret candidate (meaningless on an
-`unset` entry — see [`secrets.md`](./secrets.md#marking-arbitrary-values)):
-names ride unquoted inside eval'd export lines, so enver refuses anything looser
-at config load, at every write boundary, and at TUI input time.
+(`[A-Za-z_][A-Za-z0-9_]*`), optionally preceded by one `~` marking the variable
+a secret candidate (meaningless on an `unset` entry — see
+[`secrets.md`](./secrets.md#marking-arbitrary-values)): names ride unquoted
+inside eval'd export lines, so enver refuses anything looser at config load, at
+every write boundary, and at TUI input time — the same rule `.env` import
+applies; `.env` files never carry the mark.
 `$VAR` interpolation sees the shell's live value through an unset: a key enver
 does not set is simply absent from the resolved env, so a reference to it
 expands to whatever the shell exports — matching what the child process gets.
