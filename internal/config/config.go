@@ -56,19 +56,43 @@ func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 		unset = appendUniq(unset, name)
 	}
 	p.Unset = unset
-	p.Env = nil
 	env := envMapping(value)
 	if env == nil {
+		// The decoder resolved an env the node walk cannot see; a silent drop
+		// would lose the whole environment, so refuse the shape instead.
+		if len(r.Env) > 0 {
+			return fmt.Errorf("profile env is not a mapping enver can read")
+		}
 		return nil
+	}
+	p.Env = nil
+	return p.applyEnvMapping(env)
+}
+
+// applyEnvMapping records one env mapping's entries, merge keys included: `<<`
+// sources land lowest priority first, so an explicit key still overrides the
+// merged copy it shares a name with, and a mark written inside an anchor is
+// honored. Names collide only within the mapping that spells them out — an
+// override is what a merge is for. A plain override clears a merged mark, the
+// same way any later mention of a key wins.
+func (p *Profile) applyEnvMapping(env *yaml.Node) error {
+	sources := mergeSources(env)
+	for i := len(sources) - 1; i >= 0; i-- {
+		if err := p.applyEnvMapping(sources[i]); err != nil {
+			return err
+		}
 	}
 	authored := map[string]string{} // runtime name → key as written
 	for i := 0; i+1 < len(env.Content); i += 2 {
 		keyNode, valNode := env.Content[i], env.Content[i+1]
+		if keyNode.Tag == "!!merge" {
+			continue
+		}
 		name, marked := envname.SplitMarked(keyNode.Value)
 		if name == "" && marked {
 			return fmt.Errorf("env key %q carries the secret mark but no name", keyNode.Value)
 		}
-		if envname.IsMarked(name) {
+		if envname.IsMarked(name) || name == string(envname.SecretMark) {
 			return fmt.Errorf("env key %q has a doubled secret mark; write one `~`", keyNode.Value)
 		}
 		if prev, ok := envname.Get(authored, name); ok {
@@ -88,6 +112,8 @@ func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 				p.Marked = map[string]bool{}
 			}
 			envname.Set(p.Marked, name, true)
+		} else {
+			envname.Delete(p.Marked, name)
 		}
 		if c := keyNode.HeadComment; c != "" {
 			if p.Comments == nil {
