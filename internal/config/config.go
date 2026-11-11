@@ -69,11 +69,7 @@ func (p *Profile) UnmarshalYAML(value *yaml.Node) error {
 	if err := p.applyEnvMapping(env); err != nil {
 		return err
 	}
-	// A merge override can clear the only mark the walk recorded; the field's
-	// contract is nil when no mark survives, not an empty map.
-	if len(p.Marked) == 0 {
-		p.Marked = nil
-	}
+	p.Marked = markedOrNil(p.Marked)
 	return nil
 }
 
@@ -289,9 +285,16 @@ func Merge(base, override Config) Config {
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
 		}
+		if bp.Marked == nil {
+			bp.Marked = map[string]bool{}
+		}
 		ownKeys := slices.Sorted(maps.Keys(p.Env))
 		for _, k := range ownKeys {
 			envname.Set(bp.Env, k, p.Env[k])
+			envname.Delete(bp.Marked, k)
+			if p.Marked[k] {
+				envname.Set(bp.Marked, k, true)
+			}
 			if out.Origins == nil {
 				out.Origins = map[string]map[string]string{}
 			}
@@ -310,6 +313,7 @@ func Merge(base, override Config) Config {
 				envname.Set(bp.Comments, k, c)
 			}
 		}
+		bp.Marked = markedOrNil(bp.Marked)
 		out.Profiles[name] = bp
 	}
 	// Profiles without an overriding copy resolve exactly as before; only
@@ -320,9 +324,19 @@ func Merge(base, override Config) Config {
 		}
 		bp := out.Profiles[name]
 		splitUnsets(&bp, nil, base.UnsetOrigins[name])
+		bp.Marked = markedOrNil(bp.Marked)
 		out.Profiles[name] = bp
 	}
 	return out
+}
+
+// markedOrNil keeps the Marked nil contract: a set that holds no mark is nil,
+// never an empty map, so "no information" stays distinguishable from "no marks".
+func markedOrNil(m map[string]bool) map[string]bool {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // cloneProfiles copies the profiles map and every per-profile slice and map
@@ -372,6 +386,7 @@ func splitUnsets(bp *Profile, fresh Unsets, inheritedOrigins map[string]string) 
 		if envname.Has(bp.Env, u) {
 			envname.Delete(bp.Env, u)
 			envname.Delete(bp.Comments, u)
+			envname.Delete(bp.Marked, u)
 		}
 	}
 	bp.Unset = slices.Clone(fresh)
@@ -433,12 +448,15 @@ type Source struct {
 
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
-// per-key source provenance, the unset tombstones, and the self-first lineage
-// chain.
+// per-key source provenance, the secret marks whose winning entry carried one,
+// the unset tombstones, and the self-first lineage chain.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
 	Sources  map[string]Source
+	// Marked holds the keys written with a secret mark by their winning entry;
+	// nil when no key ends up marked.
+	Marked map[string]bool
 	// Unsets reports the keys deliberately absent from Env, each attributed to
 	// the profile whose unset last removed (or declared) it. A closer
 	// redefinition clears the tombstone; a tombstone never coexists with a
@@ -451,15 +469,17 @@ type Resolved struct {
 // merged left-to-right (a later parent overrides an earlier one on a shared
 // key), then the profile's own env is applied last (child wins). Comments
 // follow the same fold — a definer's comment applies only when it carries
-// one, so a nearer uncommented redefinition keeps the farther comment. The
-// returned chain is a self-first DFS pre-order for display; a cycle,
-// including one spanning multiple parents, is reported as an error. Unset
-// keys are dropped from the env (and comments) after the profile's own fold,
-// so the closest mention of a key wins: a profile's own unset strips a
-// parent's definition, and a closer redefinition overrides an ancestor's
-// unset. Every key the chain deliberately absent — declared unsets with or
-// without a victim, carried fences — is reported in Unsets with the
-// unsetting profile and layer; a key back in play holds no tombstone.
+// one, so a nearer uncommented redefinition keeps the farther comment. Marks
+// ride with values the same way: the nearest mention decides, so a closer
+// unmarked definition clears an inherited mark. The returned chain is a
+// self-first DFS pre-order for display; a cycle, including one spanning
+// multiple parents, is reported as an error. Unset keys are dropped from the
+// env (and comments) after the profile's own fold, so the closest mention of a
+// key wins: a profile's own unset strips a parent's definition, and a closer
+// redefinition overrides an ancestor's unset. Every key the chain deliberately
+// absent — declared unsets with or without a victim, carried fences — is
+// reported in Unsets with the unsetting profile and layer; a key back in play
+// holds no tombstone.
 func (c Config) ResolveProfile(name string) (Resolved, error) {
 	f, err := c.resolveEnv(name, map[string]bool{})
 	if err != nil {
@@ -469,6 +489,7 @@ func (c Config) ResolveProfile(name string) (Resolved, error) {
 		Env:      f.env,
 		Comments: f.comments,
 		Sources:  f.sources,
+		Marked:   markedOrNil(f.marked),
 		Unsets:   f.unsets,
 		Chain:    c.chainOf(name, map[string]bool{}),
 	}, nil
@@ -479,22 +500,24 @@ type envFold struct {
 	env      map[string]string
 	comments map[string]string
 	sources  map[string]Source
+	marked   map[string]bool
 	unsets   map[string]Source
 }
 
-// resolveEnv returns the fully merged env, comments, sources, and unset
-// tombstones for name: each parent is resolved transitively and merged
+// resolveEnv returns the fully merged env, comments, sources, secret marks, and
+// unset tombstones for name: each parent is resolved transitively and merged
 // left-to-right, then name's own entries are applied last (child wins;
-// comments only when the definer carries one). Name's own unsets are applied
-// after its own env, so the closest mention of a key wins: a profile's own
-// unset strips a parent's definition, and a closer redefinition overrides an
-// ancestor's unset. Tombstones follow the env: setting a key clears its
-// tombstone, an unset (declared or carried) records one attributed to the
-// unsetting profile, and the final sweep drops any tombstone whose key a
-// sibling parent's define kept alive. The visiting set tracks the active
-// path so a cycle (self, mutual, or across multiple parents) is detected; a
-// name is removed from it on the way back up so a diamond is not mistaken
-// for a cycle.
+// comments only when the definer carries one). Each mention moves the key's
+// mark with its value, so the winning entry decides whether the key is marked.
+// Name's own unsets are applied after its own env, so the closest mention of a
+// key wins: a profile's own unset strips a parent's definition, and a closer
+// redefinition overrides an ancestor's unset. Tombstones follow the env:
+// setting a key clears its tombstone, an unset (declared or carried) records
+// one attributed to the unsetting profile, and the final sweep drops any
+// tombstone whose key a sibling parent's define kept alive. The visiting set
+// tracks the active path so a cycle (self, mutual, or across multiple parents)
+// is detected; a name is removed from it on the way back up so a diamond is not
+// mistaken for a cycle.
 func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, error) {
 	if visiting[name] {
 		return envFold{}, fmt.Errorf("%w at %q", ErrExtendsCycle, name)
@@ -508,6 +531,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	out.env = map[string]string{}
 	out.comments = map[string]string{}
 	out.sources = map[string]Source{}
+	out.marked = map[string]bool{}
 	out.unsets = map[string]Source{}
 	for _, parent := range p.Extends {
 		pf, err := c.resolveEnv(parent, visiting)
@@ -522,6 +546,9 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		}
 		for k, v := range pf.sources {
 			envname.Set(out.sources, k, v)
+		}
+		for k, v := range pf.marked {
+			envname.Set(out.marked, k, v)
 		}
 		for k, v := range pf.unsets {
 			envname.Set(out.unsets, k, v)
@@ -541,6 +568,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		envname.Delete(out.env, u.Key)
 		envname.Delete(out.comments, u.Key)
 		envname.Delete(out.sources, u.Key)
+		envname.Delete(out.marked, u.Key)
 		envname.Set(out.unsets, u.Key, Source{Profile: name, Layer: u.Layer})
 	}
 	// Own entries apply last (child wins). Sorted so a hand-authored
@@ -549,6 +577,10 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	// keeps both keys, as authored.
 	for _, k := range slices.Sorted(maps.Keys(p.Env)) {
 		envname.Set(out.env, k, p.Env[k])
+		envname.Delete(out.marked, k)
+		if p.Marked[k] {
+			envname.Set(out.marked, k, true)
+		}
 		envname.Set(out.sources, k, Source{Profile: name, Layer: c.layerOf(name, k)})
 		envname.Delete(out.unsets, k)
 	}
@@ -566,17 +598,21 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		envname.Delete(out.env, u)
 		envname.Delete(out.comments, u)
 		envname.Delete(out.sources, u)
+		envname.Delete(out.marked, u)
 		envname.Set(out.unsets, u, Source{Profile: name, Layer: c.unsetLayer(name, u)})
 	}
 	// A tombstone never coexists with a live key, whichever order sibling
 	// parents fold in: parents arrive pre-folded, so the unsetting sibling's
 	// tombstone can land after the victim is already resident from the
 	// sibling that defines it. The final sweep drops stale entries in both
-	// orders — it is the invariant's single enforcement point.
+	// orders — it is the invariant's single enforcement point. A mark rides
+	// with a live value, so a surviving tombstone takes its key's mark along.
 	for k := range out.unsets {
 		if envname.Has(out.env, k) {
 			envname.Delete(out.unsets, k)
+			continue
 		}
+		envname.Delete(out.marked, k)
 	}
 	return out, nil
 }
