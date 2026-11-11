@@ -202,6 +202,15 @@ func TestShouldEncryptMatchesSecretSelection(t *testing.T) {
 	}
 }
 
+func TestShouldEncryptMarkedArbitraryKey(t *testing.T) {
+	if !ShouldEncrypt("~PROJECT_PATH", "/Users/anna/projects/enver") {
+		t.Fatal("a marked key is a candidate whatever its name or value")
+	}
+	if ShouldEncrypt("PROJECT_PATH", "/Users/anna/projects/enver") {
+		t.Fatal("the same key unmarked is not a candidate")
+	}
+}
+
 func TestGlobalPath(t *testing.T) {
 	// Absolute on every platform: a "/xdg" literal is not filepath.IsAbs on
 	// Windows, so the spec-mandated ignore would kick in and test the wrong
