@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/ui"
 )
 
@@ -1056,5 +1058,224 @@ func TestMenuErrorAction(t *testing.T) {
 
 	if got, ask := menuErrorAction(ui.ErrCanceled, true); got != nil || !ask {
 		t.Errorf("bare cancel with pending edits must ask, got (%v, ask=%v)", got, ask)
+	}
+}
+
+// TestSecretsActionTogglesMarks pins the staging contract: a confirmed Secrets
+// selection is the authoritative mark set for own entries, and the Encrypt-now
+// row schedules the encrypt step without itself counting as an unsaved change.
+func TestSecretsActionTogglesMarks(t *testing.T) {
+	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, nil, false)
+	applySecretsPick(&s, []string{"A"}, nil, nil)
+	if !s.entries[0].Secret || s.entries[1].Secret {
+		t.Fatalf("selection [A] staged %+v, want A marked and B clear", s.entries)
+	}
+	if s.encryptNow {
+		t.Fatal("a mark-only selection must not schedule encryption")
+	}
+
+	applySecretsPick(&s, []string{"B", actionEncryptNow}, nil, nil)
+	if s.entries[0].Secret || !s.entries[1].Secret {
+		t.Fatalf("selection [B] staged %+v, want B marked and A clear", s.entries)
+	}
+	if !s.encryptNow {
+		t.Fatal("the Encrypt-now row must schedule the encrypt step")
+	}
+
+	scheduled := newEditState("p", config.Profile{
+		Env:    map[string]string{"A": "1"},
+		Marked: map[string]bool{"A": true},
+	}, nil, false)
+	applySecretsPick(&scheduled, append(secretsChecked(scheduled), actionEncryptNow), nil, nil)
+	if !scheduled.encryptNow {
+		t.Fatal("the Encrypt-now row did not set the flag")
+	}
+	if scheduled.dirty() {
+		t.Fatal("scheduling encryption changes no entry and must not read as unsaved changes")
+	}
+}
+
+// TestSecretsMenuListsInheritedKeys pins the picker's shape and its inherited
+// half: own entries in working order, then the inherited keys the copy does not
+// own, sorted, then the Encrypt-now row. A picked inherited key materializes as
+// an own marked entry carrying the value and comment the picker showed.
+func TestSecretsMenuListsInheritedKeys(t *testing.T) {
+	s := newEditState("p", config.Profile{
+		Env:    map[string]string{"OWN": "x", "K": "hunter2hunter2"},
+		Marked: map[string]bool{"K": true},
+	}, nil, false)
+	inherited := []ui.EnvEntry{
+		{Key: "ZZZ", Value: "z"},
+		{Key: "GH_TOKEN", Value: "from-base"},
+		{Key: "REGION", Value: "eu-west-1"},
+		{Key: "OWN", Value: "shadowed"},
+	}
+	opts := secretsOptions(s, inherited)
+
+	var values []string
+	for _, o := range opts {
+		if o.Separator || o.Action {
+			continue
+		}
+		values = append(values, o.Value)
+	}
+	want := []string{"K", "OWN", "GH_TOKEN", "REGION", "ZZZ", actionEncryptNow}
+	if !slices.Equal(values, want) {
+		t.Fatalf("picker values = %v, want %v", values, want)
+	}
+
+	marked := findOption(t, opts, "K")
+	if marked.Icon != ui.IconSecret {
+		t.Fatalf("a marked key must carry the secret glyph: %+v", marked)
+	}
+	if strings.Contains(marked.Label, "hunter2hunter2") {
+		t.Fatalf("the picker leaked a marked value: %q", marked.Label)
+	}
+	if got := findOption(t, opts, "REGION"); !strings.Contains(got.Label, "eu-west-1") {
+		t.Fatalf("a non-sensitive value must stay readable: %q", got.Label)
+	}
+	if got := findOption(t, opts, "GH_TOKEN"); strings.Contains(got.Label, "from-base") {
+		t.Fatalf("the picker must mask what the menu listing masks: %q", got.Label)
+	}
+
+	seed := secretsChecked(s)
+	if !slices.Contains(seed, "K") {
+		t.Fatalf("the picker must open with the current marks checked: %v", seed)
+	}
+	if _, owned := s.find("GH_TOKEN"); owned {
+		t.Fatal("setup: GH_TOKEN must be inherited, not owned")
+	}
+
+	applySecretsPick(&s, append(seed, "GH_TOKEN"), inherited, map[string]string{"GH_TOKEN": "base token"})
+	entry, ok := s.find("GH_TOKEN")
+	if !ok || !entry.Secret || entry.Value != "from-base" || entry.Comment != "base token" {
+		t.Fatalf("inherited pick = %+v, want an own marked entry seeded from the inherited row", entry)
+	}
+	if !s.markMap()["K"] {
+		t.Fatalf("the picker's inherited half must not clear own marks: %#v", s.markMap())
+	}
+}
+
+// TestSecretsEncryptRunsAfterCommit pins the order of the two writes: the Done
+// commit lands the mark in the file, and the encrypt step that follows finds the
+// marked plaintext there and seals it under the file's own key.
+func TestSecretsEncryptRunsAfterCommit(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", "")
+	keyPath := filepath.Join(dir, "key")
+	if err := crypto.GenerateKey(keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+	globalFlags.keyPath = keyPath
+
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env: map[string]string{"TOKEN": "plain-value", "OTHER": "visible"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	s := newEditState("p", prof, prof.Comments, isDefault)
+	applySecretsPick(&s, []string{"TOKEN", actionEncryptNow}, nil, nil)
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "~TOKEN") {
+		t.Fatalf("the staged mark did not reach the file:\n%s", raw)
+	}
+
+	if err := encryptMarked(path, "p"); err != nil {
+		t.Fatalf("encrypt step: %v", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !crypto.IsEncrypted(got.Env["TOKEN"]) {
+		t.Fatalf("the marked value stayed plaintext: %#v", got.Env)
+	}
+	key, _, err := crypto.LoadKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := crypto.DecryptValue(got.Env["TOKEN"], key)
+	if err != nil || plain != "plain-value" {
+		t.Fatalf("round trip = %q, %v; want the committed plaintext", plain, err)
+	}
+	if crypto.IsEncrypted(got.Env["OTHER"]) || got.Env["OTHER"] != "visible" {
+		t.Fatalf("an unmarked value must stay plaintext: %#v", got.Env)
+	}
+	if !got.Marked["TOKEN"] {
+		t.Fatalf("the mark did not survive encryption: %#v", got.Marked)
+	}
+}
+
+// TestSecretsEncryptWithoutKeyKeepsMarks pins the degraded encrypt step: with no
+// key at all the marks stay saved, the file stays plaintext, and the command
+// still succeeds — the mark is a hint, so a missing key is not a failure.
+func TestSecretsEncryptWithoutKeyKeepsMarks(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", "")
+	prevKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "missing-key") }
+	t.Cleanup(func() { crypto.KeyFilePath = prevKeyFile })
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return false }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"TOKEN": "plain-value"},
+		Marked: map[string]bool{"TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := encryptMarked(path, "p"); err != nil {
+		t.Fatalf("a missing key must not fail the encrypt step: %v", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != "plain-value" || !got.Marked["TOKEN"] {
+		t.Fatalf("the mark must stay saved with the value plaintext: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+}
+
+// TestSecretsEncryptWithEnvKeyKeepsMarks pins the saltless-key guard: an
+// ENVER_KEY key can decrypt but not encrypt, so the encrypt step notes the
+// plaintext rather than calling EncryptFile with a nil salt.
+func TestSecretsEncryptWithEnvKeyKeepsMarks(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", crypto.EncodeKey(make([]byte, 32)))
+
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env:    map[string]string{"TOKEN": "plain-value"},
+		Marked: map[string]bool{"TOKEN": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := encryptMarked(path, "p"); err != nil {
+		t.Fatalf("an ENVER_KEY run must not fail the encrypt step: %v", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != "plain-value" || !got.Marked["TOKEN"] {
+		t.Fatalf("the mark must stay saved with the value plaintext: env=%#v marks=%#v", got.Env, got.Marked)
 	}
 }
