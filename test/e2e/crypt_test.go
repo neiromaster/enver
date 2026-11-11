@@ -104,7 +104,10 @@ func TestEncryptShowDecryptLifecycle(t *testing.T) {
 	}
 }
 
-func TestShowWithoutKeyFailsLoudly(t *testing.T) {
+// TestShowWithoutKeyDegrades pins the display/execution split: with no key
+// source text show names what it cannot read and still exits 0, while JSON
+// keeps failing loudly rather than handing machines ciphertext.
+func TestShowWithoutKeyDegrades(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
@@ -115,11 +118,21 @@ func TestShowWithoutKeyFailsLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := s.run("show", "p")
-	if r.ExitCode == 0 {
-		t.Fatal("reading encrypted values without any key must fail")
+	if r.ExitCode != 0 {
+		t.Fatalf("text show must degrade, got exit %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
-	if !strings.Contains(r.Stderr, "keygen") {
-		t.Fatalf("the failure should point at recovery, got: %q", r.Stderr)
+	if !strings.Contains(r.Stdout, "TOKEN=(cannot decrypt: no key — run enver keygen)") {
+		t.Fatalf("the degraded row must say why, got: %q", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "enc:v3:") {
+		t.Fatalf("ciphertext must not reach the display, got: %q", r.Stdout)
+	}
+	r = s.run("show", "--format", "json", "p")
+	if r.ExitCode == 0 {
+		t.Fatal("JSON output without a key must fail: machines would receive ciphertext")
+	}
+	if !strings.Contains(r.Stderr, "TOKEN") || !strings.Contains(r.Stderr, "keygen") {
+		t.Fatalf("the failure should name the keys and point at recovery, got: %q", r.Stderr)
 	}
 }
 

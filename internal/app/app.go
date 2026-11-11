@@ -3,8 +3,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -21,7 +24,19 @@ type Options struct {
 	NoLocal    bool
 	NoExpand   bool   // skip $VAR interpolation
 	Name       string // invocation label ("enver x") for error messages
+	// TolerateMissingKey degrades an absent key to a per-key report instead of
+	// a failure. Only the text display path may set it: a child process or a
+	// machine consumer started with unreadable values fails somewhere else.
+	TolerateMissingKey bool
 }
+
+// ErrNoKey reports that encrypted values are present and no key source
+// resolved. It is the absence of a key, not an unusable one: a wrong key is a
+// misconfiguration and never matches.
+var ErrNoKey = errors.New("no key found — run `enver keygen` or set --key/ENVER_KEY")
+
+// noKeyReason is the short per-key explanation the display paths render.
+const noKeyReason = "no key — run enver keygen"
 
 // Interactive reports whether stdin is a terminal. Injected by the CLI layer
 // (cmd/enver sets it to ui.Interactive) so this package stays free of ui.
@@ -64,7 +79,9 @@ func Chdir(dir string) error {
 
 // resolve walks the profile's extends chain, transparently decrypts any
 // enc:v3: values, and expands $VAR interpolation unless opts.NoExpand. A key
-// is required only when encrypted values are present. Comments ride through
+// is required only when encrypted values are present, and then only a missing
+// key is forgivable: with opts.TolerateMissingKey the ciphertext stays in place
+// and each such key is reported in Undecryptable. Comments ride through
 // untouched.
 func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
 	r, err := cfg.ResolveProfile(profile)
@@ -94,7 +111,23 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 		return firstSaltAndSample(r.Env)
 	})
 	if err != nil {
-		return config.Resolved{}, err
+		if !errors.Is(err, ErrNoKey) {
+			return config.Resolved{}, err
+		}
+		if !opts.TolerateMissingKey {
+			keys := slices.Sorted(maps.Keys(r.Encrypted))
+			return config.Resolved{}, fmt.Errorf("%w (encrypted: %s)", err, strings.Join(keys, ", "))
+		}
+		// Only an absent key degrades: the ciphertext stays for the renderer to
+		// annotate, and the values a key could read still expand.
+		r.Undecryptable = make(map[string]string, len(r.Encrypted))
+		for k := range r.Encrypted {
+			r.Undecryptable[k] = noKeyReason
+		}
+		if !opts.NoExpand {
+			r.Env = expandReadable(r.Env, r.Undecryptable)
+		}
+		return r, nil
 	}
 	for k, v := range r.Env {
 		if crypto.IsEncrypted(v) {
@@ -191,7 +224,7 @@ func ResolveKeyOrPrompt(opts Options, saltSource SaltSource) (key, salt []byte, 
 		return nil, nil, err
 	}
 	if salt == nil {
-		return nil, nil, fmt.Errorf("no key found; run `enver keygen` or set --key/ENVER_KEY")
+		return nil, nil, ErrNoKey
 	}
 	key, err = recoverKey(salt, params, sample)
 	if err != nil {
@@ -222,7 +255,7 @@ func resolveKey(opts Options) (key, salt []byte, err error) {
 // the key cache. Returns the derived key.
 func recoverKey(salt []byte, p crypto.Argon2Params, sample string) ([]byte, error) {
 	if !Interactive() {
-		return nil, fmt.Errorf("encrypted values present but no key found; run `enver keygen` or set --key/ENVER_KEY")
+		return nil, ErrNoKey
 	}
 	if PromptPassphrase == nil {
 		return nil, fmt.Errorf("passphrase recovery is not configured")
@@ -278,6 +311,21 @@ func foreignEncPrefix(env map[string]string) string {
 		}
 	}
 	return ""
+}
+
+// expandReadable expands the values a key could read and leaves the unreadable
+// ones — ciphertext nobody can decrypt — exactly as they sit at rest.
+func expandReadable(env, unreadable map[string]string) map[string]string {
+	readable := make(map[string]string, len(env))
+	for k, v := range env {
+		if _, skip := unreadable[k]; !skip {
+			readable[k] = v
+		}
+	}
+	for k, v := range varsubst.Expand(readable, osEnvMap()) {
+		env[k] = v
+	}
+	return env
 }
 
 func fileExists(p string) bool {

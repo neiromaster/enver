@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -160,6 +162,9 @@ func TestResolveRecordsEncrypted(t *testing.T) {
 	if !r.Encrypted["API_KEY"] || r.Encrypted["MODEL"] {
 		t.Fatalf("Encrypted = %v, want only API_KEY", r.Encrypted)
 	}
+	if r.Undecryptable != nil {
+		t.Fatalf("Undecryptable = %v, want nil when a key read every value", r.Undecryptable)
+	}
 
 	plain := config.Config{Profiles: map[string]config.Profile{
 		"p": {Env: map[string]string{"MODEL": "claude-sonnet-5"}},
@@ -170,6 +175,99 @@ func TestResolveRecordsEncrypted(t *testing.T) {
 	}
 	if pr.Encrypted != nil {
 		t.Fatalf("Encrypted = %v, want nil for an all-plaintext profile", pr.Encrypted)
+	}
+	if pr.Undecryptable != nil {
+		t.Fatalf("Undecryptable = %v, want nil for an all-plaintext profile", pr.Undecryptable)
+	}
+}
+
+// noKeyFixture writes a config holding one encrypted value plus two plaintext
+// ones and removes every key source, so resolve reaches the real no-key path.
+func noKeyFixture(t *testing.T) string {
+	t.Helper()
+	t.Setenv("ENVER_KEY", "")
+	restoreKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(t.TempDir(), "missing-key") }
+	t.Cleanup(func() { crypto.KeyFilePath = restoreKeyFile })
+	restoreInteractive := Interactive
+	Interactive = func() bool { return false }
+	t.Cleanup(func() { Interactive = restoreInteractive })
+
+	salt := []byte("0123456789abcdef")
+	key, err := crypto.DeriveKey("hunter2", salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("derive: %v", err)
+	}
+	enc, err := crypto.EncryptValueWithParams("secret", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := fmt.Sprintf("profiles:\n  work:\n    env:\n      TOKEN: %s\n      PLAIN: kept\n      DERIVED: '$PLAIN/x'\n", enc)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// TestResolveToleratesMissingKey pins the display degrade: a tolerant resolve
+// leaves the ciphertext untouched, reports why per key, and keeps expanding the
+// values it can read.
+func TestResolveToleratesMissingKey(t *testing.T) {
+	cfgPath := noKeyFixture(t)
+	_, r, err := ResolveDefault(Options{ConfigPath: cfgPath, NoLocal: true, TolerateMissingKey: true}, "work")
+	if err != nil {
+		t.Fatalf("tolerant resolve must not fail: %v", err)
+	}
+	if !strings.HasPrefix(r.Env["TOKEN"], "enc:v3:") {
+		t.Fatalf("the ciphertext must be left untouched, got %q", r.Env["TOKEN"])
+	}
+	if !strings.Contains(r.Undecryptable["TOKEN"], "no key") {
+		t.Fatalf("reason missing: %#v", r.Undecryptable)
+	}
+	if _, ok := r.Undecryptable["PLAIN"]; ok {
+		t.Fatalf("a plaintext key must not be reported undecryptable: %#v", r.Undecryptable)
+	}
+	if r.Env["DERIVED"] != "kept/x" {
+		t.Fatalf("DERIVED = %q, want kept/x: readable values still expand", r.Env["DERIVED"])
+	}
+}
+
+// TestResolveFailsWithoutKeyByDefault pins the execution paths: x, export, and
+// dotenv share this call, so the failure must carry ErrNoKey and name the
+// encrypted keys that blocked the run.
+func TestResolveFailsWithoutKeyByDefault(t *testing.T) {
+	cfgPath := noKeyFixture(t)
+	_, _, err := ResolveDefault(Options{ConfigPath: cfgPath, NoLocal: true}, "work")
+	if !errors.Is(err, ErrNoKey) {
+		t.Fatalf("want ErrNoKey, got %v", err)
+	}
+	for _, want := range []string{"TOKEN", "no key found", "enver keygen"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q misses %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "PLAIN") {
+		t.Fatalf("the error must name only the encrypted keys: %v", err)
+	}
+}
+
+// TestResolveToleranceDoesNotSwallowWrongKey pins the boundary between an
+// absent key and an unusable one: a key that exists but cannot read the value
+// is a misconfiguration and stays a hard error.
+func TestResolveToleranceDoesNotSwallowWrongKey(t *testing.T) {
+	cfgPath := noKeyFixture(t)
+	otherKey := filepath.Join(t.TempDir(), "other-key")
+	if err := crypto.GenerateKey(otherKey, true); err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true, KeyPath: otherKey, TolerateMissingKey: true}
+	if _, _, err := ResolveDefault(opts, "work"); err == nil {
+		t.Fatal("a wrong key must fail even when a missing key is tolerated")
+	} else if errors.Is(err, ErrNoKey) {
+		t.Fatalf("a wrong key is not a missing key: %v", err)
+	} else if !strings.Contains(err.Error(), "TOKEN") {
+		t.Fatalf("the decrypt failure must name the key: %v", err)
 	}
 }
 

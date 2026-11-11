@@ -449,9 +449,10 @@ type Source struct {
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
 // per-key source provenance, the secret marks whose winning entry carried one,
-// the unset tombstones, and the self-first lineage chain. Encrypted is filled in
-// by the run layer, not by resolution: config recognizes ciphertext but never
-// decrypts, so the at-rest report belongs to the caller that does.
+// the unset tombstones, and the self-first lineage chain. Encrypted and
+// Undecryptable are filled in by the run layer, not by resolution: config
+// recognizes ciphertext but never decrypts, so the at-rest report belongs to
+// the caller that does.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
@@ -462,6 +463,10 @@ type Resolved struct {
 	// Encrypted holds the keys whose value was ciphertext at rest before
 	// resolution decrypted it; nil when no value was encrypted.
 	Encrypted map[string]bool
+	// Undecryptable holds the keys whose ciphertext stayed unread because no key
+	// source resolved, each with the reason to display; nil when every value was
+	// readable.
+	Undecryptable map[string]string
 	// Unsets reports the keys deliberately absent from Env, each attributed to
 	// the profile whose unset last removed (or declared) it. A closer
 	// redefinition clears the tombstone; a tombstone never coexists with a

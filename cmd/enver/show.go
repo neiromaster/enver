@@ -26,24 +26,30 @@ var showCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		p, r, err := app.ResolveDefault(appOpts(), profile)
-		if err != nil {
-			return err
-		}
 		switch showFormat {
-		case "text":
-			out := cmd.OutOrStdout()
-			return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, envRender{
-				unmasked:  showNoMask,
-				color:     colorEnabled(out),
-				marked:    r.Marked,
-				encrypted: r.Encrypted,
-			})
-		case "json":
-			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
+		case "text", "json":
 		default:
 			return fmt.Errorf("unsupported show format %q (use text or json)", showFormat)
 		}
+		opts := appOpts()
+		// Text can say what it cannot read; JSON hands values to machines, where
+		// ciphertext is a trap and a non-zero exit is the honest answer.
+		opts.TolerateMissingKey = showFormat == "text"
+		p, r, err := app.ResolveDefault(opts, profile)
+		if err != nil {
+			return err
+		}
+		if showFormat == "json" {
+			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
+		}
+		out := cmd.OutOrStdout()
+		return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, envRender{
+			unmasked:      showNoMask,
+			color:         colorEnabled(out),
+			marked:        r.Marked,
+			encrypted:     r.Encrypted,
+			undecryptable: r.Undecryptable,
+		})
 	},
 }
 
@@ -95,6 +101,9 @@ type envRender struct {
 	// encryption state, both nil when empty.
 	marked    map[string]bool
 	encrypted map[string]bool
+	// undecryptable maps a key to why its ciphertext stayed unread; nil unless
+	// no key source resolved.
+	undecryptable map[string]string
 }
 
 // markNote flags a row whose value carries the secret mark but still sits in
@@ -103,9 +112,12 @@ const markNote = "~ marked, not encrypted"
 
 // printEnv writes the resolved env to w as `K=V`, masked unless
 // opts.unmasked is set: a marked or at-rest-encrypted value masks whatever its
-// name looks like, and a marked row still in plaintext says so. When provenance
-// is present, each line is annotated with the defining profile and layer
-// (`# from anth (global)`) so the chain header stays a summary and the per-key
+// name looks like, and a marked row still in plaintext says so. A key whose
+// ciphertext could not be read carries the reason in place of its value —
+// masking or revealing it would both pretend to know what it holds. When
+// provenance is present, each line is annotated with the defining profile and
+// layer (`# from anth (global)`) so the chain header stays a summary and the
+// per-key
 // winner is debuggable. Unset keys
 // interleave in the same sort as comment rows (`# KEY — unset by "anth"`),
 // mirroring the dotenv export: the deliberately absent variables stay
@@ -132,7 +144,9 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 			continue
 		}
 		marked, encrypted := opts.marked[k], opts.encrypted[k]
-		if !opts.unmasked {
+		if reason, ok := opts.undecryptable[k]; ok {
+			v = "(cannot decrypt: " + reason + ")"
+		} else if !opts.unmasked {
 			v = config.MaskValue(v, config.ShouldMask(k, v, marked, encrypted))
 		}
 		comment := ""
