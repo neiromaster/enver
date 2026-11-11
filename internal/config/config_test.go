@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestMerge(t *testing.T) {
@@ -931,5 +933,90 @@ func TestMergeDoesNotMutateInputs(t *testing.T) {
 	}
 	if _, ok := merged.Profiles["shared"].Env["B"]; ok {
 		t.Errorf("merged shared.B survived the inherited fence: %v", merged.Profiles["shared"].Env)
+	}
+}
+
+func TestUnmarshalStripsMarkAndRecordsIt(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`profiles:
+  work:
+    env:
+      # note
+      ~PROJECT_PATH: /home/anna
+      API: https://api.example.com
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Profiles["work"]
+	if p.Env["PROJECT_PATH"] != "/home/anna" || p.Env["~PROJECT_PATH"] != "" {
+		t.Fatalf("env not stripped: %#v", p.Env)
+	}
+	if !p.Marked["PROJECT_PATH"] || p.Marked["API"] {
+		t.Fatalf("marks wrong: %#v", p.Marked)
+	}
+	if p.Comments["PROJECT_PATH"] != "note" {
+		t.Fatalf("comment not keyed by the stripped name: %#v", p.Comments)
+	}
+	if _, ok := p.Comments["~PROJECT_PATH"]; ok {
+		t.Fatalf("comment kept the raw key: %#v", p.Comments)
+	}
+}
+
+func TestUnmarshalRejectsCollidingSpellings(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`profiles:
+  work:
+    env:
+      ~TOKEN: a
+      TOKEN: b
+`), &c)
+	if err == nil || !strings.Contains(err.Error(), "same variable") {
+		t.Fatalf("want collision error, got %v", err)
+	}
+}
+
+func TestUnmarshalRejectsBareMark(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~: x\n"), &c); err == nil {
+		t.Fatal("want an error for a bare ~ key")
+	}
+}
+
+func TestUnmarshalRejectsDoubledMark(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~~KEY: x\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "doubled") {
+		t.Fatalf("want a doubled-mark error, got %v", err)
+	}
+}
+
+func TestUnmarshalNormalizesUnsetMark(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("profiles:\n  work:\n    unset: [~TOKEN]\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Profiles["work"].Unset; len(got) != 1 || got[0] != "TOKEN" {
+		t.Fatalf("unset not normalized: %#v", got)
+	}
+}
+
+func TestUnmarshalCollapsesUnsetMarkAndPlainSpellings(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("profiles:\n  work:\n    unset: [~TOKEN, TOKEN]\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Profiles["work"].Unset; len(got) != 1 || got[0] != "TOKEN" {
+		t.Fatalf("unset mark and plain spellings not collapsed: %#v", got)
+	}
+}
+
+func TestUnmarshalLeavesMarkedNilWithoutMarks(t *testing.T) {
+	var c Config
+	if err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      API: x\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Profiles["work"].Marked; got != nil {
+		t.Fatalf("Marked should be nil without marks, got %#v", got)
 	}
 }
