@@ -394,6 +394,41 @@ func TestResolveKeyFromCache(t *testing.T) {
 	}
 }
 
+// TestKeyAvailable pins the no-prompt key probe the add gate reads: only a key
+// that actually resolves counts, from the key file or ENVER_KEY, and a broken key
+// source answers false rather than passing for a usable key.
+func TestKeyAvailable(t *testing.T) {
+	t.Setenv("ENVER_KEY", "")
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "key")
+	oldKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return keyFile }
+	t.Cleanup(func() { crypto.KeyFilePath = oldKeyFile })
+
+	if KeyAvailable(Options{}) {
+		t.Fatal("no key file and no ENVER_KEY must report false")
+	}
+	if err := crypto.GenerateKey(keyFile, true); err != nil {
+		t.Fatal(err)
+	}
+	if !KeyAvailable(Options{}) {
+		t.Fatal("a keygen'd key file must report true")
+	}
+	key, _, err := crypto.LoadKey(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENVER_KEY", crypto.EncodeKey(key))
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "absent") }
+	if !KeyAvailable(Options{}) {
+		t.Fatal("ENVER_KEY must report true")
+	}
+	t.Setenv("ENVER_KEY", "not-a-key")
+	if KeyAvailable(Options{}) {
+		t.Fatal("a key that fails to decode must report false")
+	}
+}
+
 func TestResolveKeyOrPromptSkipsSourceWhenKeyResolves(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "key")

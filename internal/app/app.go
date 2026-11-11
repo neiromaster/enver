@@ -245,6 +245,15 @@ func ResolveKeyOrPrompt(opts Options, saltSource SaltSource) (key, salt []byte, 
 	return key, salt, nil
 }
 
+// KeyAvailable reports whether a key resolves. It never prompts — resolveKey
+// reads --key, ENVER_KEY, and the key cache only — so a caller can consult it
+// before a write that would need to decrypt. A key source that fails to load is
+// unavailable, not available: only a resolved key counts.
+func KeyAvailable(opts Options) bool {
+	key, _, err := resolveKey(opts)
+	return key != nil && err == nil
+}
+
 // resolveKey resolves the decryption key from --key, the ENVER_KEY env var, or
 // the default key file. It returns (nil, nil, nil) when no key is available;
 // callers decide whether that is an error.
