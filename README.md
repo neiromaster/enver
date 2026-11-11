@@ -106,6 +106,7 @@ store, inherits like code, and hands the result to a single child process.
 | `unset` fences: keys enver must never set; shell values pass through untouched | [`config.md`](docs/config.md#suppressing-variables-unset) |
 | Provenance: every value annotated `# from <profile> (<layer>)` in `show` | [`cli.md`](docs/cli.md#preview-and-masking) |
 | Secrets encrypted at rest (argon2id + AES-256-GCM), transparent decrypt | [`secrets.md`](docs/secrets.md) |
+| `~KEY` marks any variable a secret candidate, whatever its name | [`secrets.md`](docs/secrets.md#marking-arbitrary-values) |
 | `.env` round-trip with comments, raw `$VAR` references, diff-marked import | [`dotenv.md`](docs/dotenv.md) |
 
 ## How it works

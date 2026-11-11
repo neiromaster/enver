@@ -86,6 +86,69 @@ func TestDecryptKeepsMarkThroughRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSecretMarkEndToEnd walks the whole marked-variable story through the
+// binary: the mark widens what encrypt seals without touching the runtime name,
+// text show masks it and says it is still plaintext, and export hands the child
+// the bare key. The file keeps the mark in every step, so the candidate survives
+// a round trip.
+func TestSecretMarkEndToEnd(t *testing.T) {
+	s := newSandbox(t)
+	s.writeGlobal("profiles:\n  work:\n    env:\n      ~PROJECT_PATH: /home/anna/enver\n      PLAIN: x\n")
+
+	r := s.run("show", "work")
+	if r.ExitCode != 0 {
+		t.Fatalf("show: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "marked, not encrypted") {
+		t.Fatalf("a marked plaintext value must say so, got: %q", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "/home/anna/enver") {
+		t.Fatalf("a marked value must mask whatever its name looks like, got: %q", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "PLAIN=x") {
+		t.Fatalf("an unmarked non-secret key must stay readable, got: %q", r.Stdout)
+	}
+
+	requireKeygen(t, s)
+	if r := s.run("encrypt", "-g", "work"); r.ExitCode != 0 {
+		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	cfg := s.readFile(s.configPath())
+	if !strings.Contains(cfg, "~PROJECT_PATH: enc:v3:") {
+		t.Fatalf("the mark must seal the value under its marked spelling, got: %q", cfg)
+	}
+	if !strings.Contains(cfg, "PLAIN: x") {
+		t.Fatalf("an unmarked non-secret key must stay plaintext, got: %q", cfg)
+	}
+
+	r = s.run("show", "work")
+	if r.ExitCode != 0 {
+		t.Fatalf("show after encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if strings.Contains(r.Stdout, "marked, not encrypted") {
+		t.Fatalf("a sealed value must drop the plaintext note, got: %q", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "/home/anna/enver") {
+		t.Fatalf("a sealed value must stay masked, got: %q", r.Stdout)
+	}
+
+	r = s.run("show", "--no-mask", "work")
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "/home/anna/enver") {
+		t.Fatalf("--no-mask must reveal the decrypted value, got %d, %q, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+
+	r = s.run("export", "work")
+	if r.ExitCode != 0 {
+		t.Fatalf("export: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "export PROJECT_PATH=") {
+		t.Fatalf("export must spell the runtime name, got: %q", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "~PROJECT_PATH") {
+		t.Fatalf("the mark must never reach a runtime surface, got: %q", r.Stdout)
+	}
+}
+
 func TestEncryptShowDecryptLifecycle(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
