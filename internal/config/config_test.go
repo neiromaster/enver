@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neiromaster/enver/internal/envname"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1165,5 +1166,75 @@ func TestUnmarshalRejectsEnvKeyItCannotWalk(t *testing.T) {
 	err := yaml.Unmarshal([]byte("e: &e env\nprofiles:\n  work:\n    *e:\n      A: 1\n"), &c)
 	if err == nil || !strings.Contains(err.Error(), "enver can read") {
 		t.Fatalf("want an unreadable-env error, got %v", err)
+	}
+}
+
+func profileConfig(name string, env map[string]string, markedKey string) Config {
+	p := Profile{Env: env}
+	if markedKey != "" {
+		p.Marked = map[string]bool{markedKey: true}
+	}
+	return Config{Profiles: map[string]Profile{name: p}}
+}
+
+func TestMergeLocalPlainKeyClearsInheritedMark(t *testing.T) {
+	base := profileConfig("work", map[string]string{"TOKEN": "a"}, "TOKEN")
+	local := profileConfig("work", map[string]string{"TOKEN": "b"}, "")
+	got := Merge(base, local).Profiles["work"]
+	if got.Marked["TOKEN"] {
+		t.Fatal("local unmarked override must clear the mark")
+	}
+}
+
+func TestResolveCloserOverrideClearsMark(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}, Env: map[string]string{"TOKEN": "b"}},
+	}}
+	r, err := cfg.ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Marked["TOKEN"] {
+		t.Fatal("own unmarked entry must clear the inherited mark")
+	}
+}
+
+func TestResolveInheritsMarkWhenUntouched(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}},
+	}}
+	r, _ := cfg.ResolveProfile("work")
+	if !r.Marked["TOKEN"] {
+		t.Fatal("an untouched inherited mark must survive")
+	}
+}
+
+func TestUnsetFenceDropsMark(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}},
+		"work": {Extends: Extends{"base"}, Unset: Unsets{"TOKEN"}},
+	}}
+	r, _ := cfg.ResolveProfile("work")
+	if r.Marked["TOKEN"] {
+		t.Fatal("a fenced key keeps no mark")
+	}
+}
+
+func TestResolveCaseVariantClearsMarkOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("env names are case-sensitive elsewhere")
+	}
+	cfg := Config{Profiles: map[string]Profile{
+		"base": {Env: map[string]string{"Path": "a"}, Marked: map[string]bool{"Path": true}},
+		"work": {Extends: Extends{"base"}, Env: map[string]string{"PATH": "b"}},
+	}}
+	r, err := cfg.ResolveProfile("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked, _ := envname.Get(r.Marked, "PATH"); marked {
+		t.Fatal("a case-variant override must clear the mark on Windows")
 	}
 }
