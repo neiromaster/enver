@@ -133,12 +133,36 @@ func TestMaskValue(t *testing.T) {
 		{"CREDENTIAL", "cred-xxxx"},
 	}
 	for _, c := range cases {
-		if got := MaskValue(c.k, c.v); got == c.v {
+		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got == c.v {
 			t.Fatalf("MaskValue(%q) returned the value unchanged", c.k)
 		}
 	}
-	if got := MaskValue("ANTHROPIC_MODEL", "claude-sonnet-5"); got != "claude-sonnet-5" {
+	if got := MaskValue("claude-sonnet-5", ShouldMask("ANTHROPIC_MODEL", "claude-sonnet-5", false, false)); got != "claude-sonnet-5" {
 		t.Fatalf("non-secret masked: got %q", got)
+	}
+}
+
+func TestShouldMask(t *testing.T) {
+	if !ShouldMask("PROJECT_PATH", "/home/anna", true, false) {
+		t.Fatal("marked masks")
+	}
+	if !ShouldMask("X", "enc:v3:abc", false, true) {
+		t.Fatal("encrypted at rest masks")
+	}
+	if !ShouldMask("GITHUB_TOKEN", "x", false, false) {
+		t.Fatal("heuristic still masks")
+	}
+	if ShouldMask("API", "https://api.example.com", false, false) {
+		t.Fatal("a plain non-secret value must not mask")
+	}
+}
+
+func TestMaskValueKeepsShortValueHidden(t *testing.T) {
+	if got := MaskValue("hunter2", true); strings.Contains(got, "hunter2") {
+		t.Fatalf("MaskValue leaked the value: %q", got)
+	}
+	if got := MaskValue("hunter2", false); got != "hunter2" {
+		t.Fatalf("unmarked value changed: %q", got)
 	}
 }
 
@@ -152,7 +176,7 @@ func TestMaskValueShortSecretRedacted(t *testing.T) {
 		{"0123456789ab", "0123…" + "(len=12)"},
 	}
 	for _, c := range cases {
-		if got := MaskValue("API_KEY", c.v); got != c.want {
+		if got := MaskValue(c.v, ShouldMask("API_KEY", c.v, false, false)); got != c.want {
 			t.Errorf("MaskValue(API_KEY, %q) = %q, want %q", c.v, got, c.want)
 		}
 	}
@@ -167,7 +191,7 @@ func TestMaskValueURLSecrets(t *testing.T) {
 		{"GITHUB_URL", "https://ghp_xxx@github.com/org/repo"},
 	}
 	for _, c := range cases {
-		if got := MaskValue(c.k, c.v); got == c.v {
+		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got == c.v {
 			t.Fatalf("MaskValue(%q) should redact URL credentials", c.k)
 		}
 	}
@@ -178,7 +202,7 @@ func TestMaskValueURLSecrets(t *testing.T) {
 		{"POSTGRES_URL", "postgres://db:5432/app"},
 	}
 	for _, c := range plain {
-		if got := MaskValue(c.k, c.v); got != c.v {
+		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got != c.v {
 			t.Fatalf("MaskValue(%q) must not redact a URL without credentials, got %q", c.k, got)
 		}
 	}

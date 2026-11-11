@@ -33,6 +33,70 @@ func TestPrintEnvMasking(t *testing.T) {
 	}
 }
 
+// TestPrintEnvMarkedAnnotation pins the secret-mark rendering: a marked value
+// masks whatever its name looks like, and a marked row still holding plaintext
+// carries a note saying so. Once the value is ciphertext at rest the note goes
+// away — the promise is kept and there is nothing to flag.
+func TestPrintEnvMarkedAnnotation(t *testing.T) {
+	env := map[string]string{"PROJECT_PATH": "/home/anna"}
+	chain := []string{"dev"}
+	sources := map[string]config.Source{"PROJECT_PATH": {Profile: "dev", Layer: "local"}}
+	marked := map[string]bool{"PROJECT_PATH": true}
+
+	var out bytes.Buffer
+	if err := printEnv(&out, env, chain, sources, nil, envRender{marked: marked}); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	s := out.String()
+	if strings.Contains(s, "/home/anna") {
+		t.Errorf("marked value leaked:\n%s", s)
+	}
+	if !strings.Contains(s, "# from dev (local) ~ marked, not encrypted") {
+		t.Errorf("plaintext secret missing its annotation:\n%s", s)
+	}
+
+	var enc bytes.Buffer
+	if err := printEnv(&enc, env, chain, sources, nil, envRender{marked: marked, encrypted: map[string]bool{"PROJECT_PATH": true}}); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	es := enc.String()
+	if strings.Contains(es, "/home/anna") {
+		t.Errorf("marked encrypted value leaked:\n%s", es)
+	}
+	if strings.Contains(es, "marked, not encrypted") {
+		t.Errorf("encrypted secret kept the plaintext annotation:\n%s", es)
+	}
+
+	// Without provenance the note rides the plain line, so the flag never
+	// depends on the per-key source being known.
+	var bare bytes.Buffer
+	if err := printEnv(&bare, env, chain, nil, nil, envRender{marked: marked}); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	if bs := bare.String(); !strings.Contains(bs, "~ marked, not encrypted") {
+		t.Errorf("sourceless plaintext secret missing its annotation:\n%s", bs)
+	}
+}
+
+// TestShowWiresSecretMarks pins the mark's trip from the YAML key to the text
+// renderer: show resolves the profile itself, so the annotation only appears if
+// the resolved marks reach printEnv.
+func TestShowWiresSecretMarks(t *testing.T) {
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global.yaml")
+	writeDoc(t, globalPath, "profiles:\n  dev:\n    env:\n      ~PROJECT_PATH: /home/anna\n")
+	out, err := runCommand(t, "--config", globalPath, "--chdir", dir, "show", "dev")
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if strings.Contains(out, "/home/anna") {
+		t.Fatalf("show leaked the marked value: %q", out)
+	}
+	if !strings.Contains(out, "~ marked, not encrypted") {
+		t.Fatalf("show lost the plaintext annotation: %q", out)
+	}
+}
+
 // TestPrintEnvJSON pins the JSON contract: machine-readable output is always
 // unmasked. Text masking is for human eyes; a consumer piping JSON to a tool
 // needs the real values, and --no-mask stays a text-output concern.

@@ -71,6 +71,16 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 	if err != nil {
 		return config.Resolved{}, err
 	}
+	// Record ciphertext before decryption overwrites it: masking and the
+	// plaintext-secret warning both key off how a value sits at rest.
+	for k, v := range r.Env {
+		if crypto.IsEncrypted(v) {
+			if r.Encrypted == nil {
+				r.Encrypted = map[string]bool{}
+			}
+			r.Encrypted[k] = true
+		}
+	}
 	if prefix := foreignEncPrefix(r.Env); prefix != "" {
 		return config.Resolved{}, crypto.ForeignEncError(prefix)
 	}

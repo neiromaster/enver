@@ -449,7 +449,9 @@ type Source struct {
 // Resolved is the outcome of resolving a profile: the merged env, the merged
 // comments (nearest commented definer wins, matching value provenance), the
 // per-key source provenance, the secret marks whose winning entry carried one,
-// the unset tombstones, and the self-first lineage chain.
+// the unset tombstones, and the self-first lineage chain. Whether a value was
+// encrypted is not known here — ResolveProfile sees the file as written but
+// only the caller decrypts — so Encrypted is filled in by the run layer.
 type Resolved struct {
 	Env      map[string]string
 	Comments map[string]string
@@ -457,6 +459,9 @@ type Resolved struct {
 	// Marked holds the keys written with a secret mark by their winning entry;
 	// nil when no key ends up marked.
 	Marked map[string]bool
+	// Encrypted holds the keys whose value was ciphertext at rest before
+	// resolution decrypted it; nil when no value was encrypted.
+	Encrypted map[string]bool
 	// Unsets reports the keys deliberately absent from Env, each attributed to
 	// the profile whose unset last removed (or declared) it. A closer
 	// redefinition clears the tombstone; a tombstone never coexists with a
@@ -720,11 +725,20 @@ func ShouldEncrypt(k, v string) bool {
 	return marked || secretRe.MatchString(name) || urlCredRe.MatchString(v)
 }
 
-// MaskValue redacts secret-looking values for display. A secret shows its
-// first four characters only when the value is long enough to keep the prefix
-// no more than a third of it; shorter values reveal just their length.
-func MaskValue(k, v string) string {
-	if !IsSensitive(k, v) || v == "" {
+// ShouldMask reports whether a resolved value must be masked in text output:
+// the winning entry carries the secret mark, the value is ciphertext at rest,
+// or the name/value heuristic flags it. Display masking is separate from
+// ShouldEncrypt so a value encrypted without a mark, or a marked value not yet
+// encrypted, still hides on screen.
+func ShouldMask(k, v string, marked, encrypted bool) bool {
+	return marked || encrypted || IsSensitive(k, v)
+}
+
+// MaskValue redacts a value for display. A secret shows its first four
+// characters only when the value is long enough to keep the prefix no more
+// than a third of it; shorter values reveal just their length.
+func MaskValue(v string, secret bool) string {
+	if !secret || v == "" {
 		return v
 	}
 	if len(v) >= 12 {
