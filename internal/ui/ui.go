@@ -10,6 +10,10 @@ type EnvEntry struct {
 	// Secret reports that the entry carries the secret mark. Key stays the
 	// runtime name: the mark is file syntax, never part of the name.
 	Secret bool
+	// Encrypted reports that the entry's value is sealed at rest. The editor
+	// loads such a value decrypted for the card and seals it again on save; no
+	// text field can express the state, so it rides along like Secret.
+	Encrypted bool
 }
 
 // Option is one selectable item in a Select prompt.

@@ -67,12 +67,26 @@ func menuErrorAction(err error, dirty bool) (exitErr error, ask bool) {
 	return nil, true
 }
 
-func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
+// newEditState loads the working copy. A value sealed at rest is decrypted for
+// the card and flagged, so the commit can seal it again; without a crypter the
+// ciphertext stays as it is and the flag keeps that entry's card shut.
+func newEditState(name string, prof config.Profile, comments map[string]string, isDefault bool, crypter *valueCrypter) (editState, error) {
 	keys := slices.Sorted(maps.Keys(prof.Env))
 	entries := make([]ui.EnvEntry, 0, len(keys))
 	for _, k := range keys {
 		secret, _ := envname.Get(prof.Marked, k)
-		entries = append(entries, ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k], Secret: secret})
+		entry := ui.EnvEntry{Key: k, Value: prof.Env[k], Comment: comments[k], Secret: secret}
+		if crypto.IsEncrypted(entry.Value) {
+			entry.Encrypted = true
+			if crypter != nil {
+				plain, err := crypto.DecryptValue(entry.Value, crypter.Key)
+				if err != nil {
+					return editState{}, fmt.Errorf("decrypt %s: %w", k, err)
+				}
+				entry.Value = plain
+			}
+		}
+		entries = append(entries, entry)
 	}
 	return editState{
 		name:          name,
@@ -84,7 +98,19 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 		origIsDefault: isDefault,
 		origEntries:   append([]ui.EnvEntry(nil), entries...),
 		origUnset:     slices.Clone(prof.Unset),
-	}
+	}, nil
+}
+
+// cannotDecryptNote explains why an encrypted value's card stays shut: with no
+// key the card could only show ciphertext, and submitting that text would
+// overwrite the secret with it.
+const cannotDecryptNote = "cannot decrypt: no key"
+
+// editCardBlocked reports whether an entry's card must stay shut. The
+// encryption flag alone is not the reason — a resolved crypter makes the value
+// readable — so only the absence of a key blocks.
+func editCardBlocked(e ui.EnvEntry, crypter *valueCrypter) bool {
+	return e.Encrypted && crypter == nil
 }
 
 func (s *editState) find(key string) (ui.EnvEntry, bool) {
@@ -124,6 +150,42 @@ func (s editState) envMap() map[string]string {
 		}
 	}
 	return m
+}
+
+// envForWrite builds the env mapping the commit persists. A value the card showed
+// decrypted is sealed again under the crypter's key and era; everything else —
+// including an entry still holding ciphertext because no key was available — is
+// written unchanged. A crypter that cannot encrypt never gets here: commitEdit
+// refuses it before composing the write.
+func (s editState) envForWrite(crypter *valueCrypter) (map[string]string, error) {
+	m := make(map[string]string, len(s.entries))
+	for _, e := range s.entries {
+		if e.Key == "" {
+			continue
+		}
+		value := e.Value
+		if e.Encrypted && crypter != nil && !crypto.IsEncrypted(value) {
+			sealed, err := crypter.Encrypt(value)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt %s: %w", e.Key, err)
+			}
+			value = sealed
+		}
+		envname.Set(m, e.Key, value)
+	}
+	return m, nil
+}
+
+// plaintextSecrets lists the keys that stay encrypted but now hold plaintext —
+// the values a commit has to seal again to keep them secret at rest.
+func (s editState) plaintextSecrets() []string {
+	var keys []string
+	for _, e := range s.entries {
+		if e.Encrypted && !crypto.IsEncrypted(e.Value) {
+			keys = append(keys, e.Key)
+		}
+	}
+	return keys
 }
 
 func (s editState) commentsMap() map[string]string {
@@ -225,6 +287,7 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 		if e.Key == key {
 			seed.Value = e.Value
 			seed.Secret = e.Secret
+			seed.Encrypted = e.Encrypted
 			break
 		}
 	}
@@ -245,8 +308,24 @@ func (s *editState) addEntry(entry ui.EnvEntry, inherited []ui.EnvEntry) {
 	if !entry.Secret {
 		entry.Secret = s.carriedMark(entry.Key, inherited)
 	}
+	if !entry.Encrypted {
+		entry.Encrypted = s.carriedEncryption(entry.Key)
+	}
 	settleDefineFence(s, entry.Key)
 	s.upsert(entry)
+}
+
+// carriedEncryption reports whether the copy already holds key as an encrypted
+// entry. A collected Add entry cannot express the encryption state, so replacing
+// an encrypted value must not write the typed text to the file in the clear.
+// Inherited entries are resolved raw values and never carry the state.
+func (s *editState) carriedEncryption(key string) bool {
+	for _, e := range s.entries {
+		if envname.Equal(e.Key, key) {
+			return e.Encrypted
+		}
+	}
+	return false
 }
 
 // carriedMark is the mark already in play for key: the own entry's, which is the
@@ -269,7 +348,7 @@ func (s *editState) carriedMark(key string, inherited []ui.EnvEntry) bool {
 // maskedLabel renders one variable row: the value masked exactly as the menu
 // listing masks it, so no picker reveals a value another surface hides.
 func maskedLabel(e ui.EnvEntry) string {
-	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))
+	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, e.Encrypted)))
 }
 
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {
@@ -670,7 +749,14 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	}
 	wasDefault := isDefault
 
-	s := newEditState(name, prof, prof.Comments, isDefault)
+	crypter, err := crypterForProfile(path, prof)
+	if err != nil {
+		return err
+	}
+	s, err := newEditState(name, prof, prof.Comments, isDefault, crypter)
+	if err != nil {
+		return err
+	}
 	for {
 		inherited := listedInheritedForState(cfg, s)
 		choice, err := ui.Select(editTitle(s), s.menuOptions(inherited, overrideKeySet(cfg, s)))
@@ -693,7 +779,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		case "action":
 			switch key {
 			case actionDone:
-				if err := commitEdit(path, cfg, s, wasDefault); err != nil {
+				if err := commitEdit(path, cfg, s, wasDefault, crypter); err != nil {
 					fmt.Fprintf(os.Stderr, "\n%v\n", err)
 					continue
 				}
@@ -789,6 +875,10 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			}
 		case "own":
 			cur, _ := s.find(key)
+			if editCardBlocked(cur, crypter) {
+				fmt.Println("  " + cannotDecryptNote)
+				continue
+			}
 			edited, err := ui.EnvCard(cur)
 			if err != nil {
 				continue
@@ -833,16 +923,32 @@ func applyExtendsPick(cfg config.Config, name string, s *editState, picked []str
 
 // commitEdit commits the working copy: a pending delete is honored first;
 // otherwise it validates (extends cycle, non-empty invariant) and writes the
-// profile, secret marks included as the working copy decided them.
-// setDefault/clearDefault are derived from wasDefault vs the toggled state.
-func commitEdit(path string, cfg config.Config, s editState, wasDefault bool) error {
+// profile, secret marks included as the working copy decided them and encrypted
+// values sealed again. setDefault/clearDefault are derived from wasDefault vs the
+// toggled state. A value that must be sealed but cannot be — no key at all, or a
+// key without a salt — fails before the file is touched, since writing it as it
+// stands would put the secret on disk in the clear.
+func commitEdit(path string, cfg config.Config, s editState, wasDefault bool, crypter *valueCrypter) error {
 	if s.deleteProfile {
 		return config.DeleteProfile(path, s.name)
 	}
 	if err := commitValidate(cfg, s); err != nil {
 		return err
 	}
-	p := config.Profile{Extends: s.extends, Unset: s.unset, Env: s.envMap(), Comments: s.commentsMap(), Marked: s.markMap()}
+	if keys := s.plaintextSecrets(); len(keys) > 0 {
+		switch {
+		case crypter == nil:
+			return fmt.Errorf("refusing to write %s in plaintext: no key is available (set --key or ENVER_KEY)",
+				strings.Join(keys, ", "))
+		case crypter.Salt == nil:
+			return errSaltlessCrypter
+		}
+	}
+	env, err := s.envForWrite(crypter)
+	if err != nil {
+		return err
+	}
+	p := config.Profile{Extends: s.extends, Unset: s.unset, Env: env, Comments: s.commentsMap(), Marked: s.markMap()}
 	return config.WriteProfile(path, s.name, p, s.isDefault, !s.isDefault && wasDefault)
 }
 
@@ -865,9 +971,32 @@ type valueCrypter struct {
 	Params crypto.Argon2Params
 }
 
+// errSaltlessCrypter reports a crypter that can decrypt but not encrypt: the key
+// came from ENVER_KEY, which carries no salt to seal new values under.
+var errSaltlessCrypter = errors.New("this key cannot encrypt (ENVER_KEY carries no salt)")
+
 // Encrypt seals plain into an enc:v3: value under the crypter's key and era.
 func (c *valueCrypter) Encrypt(plain string) (string, error) {
 	return crypto.EncryptValueWithParams(plain, c.Key, c.Salt, c.Params)
+}
+
+// crypterForProfile resolves the crypter the editor needs for a profile's own
+// encrypted values. A profile with none needs no key, so opening it neither
+// resolves nor prompts for one. An absent key — and a declined passphrase, which
+// is the same absence — leaves the ciphertext in place; a wrong key is a
+// misconfiguration and propagates.
+func crypterForProfile(path string, prof config.Profile) (*valueCrypter, error) {
+	if !slices.ContainsFunc(slices.Collect(maps.Values(prof.Env)), crypto.IsEncrypted) {
+		return nil, nil
+	}
+	crypter, err := crypterFor(path)
+	if errors.Is(err, app.ErrNoKey) || errors.Is(err, ui.ErrCanceled) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return crypter, nil
 }
 
 // crypterFor resolves the key and era for writing encrypted values in path. The

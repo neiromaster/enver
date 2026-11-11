@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ import (
 func TestNewEditStateSortedWithComments(t *testing.T) {
 	prof := config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"B": "2", "A": "1"}}
 	comments := map[string]string{"A": "the A"}
-	s := newEditState("p", prof, comments, true)
+	s := plainState(t, "p", prof, comments, true)
 	if !s.extends.Has("base") || !s.isDefault || len(s.entries) != 2 {
 		t.Fatalf("state = %+v", s)
 	}
@@ -31,7 +32,7 @@ func TestNewEditStateSortedWithComments(t *testing.T) {
 }
 
 func TestEditStateUpsertUpdateAndAppend(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new", Comment: "c"})
 	s.upsert(ui.EnvEntry{Key: "B", Value: "2"})
 	if s.entries[0].Value != "1-new" || s.entries[0].Comment != "c" {
@@ -43,7 +44,7 @@ func TestEditStateUpsertUpdateAndAppend(t *testing.T) {
 }
 
 func TestEditStateDeleteKey(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, nil, false)
 	s.deleteKey("A")
 	if _, ok := s.find("A"); ok || len(s.entries) != 1 {
 		t.Fatalf("delete failed: %+v", s.entries)
@@ -51,11 +52,11 @@ func TestEditStateDeleteKey(t *testing.T) {
 }
 
 func TestEditStateCanCommitInvariant(t *testing.T) {
-	empty := newEditState("p", config.Profile{}, nil, false)
+	empty := plainState(t, "p", config.Profile{}, nil, false)
 	if err := empty.canCommit(); err == nil {
 		t.Fatal("empty non-extending profile should not commit")
 	}
-	withExtends := newEditState("p", config.Profile{Extends: config.Extends{"base"}}, nil, false)
+	withExtends := plainState(t, "p", config.Profile{Extends: config.Extends{"base"}}, nil, false)
 	if err := withExtends.canCommit(); err != nil {
 		t.Fatalf("extends-only should commit: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestEditStateCanCommitInvariant(t *testing.T) {
 
 func TestEditStateDirtyDetection(t *testing.T) {
 	// Freshly loaded: clean, including a comment and extends and default.
-	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"A": "1"}},
+	s := plainState(t, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"A": "1"}},
 		map[string]string{"A": "c"}, true)
 	if s.dirty() {
 		t.Fatal("freshly loaded state should not be dirty")
@@ -90,21 +91,21 @@ func TestEditStateDirtyDetection(t *testing.T) {
 	}
 
 	// Changed extends from clean state.
-	se := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	se := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	se.extends = config.Extends{"base"}
 	if !se.dirty() {
 		t.Fatal("changed extends should be dirty")
 	}
 
 	// Toggled default from clean state.
-	sd := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	sd := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	sd.isDefault = true
 	if !sd.dirty() {
 		t.Fatal("toggled default should be dirty")
 	}
 
 	// Pending profile deletion from clean state.
-	sp := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	sp := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	sp.deleteProfile = true
 	if !sp.dirty() {
 		t.Fatal("pending delete should be dirty")
@@ -112,7 +113,7 @@ func TestEditStateDirtyDetection(t *testing.T) {
 }
 
 func TestMenuOptionsDoneMarksUnsaved(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	if got := doneLabelOf(s.menuOptions(nil, nil)); got != "Done" {
 		t.Fatalf("clean Done label = %q, want %q", got, "Done")
 	}
@@ -140,7 +141,7 @@ func optionLabels(opts []ui.Option) string {
 }
 
 func TestMenuOptionsContainsVarsInheritedAndActions(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	inherited := []ui.EnvEntry{{Key: "INH", Value: "y"}}
 	labels := optionLabels(s.menuOptions(inherited, nil))
 	for _, want := range []string{"OWN", "INH", "Add variable", "Change extends", "Done", "Delete variable", "Delete profile", "Set as default"} {
@@ -154,7 +155,7 @@ func TestMenuOptionsContainsVarsInheritedAndActions(t *testing.T) {
 // display-only listing, so secret values mask there exactly as they do in
 // show. Selecting a row still opens the full-value card.
 func TestMenuOptionsMaskSecretValues(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{
+	s := plainState(t, "p", config.Profile{Env: map[string]string{
 		"API_SECRET": "hunter2", "PLAIN": "visible",
 	}}, nil, false)
 	labels := optionLabels(s.menuOptions(nil, nil))
@@ -171,7 +172,7 @@ func TestMenuOptionsMaskSecretValues(t *testing.T) {
 // trips the sensitivity heuristic, on own and inherited rows alike — and the
 // same value stays visible without the mark.
 func TestMenuOptionsMasksMarkedValue(t *testing.T) {
-	marked := newEditState("p", config.Profile{
+	marked := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"K": "hunter2"},
 		Marked: map[string]bool{"K": true},
 	}, nil, false)
@@ -180,7 +181,7 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 		t.Fatalf("menu leaked a marked value: %s", labels)
 	}
 
-	plain := newEditState("p", config.Profile{Env: map[string]string{"K": "hunter2"}}, nil, false)
+	plain := plainState(t, "p", config.Profile{Env: map[string]string{"K": "hunter2"}}, nil, false)
 	plainLabels := optionLabels(plain.menuOptions([]ui.EnvEntry{{Key: "GH", Value: "hunter2"}}, nil))
 	if !strings.Contains(plainLabels, "hunter2") {
 		t.Fatalf("an unmarked value must stay visible: %s", plainLabels)
@@ -188,7 +189,7 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 }
 
 func TestParseMenuChoice(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	if kind, key := parseMenuChoice("OWN", s); kind != "own" || key != "OWN" {
 		t.Fatalf("own choice: kind=%q key=%q", kind, key)
 	}
@@ -196,7 +197,7 @@ func TestParseMenuChoice(t *testing.T) {
 		t.Fatalf("action choice: kind=%q key=%q", kind, key)
 	}
 	// An override row's Value is the bare key, so it classifies as "own".
-	overrideState := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine"}}, nil, false)
+	overrideState := plainState(t, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine"}}, nil, false)
 	if kind, key := parseMenuChoice("SHADOW", overrideState); kind != "own" || key != "SHADOW" {
 		t.Fatalf("override choice: kind=%q key=%q", kind, key)
 	}
@@ -207,7 +208,7 @@ func TestInheritedForStateReflectsWorkingExtends(t *testing.T) {
 		"base": {Env: map[string]string{"FROM_BASE": "b"}},
 	}}
 	// Working copy starts with no extends: nothing inherited.
-	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	if got := inheritedForState(cfg, s); len(got) != 0 {
 		t.Fatalf("expected no inherited before extends set, got %+v", got)
 	}
@@ -224,7 +225,7 @@ func TestInheritedForStateReexposesDeletedShadow(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"OWN": "from-base"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "mine"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "mine"}}, nil, false)
 	if got := inheritedForState(cfg, s); len(got) != 0 {
 		t.Fatalf("expected no inherited while own shadows, got %+v", got)
 	}
@@ -240,7 +241,7 @@ func TestInheritedForStateEmptyOnCycle(t *testing.T) {
 		"a": {Extends: config.Extends{"b"}},
 		"b": {Extends: config.Extends{"a"}, Env: map[string]string{"K": "v"}},
 	}}
-	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	s.extends = config.Extends{"b"} // would cycle
 	if got := inheritedForState(cfg, s); got != nil {
 		t.Fatalf("expected nil inherited on pending cycle, got %+v", got)
@@ -253,7 +254,7 @@ func TestCommitValidateCycleRejected(t *testing.T) {
 		"a": {Extends: config.Extends{"b"}},
 		"b": {Extends: config.Extends{"a"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: config.Extends{"b"}, Env: map[string]string{"K": "v"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Extends: config.Extends{"b"}, Env: map[string]string{"K": "v"}}, nil, false)
 	s.extends = config.Extends{"b"} // a extending b, where b extends a
 	if err := commitValidate(cfg, s); err == nil {
 		t.Fatal("cycle not rejected")
@@ -266,7 +267,7 @@ func TestApplyExtendsPickRejectsCycle(t *testing.T) {
 		"b":    {Extends: config.Extends{"a"}},
 		"base": {},
 	}}
-	s := newEditState("a", config.Profile{}, nil, false)
+	s := plainState(t, "a", config.Profile{}, nil, false)
 	s.extends = config.Extends{"base"}
 	err := applyExtendsPick(cfg, "a", &s, []string{"b"})
 	if err == nil {
@@ -279,7 +280,7 @@ func TestApplyExtendsPickRejectsCycle(t *testing.T) {
 
 func TestApplyExtendsPickAppliesAndClears(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{"base": {}}}
-	s := newEditState("a", config.Profile{}, nil, false)
+	s := plainState(t, "a", config.Profile{}, nil, false)
 	if err := applyExtendsPick(cfg, "a", &s, []string{"base"}); err != nil {
 		t.Fatalf("valid pick rejected: %v", err)
 	}
@@ -299,14 +300,14 @@ func TestCommitValidateValidExtends(t *testing.T) {
 		"base": {Env: map[string]string{"K": "v"}},
 		"a":    {Env: map[string]string{"K2": "v2"}},
 	}}
-	s := newEditState("a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"K2": "v2"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"K2": "v2"}}, nil, false)
 	if err := commitValidate(cfg, s); err != nil {
 		t.Fatalf("valid extends rejected: %v", err)
 	}
 }
 
 func TestCommitValidateEmpty(t *testing.T) {
-	s := newEditState("a", config.Profile{}, nil, false)
+	s := plainState(t, "a", config.Profile{}, nil, false)
 	if err := commitValidate(config.Config{}, s); err == nil {
 		t.Fatal("empty non-extending profile should not validate")
 	}
@@ -325,12 +326,12 @@ func TestCommitEditRoundTripsCommentsAndDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Default: "p", Profiles: map[string]config.Profile{"p": prof}}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	// Edit A (keep comment), delete B, add C with a comment.
 	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new", Comment: "a-hint"})
 	s.deleteKey("B")
 	s.upsert(ui.EnvEntry{Key: "C", Value: "3", Comment: "c-hint"})
-	if err := commitEdit(path, cfg, s, true); err != nil {
+	if err := commitEdit(path, cfg, s, true, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	p, isDef, _, err := config.ReadProfile(path, "p")
@@ -353,7 +354,7 @@ func TestMenuOptionsMarksOverrides(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
 	// Integration reality: SHADOW is an override, so inheritedForState excludes it.
 	if got := inheritedForState(cfg, s); len(got) != 0 {
 		t.Fatalf("shadowed key leaked into inherited set: %+v", got)
@@ -377,7 +378,7 @@ func TestProbeConfigCarriesWorkingExtendsAndEnv(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"FROM_BASE": "b"}},
 	}}
-	s := newEditState("a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "a", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	s.extends = config.Extends{"base"} // changed in-session, not yet committed
 	probe := probeConfig(cfg, s)
 	tp := probe.Profiles["a"]
@@ -411,7 +412,7 @@ func TestOverrideSeedFillsValueAndComment(t *testing.T) {
 }
 
 func TestDeleteVarOptionsMarksFences(t *testing.T) {
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"FKEY": "v", "OWN": "x"}, Unset: config.Unsets{"FKEY"}},
 		nil, false)
 	opts := deleteVarOptions(s, nil)
@@ -429,7 +430,7 @@ func TestOverrideKeySetIgnoresWorkingFences(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Extends: config.Extends{"base"},
 			Env:   map[string]string{"SHADOW": "mine"},
 			Unset: config.Unsets{"SHADOW"}},
@@ -444,7 +445,7 @@ func TestOverrideKeySetIgnoresWorkingFences(t *testing.T) {
 }
 
 func TestSettleDefineFenceLiftsOnDecline(t *testing.T) {
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X", "FKEY"}}, nil, false)
 	settleDefineFence(&s, "PLAIN")
 	if !nameSetsEqual(s.unset, config.Unsets{"X", "FKEY"}) {
@@ -456,7 +457,7 @@ func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"SHADOW": "mine", "OWN": "x"}}, nil, false)
 	opts := deleteVarOptions(s, overrideKeySet(cfg, s))
 	find := func(val string) ui.Option {
 		for _, o := range opts {
@@ -484,7 +485,7 @@ func TestDeleteVarOptionsMarksOverrides(t *testing.T) {
 }
 
 func TestMenuOptionsInheritedUsesIcon(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
 	inherited := []ui.EnvEntry{{Key: "INH", Value: "y"}}
 	opts := s.menuOptions(inherited, nil)
 	for _, o := range opts {
@@ -513,7 +514,7 @@ func findOption(t *testing.T, opts []ui.Option, value string) ui.Option {
 }
 
 func TestEditStateDirtyDetectsUnsetChanges(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
 	if s.dirty() {
 		t.Fatal("freshly loaded unset list should be clean")
 	}
@@ -532,7 +533,7 @@ func TestEditStateDirtyDetectsUnsetChanges(t *testing.T) {
 }
 
 func TestMenuOptionsManageUnsetsRow(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"X"}}, nil, false)
 	opt := findOption(t, s.menuOptions(nil, nil), actionManageUnsets)
 	if opt.Icon != ui.IconUnset {
 		t.Fatalf("manage row icon = %q, want %q", opt.Icon, ui.IconUnset)
@@ -541,7 +542,7 @@ func TestMenuOptionsManageUnsetsRow(t *testing.T) {
 		t.Fatalf("manage row label missing name/count: %q", opt.Label)
 	}
 
-	s0 := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
+	s0 := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false)
 	if got := findOption(t, s0.menuOptions(nil, nil), actionManageUnsets).Label; strings.Contains(got, "(") {
 		t.Fatalf("empty list should omit the count suffix: %q", got)
 	}
@@ -551,7 +552,7 @@ func TestMenuOptionsMarksFencedOwnVar(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Extends: config.Extends{"base"},
 			Env:   map[string]string{"SHADOW": "mine", "PLAIN": "v"},
 			Unset: config.Unsets{"SHADOW"}},
@@ -574,7 +575,7 @@ func TestMenuOptionsListsFencedInheritedDimmed(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"FROM_BASE": "b", "LIVE": "l"}},
 	}}
-	s := newEditState("a",
+	s := plainState(t, "a",
 		config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
 			Unset: config.Unsets{"FROM_BASE"}},
 		nil, false)
@@ -602,7 +603,7 @@ func TestListedInheritedSurvivesCarriedFence(t *testing.T) {
 			Carried: []config.CarriedFence{{Key: "FROM_BASE", Layer: config.LayerGlobal}}},
 		"base": {Env: map[string]string{"FROM_BASE": "b", "LIVE": "l"}},
 	}}
-	s := newEditState("a", cfg.Profiles["a"], nil, false)
+	s := plainState(t, "a", cfg.Profiles["a"], nil, false)
 	if listed := listedInheritedForState(cfg, s); len(listed) != 2 {
 		t.Fatalf("carried-fenced inherited keys dropped from display listing: %+v", listed)
 	}
@@ -617,7 +618,7 @@ func TestOverrideKeySetSurvivesCarriedFence(t *testing.T) {
 			Carried: []config.CarriedFence{{Key: "SHADOW", Layer: config.LayerGlobal}}},
 		"base": {Env: map[string]string{"SHADOW": "from-base"}},
 	}}
-	s := newEditState("a", cfg.Profiles["a"], nil, false)
+	s := plainState(t, "a", cfg.Profiles["a"], nil, false)
 	if !overrideKeySet(cfg, s)["SHADOW"] {
 		t.Fatal("a carried-fenced override should still count as parent-contributed")
 	}
@@ -627,7 +628,7 @@ func TestInheritedForStateExcludesDeclaredUnset(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"FROM_BASE": "b"}},
 	}}
-	s := newEditState("a",
+	s := plainState(t, "a",
 		config.Profile{Extends: config.Extends{"base"}, Env: map[string]string{"OWN": "x"},
 			Unset: config.Unsets{"FROM_BASE"}},
 		nil, false)
@@ -642,7 +643,7 @@ func TestInheritedForStateExcludesDeclaredUnset(t *testing.T) {
 
 func TestManageUnsetOptionsGroupsOrderAndDedupe(t *testing.T) {
 	inherited := []ui.EnvEntry{{Key: "API_KEY", Value: "k"}, {Key: "CACHE_TTL", Value: "c"}}
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"RETRIES": "5", "OWN": "x"},
 			Unset: config.Unsets{"CACHE_TTL", "ZZZ"}},
 		nil, false)
@@ -711,7 +712,7 @@ func TestDropUnsetKeyStripsOnlyTarget(t *testing.T) {
 }
 
 func TestEditStateDirtyIgnoresUnsetReorder(t *testing.T) {
-	s := newEditState("p",
+	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"A": "1"}, Unset: config.Unsets{"FA", "FB"}}, nil, false)
 	s.unset = config.Unsets{"FB", "FA"}
 	if s.dirty() {
@@ -737,9 +738,9 @@ func TestCommitEditRoundTripsUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Profiles: map[string]config.Profile{"p": prof}}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	s.upsert(ui.EnvEntry{Key: "A", Value: "1-new"})
-	if err := commitEdit(path, cfg, s, false); err != nil {
+	if err := commitEdit(path, cfg, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	gotProf, _, _, err := config.ReadProfile(path, "p")
@@ -785,7 +786,7 @@ func TestInheritedEntriesExcludesOwnKeys(t *testing.T) {
 // decision back to the file — and keyed by runtime name, never by the marked
 // spelling.
 func TestEditMarkMapAuthoritative(t *testing.T) {
-	s := newEditState("p", config.Profile{
+	s := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"A": "1", "B": "2"},
 		Marked: map[string]bool{"B": true},
 	}, nil, false)
@@ -799,7 +800,7 @@ func TestEditMarkMapAuthoritative(t *testing.T) {
 	if _, has := m["~B"]; has {
 		t.Fatalf("markMap is keyed by the marked spelling: %#v", m)
 	}
-	empty := newEditState("p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false).markMap()
+	empty := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1"}}, nil, false).markMap()
 	if empty == nil || len(empty) != 0 {
 		t.Fatalf("unmarked working copy = %#v, want a non-nil empty map", empty)
 	}
@@ -821,14 +822,14 @@ func TestEditStateMarksSurviveCommit(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
 	}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	if !s.entries[0].Secret {
 		t.Fatalf("mark lost on load: %+v", s.entries)
 	}
 	if s.entries[1].Secret {
 		t.Fatalf("unmarked key read as marked: %+v", s.entries)
 	}
-	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -874,14 +875,14 @@ func TestEditOverrideInheritsMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Profiles: map[string]config.Profile{"base": base, "work": prof}}
-	s := newEditState("work", prof, prof.Comments, isDefault)
+	s := plainState(t, "work", prof, prof.Comments, isDefault)
 	seed := overrideSeed(inheritedForState(cfg, s), nil, "GH_TOKEN")
 	if !seed.Secret || seed.Value != "from-base" {
 		t.Fatalf("override seed = %+v, want the inherited value and its mark", seed)
 	}
 
 	s.upsert(seed)
-	if err := commitEdit(path, cfg, s, false); err != nil {
+	if err := commitEdit(path, cfg, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	got, _, _, err := config.ReadProfile(path, "work")
@@ -920,10 +921,10 @@ func TestEditAddKeepsInheritedMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Profiles: map[string]config.Profile{"base": base, "work": prof}}
-	s := newEditState("work", prof, prof.Comments, isDefault)
+	s := plainState(t, "work", prof, prof.Comments, isDefault)
 
 	s.addEntry(ui.EnvEntry{Key: "GH_TOKEN", Value: "typed"}, listedInheritedForState(cfg, s))
-	if err := commitEdit(path, cfg, s, false); err != nil {
+	if err := commitEdit(path, cfg, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -963,13 +964,13 @@ func TestEditAddKeepsOwnMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	if cur, ok := s.find("K"); !ok || !cur.Secret {
 		t.Fatalf("setup: own entry should load marked: %+v", s.entries)
 	}
 
 	s.addEntry(ui.EnvEntry{Key: "K", Value: "typed"}, nil)
-	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -1009,14 +1010,14 @@ func TestEditDeleteMatchesMarkedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	entry, ok := s.find("GH_TOKEN")
 	if !ok || !entry.Secret {
 		t.Fatalf("the runtime name does not carry the mark: %+v", s.entries)
 	}
 
 	s.deleteKey("GH_TOKEN")
-	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -1065,7 +1066,7 @@ func TestMenuErrorAction(t *testing.T) {
 // selection is the authoritative mark set for own entries, and the Encrypt-now
 // row schedules the encrypt step without itself counting as an unsaved change.
 func TestSecretsActionTogglesMarks(t *testing.T) {
-	s := newEditState("p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, nil, false)
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"A": "1", "B": "2"}}, nil, false)
 	applySecretsPick(&s, []string{"A"}, nil, nil)
 	if !s.entries[0].Secret || s.entries[1].Secret {
 		t.Fatalf("selection [A] staged %+v, want A marked and B clear", s.entries)
@@ -1082,7 +1083,7 @@ func TestSecretsActionTogglesMarks(t *testing.T) {
 		t.Fatal("the Encrypt-now row must schedule the encrypt step")
 	}
 
-	scheduled := newEditState("p", config.Profile{
+	scheduled := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"A": "1"},
 		Marked: map[string]bool{"A": true},
 	}, nil, false)
@@ -1100,7 +1101,7 @@ func TestSecretsActionTogglesMarks(t *testing.T) {
 // own, sorted, then the Encrypt-now row. A picked inherited key materializes as
 // an own marked entry carrying the value and comment the picker showed.
 func TestSecretsMenuListsInheritedKeys(t *testing.T) {
-	s := newEditState("p", config.Profile{
+	s := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"OWN": "x", "K": "hunter2hunter2"},
 		Marked: map[string]bool{"K": true},
 		Unset:  config.Unsets{"OWN", "REGION"},
@@ -1188,9 +1189,9 @@ func TestSecretsEncryptRunsAfterCommit(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
 	}
-	s := newEditState("p", prof, prof.Comments, isDefault)
+	s := plainState(t, "p", prof, prof.Comments, isDefault)
 	applySecretsPick(&s, []string{"TOKEN", actionEncryptNow}, nil, nil)
-	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false); err != nil {
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
 		t.Fatalf("commitEdit: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -1328,5 +1329,364 @@ func TestSecretsEncryptWithEnvKeyKeepsMarks(t *testing.T) {
 	}
 	if got.Env["TOKEN"] != "plain-value" || !got.Marked["TOKEN"] {
 		t.Fatalf("the mark must stay saved with the value plaintext: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+}
+
+// plainState builds the working copy for a profile with no encrypted values, so
+// a test about marks, fences, or pickers never needs a key.
+func plainState(t *testing.T, name string, prof config.Profile, comments map[string]string, isDefault bool) editState {
+	t.Helper()
+	s, err := newEditState(name, prof, comments, isDefault, nil)
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	return s
+}
+
+// testKey and testSalt seal the edit tests' fixtures, so a crypter can be handed
+// to the editor without touching the real key ladder.
+var (
+	testKey  = bytes.Repeat([]byte{0x2a}, 32)
+	testSalt = []byte("0123456789abcdef")
+)
+
+func testCrypter() *valueCrypter {
+	return &valueCrypter{Key: testKey, Salt: testSalt, Params: crypto.CurrentParams}
+}
+
+func sealedValue(t *testing.T, value string) string {
+	t.Helper()
+	enc, err := crypto.EncryptValueWithParams(value, testKey, testSalt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	return enc
+}
+
+// TestEditDecryptsForDisplay pins the load half: an encrypted value reaches the
+// editor as the plaintext the card can edit, carrying the flag that says so, and
+// a plain sibling comes through untouched. The decrypted load must also leave the
+// copy clean — an unchanged profile may never read as unsaved.
+func TestEditDecryptsForDisplay(t *testing.T) {
+	sealed := sealedValue(t, "plain-value")
+	prof := config.Profile{Env: map[string]string{"TOKEN": sealed, "PLAIN": "visible"}}
+	s, err := newEditState("p", prof, nil, false, testCrypter())
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	token, ok := s.find("TOKEN")
+	if !ok || !token.Encrypted {
+		t.Fatalf("encrypted entry = %+v, want it flagged Encrypted", token)
+	}
+	if token.Value != "plain-value" {
+		t.Fatalf("card value = %q, want the decrypted plaintext", token.Value)
+	}
+	plain, _ := s.find("PLAIN")
+	if plain.Encrypted || plain.Value != "visible" {
+		t.Fatalf("plain entry = %+v, want it untouched and not Encrypted", plain)
+	}
+	if s.dirty() {
+		t.Fatal("a freshly loaded encrypted profile must read as clean")
+	}
+}
+
+// TestEditSaveReencrypts pins the save half: the plaintext the card showed goes
+// back to the file as fresh ciphertext that decrypts to the edited text.
+func TestEditSaveReencrypts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env: map[string]string{"TOKEN": sealedValue(t, "old-value"), "OTHER": "1"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	c := testCrypter()
+	s, err := newEditState("p", prof, prof.Comments, isDefault, c)
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	cur, _ := s.find("TOKEN")
+	cur.Value = "new-value"
+	s.upsert(cur)
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, c); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "new-value") {
+		t.Fatalf("the edited plaintext reached the file:\n%s", raw)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := got.Env["TOKEN"]
+	if !crypto.IsEncrypted(stored) {
+		t.Fatalf("the saved value is not ciphertext: %q", stored)
+	}
+	plain, err := crypto.DecryptValue(stored, testKey)
+	if err != nil || plain != "new-value" {
+		t.Fatalf("saved ciphertext decrypts to %q (%v), want the edited text", plain, err)
+	}
+	if got.Env["OTHER"] != "1" {
+		t.Fatalf("an unrelated key did not survive: %#v", got.Env)
+	}
+}
+
+// TestEditSaveWithoutKeyKeepsCiphertext pins the degrade: without a crypter the
+// entry keeps the ciphertext it already holds and its flag, its card stays shut,
+// and a commit touching another key writes that ciphertext back byte for byte.
+func TestEditSaveWithoutKeyKeepsCiphertext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	sealed := sealedValue(t, "old-value")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env: map[string]string{"TOKEN": sealed, "OTHER": "1"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	s, err := newEditState("p", prof, prof.Comments, isDefault, nil)
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	token, _ := s.find("TOKEN")
+	if !token.Encrypted || token.Value != sealed {
+		t.Fatalf("entry without a key = %+v, want the ciphertext kept and flagged", token)
+	}
+	if !editCardBlocked(token, nil) {
+		t.Fatal("an encrypted entry with no key must not open its card")
+	}
+	other, _ := s.find("OTHER")
+	other.Value = "2"
+	s.upsert(other)
+	if err := commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != sealed {
+		t.Fatalf("the ciphertext was rewritten behind the user's back: %q", got.Env["TOKEN"])
+	}
+	if got.Env["OTHER"] != "2" {
+		t.Fatalf("the edited key did not land: %#v", got.Env)
+	}
+}
+
+// TestEditCannotReencryptWithEnvKey pins the saltless guard: an ENVER_KEY key
+// decrypts but cannot seal, so a save that would have to write a decrypted value
+// back fails loudly and leaves the file exactly as it was.
+func TestEditCannotReencryptWithEnvKey(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", crypto.EncodeKey(testKey))
+	path := filepath.Join(dir, "config.yaml")
+	sealed := sealedValue(t, "old-value")
+	if err := config.UpsertProfile(path, "p", config.Profile{Env: map[string]string{"TOKEN": sealed}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	c, err := crypterFor(path)
+	if err != nil {
+		t.Fatalf("crypterFor: %v", err)
+	}
+	if c.Salt != nil {
+		t.Fatalf("ENVER_KEY must resolve a saltless crypter, got salt %x", c.Salt)
+	}
+	s, err := newEditState("p", prof, prof.Comments, isDefault, c)
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	cur, _ := s.find("TOKEN")
+	cur.Value = "new-value"
+	s.upsert(cur)
+
+	err = commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, c)
+	if err == nil || !strings.Contains(err.Error(), "cannot encrypt") {
+		t.Fatalf("commit error = %v, want a loud saltless-key refusal", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != sealed {
+		t.Fatalf("a failed commit must not touch the file: %q", got.Env["TOKEN"])
+	}
+}
+
+// TestEditCrypterForProfileNeedsNoKey pins the prompt discipline: a profile with
+// nothing encrypted never resolves a key, and an encrypted one whose key is
+// absent degrades to a nil crypter instead of failing.
+func TestEditCrypterForProfileNeedsNoKey(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", "")
+	prevKeyFile := crypto.KeyFilePath
+	crypto.KeyFilePath = func() string { return filepath.Join(dir, "missing-key") }
+	t.Cleanup(func() { crypto.KeyFilePath = prevKeyFile })
+	prevInteractive := app.Interactive
+	app.Interactive = func() bool { return false }
+	t.Cleanup(func() { app.Interactive = prevInteractive })
+
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "p", config.Profile{
+		Env: map[string]string{"PLAIN": "1", "TOKEN": sealedValue(t, "sealed")},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := crypterForProfile(path, config.Profile{Env: map[string]string{"PLAIN": "1"}})
+	if c != nil || err != nil {
+		t.Fatalf("a profile with no encrypted value = (%v, %v), want no key and no error", c, err)
+	}
+	c, err = crypterForProfile(path, prof)
+	if c != nil || err != nil {
+		t.Fatalf("an absent key must degrade = (%v, %v), want nil, nil", c, err)
+	}
+}
+
+// TestEditCardBlockedWithoutCrypter pins the one thing that keeps a card shut:
+// the flag alone is not enough — only the absence of a key is.
+func TestEditCardBlockedWithoutCrypter(t *testing.T) {
+	encrypted := ui.EnvEntry{Key: "K", Value: "ciphertext", Encrypted: true}
+	if !editCardBlocked(encrypted, nil) {
+		t.Fatal("an encrypted entry without a crypter must not open its card")
+	}
+	if editCardBlocked(encrypted, testCrypter()) {
+		t.Fatal("a resolved crypter must open the card")
+	}
+	if editCardBlocked(ui.EnvEntry{Key: "K", Value: "v"}, nil) {
+		t.Fatal("a plaintext entry needs no key")
+	}
+}
+
+// TestEditMenuMasksEncryptedPlaintext pins the labels: the menu and the Secrets
+// picker now hold decrypted values, so Encrypted has to mask them there — the
+// flag replaces the placeholder both menus used to pass.
+func TestEditMenuMasksEncryptedPlaintext(t *testing.T) {
+	prof := config.Profile{Env: map[string]string{"K": sealedValue(t, "hunter2hunter2")}}
+	s, err := newEditState("p", prof, nil, false, testCrypter())
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	entry, _ := s.find("K")
+	if !entry.Encrypted || entry.Value != "hunter2hunter2" {
+		t.Fatalf("setup: the entry must load decrypted and flagged, got %+v", entry)
+	}
+	labels := map[string]string{
+		"menu":    optionLabels(s.menuOptions(nil, nil)),
+		"secrets": optionLabels(secretsOptions(s, nil)),
+	}
+	for name, got := range labels {
+		if strings.Contains(got, "hunter2hunter2") {
+			t.Fatalf("the %s leaked a decrypted value: %s", name, got)
+		}
+	}
+}
+
+// TestEditAddKeepsEncryptedFlag pins the Add row's carry: no text field can
+// express the encryption state, so re-adding an encrypted key must keep sealing
+// the typed value instead of writing it to the file in the clear.
+func TestEditAddKeepsEncryptedFlag(t *testing.T) {
+	prof := config.Profile{Env: map[string]string{"K": sealedValue(t, "old")}}
+	s, err := newEditState("p", prof, nil, false, testCrypter())
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	s.addEntry(ui.EnvEntry{Key: "K", Value: "typed"}, nil)
+	entry, ok := s.find("K")
+	if !ok || !entry.Encrypted || entry.Value != "typed" {
+		t.Fatalf("re-added entry = %+v, want the typed value still Encrypted", entry)
+	}
+	env, err := s.envForWrite(testCrypter())
+	if err != nil {
+		t.Fatalf("envForWrite: %v", err)
+	}
+	plain, err := crypto.DecryptValue(env["K"], testKey)
+	if err != nil || plain != "typed" {
+		t.Fatalf("written value decrypts to %q (%v), want the typed text sealed", plain, err)
+	}
+}
+
+// TestEditRenameKeepsEncryptedFlag pins the rename path a card drives: the flag
+// rides with the entry, so the value is sealed under the new name.
+func TestEditRenameKeepsEncryptedFlag(t *testing.T) {
+	prof := config.Profile{Env: map[string]string{"K": sealedValue(t, "old")}}
+	s, err := newEditState("p", prof, nil, false, testCrypter())
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	entry, _ := s.find("K")
+	entry.Key = "RENAMED"
+	s.deleteKey("K") // the card path renames by deleting the old key first
+	s.upsert(entry)
+	if _, ok := s.find("K"); ok {
+		t.Fatal("setup: the old name must be gone")
+	}
+	renamed, _ := s.find("RENAMED")
+	if !renamed.Encrypted {
+		t.Fatalf("renamed entry = %+v, want the encryption state carried", renamed)
+	}
+	env, err := s.envForWrite(testCrypter())
+	if err != nil {
+		t.Fatalf("envForWrite: %v", err)
+	}
+	plain, err := crypto.DecryptValue(env["RENAMED"], testKey)
+	if err != nil || plain != "old" {
+		t.Fatalf("renamed value decrypts to %q (%v), want the sealed original", plain, err)
+	}
+}
+
+// TestEditRefusesPlaintextOverSecretWithoutKey pins the boundary the task exists
+// for: with no key the editor cannot seal anything, so it must not write a typed
+// plaintext over an encrypted variable. The Add row is the only way to reach that
+// state, since the card of an encrypted entry stays shut.
+func TestEditRefusesPlaintextOverSecretWithoutKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	sealed := sealedValue(t, "old-value")
+	if err := config.UpsertProfile(path, "p", config.Profile{Env: map[string]string{"TOKEN": sealed}}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "p")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+	s, err := newEditState("p", prof, prof.Comments, isDefault, nil)
+	if err != nil {
+		t.Fatalf("newEditState: %v", err)
+	}
+	s.addEntry(ui.EnvEntry{Key: "TOKEN", Value: "typed"}, nil)
+
+	err = commitEdit(path, config.Config{Profiles: map[string]config.Profile{"p": prof}}, s, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "plaintext") || !strings.Contains(err.Error(), "TOKEN") {
+		t.Fatalf("commit error = %v, want a refusal naming TOKEN", err)
+	}
+	got, _, _, err := config.ReadProfile(path, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["TOKEN"] != sealed {
+		t.Fatalf("the secret was overwritten: %q", got.Env["TOKEN"])
 	}
 }
