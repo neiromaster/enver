@@ -11,6 +11,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
@@ -20,6 +21,8 @@ const (
 	actionAdd           = "action:add"
 	actionExtends       = "action:extends"
 	actionDefault       = "action:default"
+	actionSecrets       = "action:secrets"
+	actionEncryptNow    = "action:encrypt-now"
 	actionDeleteVar     = "action:delete-var"
 	actionDeleteProfile = "action:delete-profile"
 	actionManageUnsets  = "action:manage-unsets"
@@ -37,6 +40,9 @@ type editState struct {
 	unset         config.Unsets
 	isDefault     bool
 	deleteProfile bool
+	// encryptNow is the Secrets menu's request to run the encrypt step once after
+	// a successful Done commit. It changes no entry, so it never reads as dirty.
+	encryptNow bool
 
 	// orig* snapshot the loaded profile for unsaved-change detection on the Done
 	// row. origEntries and origUnset are copies, so in-place edits to them never
@@ -229,11 +235,16 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 }
 
 // addEntry commits one collected Add entry into the working copy, carrying the
-// secret mark the copy already holds for that key. The working copy's mark map is
-// authoritative at write time, so an unmarked Add would declassify the key
-// rather than let the writer fall back to the file or an ancestor.
+// secret mark the copy already holds for that key. An entry that arrives marked
+// keeps its mark: the value card cannot express the mark, so a true here is an
+// explicit decision (the Secrets menu's inherited pick) while a false carries no
+// information. The working copy's mark map is authoritative at write time, so an
+// unmarked Add would declassify the key rather than let the writer fall back to
+// the file or an ancestor.
 func (s *editState) addEntry(entry ui.EnvEntry, inherited []ui.EnvEntry) {
-	entry.Secret = s.carriedMark(entry.Key, inherited)
+	if !entry.Secret {
+		entry.Secret = s.carriedMark(entry.Key, inherited)
+	}
 	settleDefineFence(s, entry.Key)
 	s.upsert(entry)
 }
@@ -281,6 +292,7 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		ui.Option{Value: actionAdd, Icon: ui.IconAdd, Label: "Add variable"},
 		ui.Option{Value: actionExtends, Icon: ui.IconExtends, Label: extendsLabel(s.extends)},
 		ui.Option{Value: actionDefault, Icon: ui.IconDefault, Label: defaultLabel(s.isDefault)},
+		ui.Option{Value: actionSecrets, Icon: ui.IconSecret, Label: "Secrets…"},
 		ui.Option{Value: actionDeleteVar, Icon: ui.IconDeleteVar, Label: "Delete variable…"},
 		ui.Option{Value: actionManageUnsets, Icon: ui.IconUnset, Label: manageUnsetsLabel(len(s.unset))},
 		ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"},
@@ -422,6 +434,107 @@ func manageUnsets(s *editState, name string, inherited []ui.EnvEntry) {
 		s.unset = next
 		return
 	}
+}
+
+// secretsOptions builds the Secrets picker: own entries in working order, then
+// the inherited keys the copy does not own, sorted, then the Encrypt-now row and
+// the Back tail. Values are runtime names, so the mark never enters a key.
+func secretsOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
+	opts := make([]ui.Option, 0, len(s.entries)+len(inherited)+4)
+	for _, e := range s.entries {
+		opts = append(opts, ui.Option{Value: e.Key, Icon: secretIcon(e.Secret), Label: secretLabel(e)})
+	}
+	own := s.envMap()
+	rest := make([]ui.EnvEntry, 0, len(inherited))
+	for _, e := range inherited {
+		if !envname.Has(own, e.Key) {
+			rest = append(rest, e)
+		}
+	}
+	slices.SortFunc(rest, func(a, b ui.EnvEntry) int { return cmp.Compare(a.Key, b.Key) })
+	for _, e := range rest {
+		icon := secretIcon(e.Secret)
+		if icon == "" {
+			icon = ui.IconInherited
+		}
+		opts = append(opts, ui.Option{Value: e.Key, Icon: icon, Label: secretLabel(e) + " (inherited)"})
+	}
+	opts = append(opts,
+		ui.Separator(),
+		ui.Option{Value: actionEncryptNow, Label: "Encrypt marked values now"},
+	)
+	return append(opts, pickerTail()...)
+}
+
+// secretLabel renders one picker row through the same masking the menu listing
+// uses, so opening the picker never reveals a value the listing hides.
+func secretLabel(e ui.EnvEntry) string {
+	return fmt.Sprintf("%s = %s", e.Key, config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, false)))
+}
+
+// secretIcon is the mark's glyph: the picker shows the state it is about to
+// change, and only a marked key earns the mark.
+func secretIcon(secret bool) string {
+	if secret {
+		return ui.IconSecret
+	}
+	return ""
+}
+
+// secretsChecked seeds the picker from the working copy: the marks in play, plus
+// the Encrypt-now row when that step is already scheduled, so a reopened menu
+// shows the truth and confirming it keeps the request.
+func secretsChecked(s editState) []string {
+	checked := slices.Sorted(maps.Keys(s.markMap()))
+	if s.encryptNow {
+		checked = append(checked, actionEncryptNow)
+	}
+	return checked
+}
+
+// applySecretsPick folds a confirmed selection into the working copy. Own entries
+// take the picked mark set in place — routing them through addEntry would let the
+// carried mark restore exactly the mark being cleared. A picked inherited key
+// becomes an own marked entry seeded with the value and comment the picker showed.
+// The Encrypt-now row only schedules the post-commit step: nothing is written here.
+func applySecretsPick(s *editState, picked []string, inherited []ui.EnvEntry, comments map[string]string) {
+	on := make(map[string]bool, len(picked))
+	for _, v := range picked {
+		on[v] = true
+	}
+	s.encryptNow = on[actionEncryptNow]
+	for i := range s.entries {
+		s.entries[i].Secret = on[s.entries[i].Key]
+	}
+	for _, e := range inherited {
+		if !on[e.Key] || s.definesKey(e.Key) {
+			continue
+		}
+		seed := overrideSeed(inherited, comments, e.Key)
+		seed.Secret = true
+		s.addEntry(seed, inherited)
+	}
+}
+
+// secrets runs the Secrets picker. A cancel or a Back row abandons the session
+// without touching the working copy; only a confirmed selection stages marks,
+// and the Done commit is what writes them.
+func secrets(s *editState, inherited []ui.EnvEntry, cfg config.Config) {
+	picked, confirmed, err := ui.MultiSelectChecked("Secrets", secretsOptions(*s, inherited), secretsChecked(*s))
+	if err != nil || !confirmed {
+		return
+	}
+	applySecretsPick(s, picked, inherited, resolvedComments(cfg, *s))
+}
+
+// resolvedComments returns the comments the working copy would resolve to, so a
+// value taken from an inherited row keeps the comment that explains it.
+func resolvedComments(cfg config.Config, s editState) map[string]string {
+	pr, err := probeConfig(cfg, s).ResolveProfile(s.name)
+	if err != nil {
+		return nil
+	}
+	return pr.Comments
 }
 
 // settleDefineFence resolves a same-layer define+unset pair created by adding,
@@ -574,8 +687,13 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				}
 				if s.deleteProfile {
 					fmt.Printf("\n✓ removed profile %q\n", s.name)
-				} else {
-					fmt.Printf("\n✓ updated profile %q\n", s.name)
+					return nil
+				}
+				fmt.Printf("\n✓ updated profile %q\n", s.name)
+				if s.encryptNow {
+					if err := encryptMarked(path, s.name); err != nil {
+						return fmt.Errorf("profile %q saved, but encrypting its marked values failed: %w", s.name, err)
+					}
 				}
 				return nil
 			case actionAdd:
@@ -598,6 +716,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				}
 			case actionDefault:
 				s.isDefault = !s.isDefault
+			case actionSecrets:
+				secrets(&s, inherited, cfg)
 			case actionDeleteVar:
 				if len(s.entries) == 0 {
 					fmt.Println("  no variables to delete")
@@ -670,12 +790,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			settleDefineFence(&s, edited.Key)
 			s.upsert(edited)
 		case "inherited":
-			probe := probeConfig(cfg, s)
-			var comments map[string]string
-			if pr, perr := probe.ResolveProfile(s.name); perr == nil {
-				comments = pr.Comments
-			}
-			edited, err := ui.EnvCard(overrideSeed(inherited, comments, key))
+			edited, err := ui.EnvCard(overrideSeed(inherited, resolvedComments(cfg, s), key))
 			if err != nil {
 				continue
 			}
@@ -727,6 +842,67 @@ func commitValidate(cfg config.Config, s editState) error {
 		return err
 	}
 	return extendsCycleError(cfg, s.name, s.extends)
+}
+
+// valueCrypter is the key and KDF era a write seals values under. One value
+// carries one key, so both travel together and no caller can pair a key with an
+// era it was not derived under.
+type valueCrypter struct {
+	Key    []byte
+	Salt   []byte
+	Params crypto.Argon2Params
+}
+
+// Encrypt seals plain into an enc:v3: value under the crypter's key and era.
+func (c *valueCrypter) Encrypt(plain string) (string, error) {
+	return crypto.EncryptValueWithParams(plain, c.Key, c.Salt, c.Params)
+}
+
+// crypterFor resolves the key and era for writing encrypted values in path. The
+// era comes from the file itself: pairing CurrentParams with an existing salt
+// would derive a different key and strand every value under it.
+func crypterFor(path string) (*valueCrypter, error) {
+	fileSalt, eraParams, sample, err := config.FirstSaltAndSample(path)
+	if err != nil {
+		return nil, err
+	}
+	key, salt, err := app.ResolveKeyOrPrompt(appOpts(), func() ([]byte, crypto.Argon2Params, string, error) {
+		return fileSalt, eraParams, sample, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	params := eraParams
+	if fileSalt == nil { // no encrypted value yet: nothing to match
+		params = crypto.CurrentParams
+	}
+	return &valueCrypter{Key: key, Salt: salt, Params: params}, nil
+}
+
+// encryptMarked runs the Secrets menu's Encrypt-now request against the file the
+// Done commit just wrote: the commit put the mark into the file, and the mark is
+// what ShouldEncrypt keys off. A key that cannot encrypt — none at all, or
+// ENVER_KEY's saltless one — leaves the marks in place and only notes the
+// plaintext, since the mark is a hint and never a condition for saving.
+func encryptMarked(path, profile string) error {
+	c, err := crypterFor(path)
+	if errors.Is(err, app.ErrNoKey) {
+		fmt.Printf("  %s — no key to encrypt with; the marks are saved\n", markNote)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if c.Salt == nil {
+		fmt.Printf("  %s — ENVER_KEY carries no salt; the marks are saved\n", markNote)
+		return nil
+	}
+	n, err := config.EncryptFile(path, c.Key, c.Salt, profile, false)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("✓ encrypted %d value(s) in %s\n", n, path)
+	return nil
 }
 
 func editTitle(s editState) string {

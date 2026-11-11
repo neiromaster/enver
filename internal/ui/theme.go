@@ -16,6 +16,7 @@ const (
 	IconOverride   = "↻"
 	IconInherited  = "↳"
 	IconUnset      = "⊘"
+	IconSecret     = "~"
 )
 
 type theme struct {
@@ -64,6 +65,7 @@ func defaultTheme() *theme {
 			IconExtends:    blue,
 			IconInherited:  blue,
 			IconDefault:    yellow,
+			IconSecret:     yellow,
 			IconOverride:   magenta,
 			IconDeleteVar:  red,
 			IconDeleteProf: red,
