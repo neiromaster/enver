@@ -406,7 +406,8 @@ func pickerTail() []ui.Option {
 // (file order — including fences whose target resolves nowhere), then unset
 // own entries, then unset inherited ones, plus the Back tail. Values are bare
 // keys and unique across groups; MultiSelectChecked pre-marks the declared
-// ones via the state's unset list.
+// ones via the state's unset list. Declared rows hold fence spellings, so only
+// variable rows spell the mark.
 func manageUnsetOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 	opts := make([]ui.Option, 0, len(s.unset)+len(s.entries)+len(inherited)+2)
 	for _, k := range s.unset {
@@ -416,13 +417,13 @@ func manageUnsetOptions(s editState, inherited []ui.EnvEntry) []ui.Option {
 		if envname.MatchesAny(s.unset, e.Key) {
 			continue
 		}
-		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (own)"})
+		opts = append(opts, ui.Option{Value: e.Key, Label: envname.JoinMarked(e.Key, e.Secret) + " (own)"})
 	}
 	for _, e := range inherited {
 		if envname.MatchesAny(s.unset, e.Key) {
 			continue
 		}
-		opts = append(opts, ui.Option{Value: e.Key, Label: e.Key + " (inherited)"})
+		opts = append(opts, ui.Option{Value: e.Key, Label: envname.JoinMarked(e.Key, e.Secret) + " (inherited)"})
 	}
 	return append(opts, pickerTail()...)
 }

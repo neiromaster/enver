@@ -189,8 +189,9 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 }
 
 // TestMarkedRowsShowTheMark pins the label half of the mark: every picker that
-// lists a variable spells a marked one ~KEY, while the row value stays the
-// runtime name the commit writes.
+// lists a variable — menu, Secrets, delete, manage unsets — spells a marked one
+// ~KEY, while the row value stays the runtime name the commit writes and a
+// declared fence keeps its own spelling.
 func TestMarkedRowsShowTheMark(t *testing.T) {
 	s := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"K": "hunter2hunter2", "PLAIN": "visible"},
@@ -216,6 +217,22 @@ func TestMarkedRowsShowTheMark(t *testing.T) {
 	}
 	if got := findOption(t, del, "PLAIN"); got.Label != "PLAIN" {
 		t.Fatalf("delete row = %q, want PLAIN", got.Label)
+	}
+
+	fenced := plainState(t, "p", config.Profile{
+		Env:    map[string]string{"K": "hunter2hunter2"},
+		Marked: map[string]bool{"K": true},
+		Unset:  config.Unsets{"FENCED"},
+	}, nil, false)
+	unsets := manageUnsetOptions(fenced, []ui.EnvEntry{{Key: "INH", Value: "x", Secret: true}})
+	if got := findOption(t, unsets, "K").Label; got != "~K (own)" {
+		t.Fatalf("manage-unsets own row = %q, want ~K (own)", got)
+	}
+	if got := findOption(t, unsets, "INH").Label; got != "~INH (inherited)" {
+		t.Fatalf("manage-unsets inherited row = %q, want ~INH (inherited)", got)
+	}
+	if got := findOption(t, unsets, "FENCED").Label; got != "FENCED (declared here)" {
+		t.Fatalf("a declared fence row holds a fence spelling, not a variable: %q", got)
 	}
 }
 
