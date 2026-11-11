@@ -664,6 +664,72 @@ func TestUpsertNilMarkedFallsBackToChainInFile(t *testing.T) {
 	}
 }
 
+func TestUpsertAuthoritativeMarkedSetsMark(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "p", Profile{Env: map[string]string{"K": "w"}, Marked: map[string]bool{"K": true}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	p := cfg.Profiles["p"]
+	if p.Env["K"] != "w" || !p.Marked["K"] {
+		t.Fatalf("entry = env %#v marked %#v, want K: w marked", p.Env, p.Marked)
+	}
+}
+
+func TestUpsertOwnPlainEntryClearsInheritedMark(t *testing.T) {
+	// The nearest mention decides: the profile's own plain entry outranks the
+	// ancestor's mark, so the rewrite stays plain even though the chain marks K.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    extends: base\n    env:\n      K: old\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "work", Profile{Env: map[string]string{"K": "y"}}, false, false); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if work.Env["K"] != "y" || work.Marked != nil {
+		t.Fatalf("entry = env %#v marked %#v, want a plain own entry", work.Env, work.Marked)
+	}
+}
+
+func TestUpsertForcedExtendsClearedKeepsInheritedMark(t *testing.T) {
+	// forceExtends with an empty p.Extends removes the ancestor that carried the
+	// mark before the marks are resolved; the pre-write chain still knows it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    extends: base\n    env: {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertProfile(path, "work", Profile{Env: map[string]string{"K": "y"}}, false, true); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after upsert: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if len(work.Extends) != 0 {
+		t.Fatalf("extends = %v, want cleared", work.Extends)
+	}
+	if work.Env["K"] != "y" || !work.Marked["K"] {
+		t.Fatalf("entry = env %#v marked %#v, want the inherited mark kept", work.Env, work.Marked)
+	}
+}
+
 func TestUpsertProfileBoolSpelledEnvKey(t *testing.T) {
 	// A hand-authored TRUE: env key decodes with a !!bool tag but a literal
 	// string value, and envname.Valid accepts it: the write path must find the

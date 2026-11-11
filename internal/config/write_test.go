@@ -229,6 +229,99 @@ func TestWriteProfileNilMarkedPreserves(t *testing.T) {
 	}
 }
 
+func TestWriteProfileAuthoritativeMarkedSetsMark(t *testing.T) {
+	// A non-nil Marked map also marks a key the file holds plain: the caller
+	// knows better than the file it is about to rewrite.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      K: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"K": "v"}, Marked: map[string]bool{"K": true}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	if got := cfg.Profiles["p"]; !got.Marked["K"] {
+		t.Fatalf("mark not written: env=%#v marked=%#v", got.Env, got.Marked)
+	}
+}
+
+func TestWriteProfileNilMarkedFallsBackToChainInFile(t *testing.T) {
+	// The mark lives on an ancestor in the same file, so a wholesale rewrite
+	// that keeps the extends must keep the inherited mark too.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    extends: base\n    env: {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "work", Profile{Extends: Extends{"base"}, Env: map[string]string{"K": "y"}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if work.Env["K"] != "y" || !work.Marked["K"] {
+		t.Fatalf("entry = env %#v marked %#v, want K: y marked", work.Env, work.Marked)
+	}
+}
+
+func TestWriteProfileClearedExtendsKeepsInheritedMark(t *testing.T) {
+	// The mark came from the ancestor this write removes. The resolver has to
+	// read the chain as it stood before the rewrite, or the mark vanishes with
+	// the ancestor that carried it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    extends: base\n    env: {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "work", Profile{Env: map[string]string{"K": "y"}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if len(work.Extends) != 0 {
+		t.Fatalf("extends = %v, want cleared", work.Extends)
+	}
+	if work.Env["K"] != "y" || !work.Marked["K"] {
+		t.Fatalf("entry = env %#v marked %#v, want the inherited mark kept", work.Env, work.Marked)
+	}
+}
+
+func TestWriteProfileNewExtendsMakesInheritedMarkVisible(t *testing.T) {
+	// The mirror case: the ancestor arrives with this write, so only the chain
+	// as it stands afterwards can tell the writer about the mark.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	original := "profiles:\n  base:\n    env:\n      ~K: v\n  work:\n    env: {}\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProfile(path, "work", Profile{Extends: Extends{"base"}, Env: map[string]string{"K": "y"}}, false, false); err != nil {
+		t.Fatalf("WriteProfile: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload after write: %v", err)
+	}
+	work := cfg.Profiles["work"]
+	if !work.Extends.Has("base") {
+		t.Fatalf("extends = %v, want base", work.Extends)
+	}
+	if work.Env["K"] != "y" || !work.Marked["K"] {
+		t.Fatalf("entry = env %#v marked %#v, want the newly inherited mark", work.Env, work.Marked)
+	}
+}
+
 func TestWriteProfileRejectsInvalidNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := WriteProfile(path, "p", Profile{Env: map[string]string{"OK": "1"}}, false, false); err != nil {
