@@ -978,8 +978,9 @@ func TestUnmarshalRejectsCollidingSpellings(t *testing.T) {
 
 func TestUnmarshalRejectsBareMark(t *testing.T) {
 	var c Config
-	if err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~: x\n"), &c); err == nil {
-		t.Fatal("want an error for a bare ~ key")
+	err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~: x\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "no name") {
+		t.Fatalf("want a mark-without-name error, got %v", err)
 	}
 }
 
@@ -1018,5 +1019,140 @@ func TestUnmarshalLeavesMarkedNilWithoutMarks(t *testing.T) {
 	}
 	if got := c.Profiles["work"].Marked; got != nil {
 		t.Fatalf("Marked should be nil without marks, got %#v", got)
+	}
+}
+
+func TestUnmarshalResolvesAliasedEnv(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`common: &common
+  ~TOKEN: a
+  B: b
+profiles:
+  work:
+    env: *common
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Profiles["work"]
+	if p.Env["TOKEN"] != "a" || p.Env["B"] != "b" || p.Env["~TOKEN"] != "" {
+		t.Fatalf("aliased env not decoded and stripped: %#v", p.Env)
+	}
+	if !p.Marked["TOKEN"] {
+		t.Fatalf("mark inside the anchor lost: %#v", p.Marked)
+	}
+}
+
+func TestUnmarshalResolvesMergedEnvKeys(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`common: &common
+  ~TOKEN: a
+  C: old
+profiles:
+  work:
+    env:
+      <<: *common
+      C: "3"
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Profiles["work"]
+	if p.Env["TOKEN"] != "a" || p.Env["C"] != "3" {
+		t.Fatalf("merged env wrong: %#v", p.Env)
+	}
+	if !p.Marked["TOKEN"] || p.Marked["C"] {
+		t.Fatalf("merged marks wrong: %#v", p.Marked)
+	}
+}
+
+func TestUnmarshalResolvesProfileLevelMerge(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`base: &base
+  env:
+    ~TOKEN: a
+profiles:
+  work:
+    <<: *base
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Profiles["work"]
+	if p.Env["TOKEN"] != "a" {
+		t.Fatalf("profile-level merge env lost: %#v", p.Env)
+	}
+	if !p.Marked["TOKEN"] {
+		t.Fatalf("profile-level merge mark lost: %#v", p.Marked)
+	}
+}
+
+func TestUnmarshalMergeSourcePrecedence(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`a: &a
+  X: 1
+b: &b
+  Y: 2
+  X: 9
+profiles:
+  work:
+    env:
+      <<: [*a, *b]
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Profiles["work"].Env; got["X"] != "1" || got["Y"] != "2" {
+		t.Fatalf("merge precedence wrong (an earlier source wins): %#v", got)
+	}
+}
+
+func TestUnmarshalExplicitKeyOverridesMergedCopy(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte(`a: &a
+  ~X: 1
+  Y: 1
+profiles:
+  plain:
+    env:
+      <<: *a
+      X: 2
+  marked:
+    env:
+      <<: *a
+      ~Y: 2
+`), &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := c.Profiles["plain"]
+	if plain.Env["X"] != "2" {
+		t.Fatalf("explicit key must override the merged copy: %#v", plain.Env)
+	}
+	if plain.Marked["X"] {
+		t.Fatalf("a plain override must clear the merged mark: %#v", plain.Marked)
+	}
+	marked := c.Profiles["marked"]
+	if marked.Env["Y"] != "2" || !marked.Marked["Y"] {
+		t.Fatalf("a marked override must win with its mark: env=%#v marks=%#v", marked.Env, marked.Marked)
+	}
+}
+
+func TestUnmarshalRejectsDoubledMarkWithoutName(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~~: x\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "doubled") {
+		t.Fatalf("want a doubled-mark error, got %v", err)
+	}
+}
+
+func TestUnmarshalRejectsCaseVariantCollisionOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("env names are case-sensitive elsewhere")
+	}
+	var c Config
+	err := yaml.Unmarshal([]byte("profiles:\n  work:\n    env:\n      ~Path: a\n      PATH: b\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "same variable") {
+		t.Fatalf("want collision error, got %v", err)
 	}
 }

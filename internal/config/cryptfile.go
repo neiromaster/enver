@@ -53,12 +53,67 @@ func requireProfile(pm *yaml.Node, profile string) error {
 	return nil
 }
 
+// envMapping returns a profile's env mapping, looking through aliases and
+// profile-level merge keys so env supplied by an anchor is still found. A direct
+// key wins over a merged one, and of several merge sources the earlier wins,
+// matching the decoder's own precedence.
 func envMapping(profileNode *yaml.Node) *yaml.Node {
-	idx := findIndex(profileNode, "env")
-	if idx < 0 || profileNode.Content[idx].Kind != yaml.MappingNode {
+	profileNode = derefAlias(profileNode)
+	if profileNode == nil || profileNode.Kind != yaml.MappingNode {
 		return nil
 	}
-	return profileNode.Content[idx]
+	if idx := findIndex(profileNode, "env"); idx >= 0 {
+		if env := derefAlias(profileNode.Content[idx]); env != nil && env.Kind == yaml.MappingNode {
+			return env
+		}
+		return nil
+	}
+	for _, src := range mergeSources(profileNode) {
+		if env := envMapping(src); env != nil {
+			return env
+		}
+	}
+	return nil
+}
+
+// derefAlias follows an alias node to the node it anchors, so callers match on
+// the real kind; nil when the target is missing.
+func derefAlias(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	return n
+}
+
+// mergeSources returns the mapping nodes a mapping pulls in through `<<` merge
+// keys, in YAML precedence order: a scalar alias contributes itself, a sequence
+// contributes its mappings left to right, and an earlier source wins.
+func mergeSources(mapping *yaml.Node) []*yaml.Node {
+	var out []*yaml.Node
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Tag != "!!merge" {
+			continue
+		}
+		out = append(out, mergeValues(derefAlias(mapping.Content[i+1]))...)
+	}
+	return out
+}
+
+// mergeValues flattens one merge value to the mapping nodes it names.
+func mergeValues(v *yaml.Node) []*yaml.Node {
+	switch {
+	case v == nil:
+		return nil
+	case v.Kind == yaml.MappingNode:
+		return []*yaml.Node{v}
+	case v.Kind == yaml.SequenceNode:
+		var out []*yaml.Node
+		for _, item := range v.Content {
+			out = append(out, mergeValues(derefAlias(item))...)
+		}
+		return out
+	}
+	return nil
 }
 
 // forEachEnvValue calls fn for every scalar env value of every profile (only
