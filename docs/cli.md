@@ -68,13 +68,18 @@ emitted only when the output destination is a terminal; `NO_COLOR` and
 `TERM=dumb` turn it off, so piped output (`enver show | grep`) stays plain.
 `--format json` is never styled.
 
-Secret-looking values (keys matching `key|token|secret|password|passwd|auth|credential`,
-case-insensitive, or values that embed credentials in a URL such as
-`postgres://user:pass@host`) are masked in `enver show` output (use
-`--no-mask` to reveal) and encrypted by `enver encrypt`. Plain URLs without
-credentials (`https://api.example.com`) are left alone. `enver export` is
-always unmasked so `eval "$(enver export <profile>)"` applies to the current
-shell. `--format fish` emits `set -gx K 'V'` for fish
+A value counts as a secret when its key looks secret
+(`key|token|secret|password|passwd|auth|credential`, case-insensitive), when
+the value embeds credentials in a URL such as `postgres://user:pass@host`, or
+when the key carries a leading `~` mark — which makes any name a candidate (see
+[`secrets.md`](./secrets.md#marking-arbitrary-values)). `enver show` masks
+those values and `enver encrypt` seals them (use `--no-mask` to reveal); a
+value already stored as `enc:v3:` stays masked and is skipped by `encrypt`.
+Plain URLs without credentials (`https://api.example.com`) are left alone.
+Masking is text-only: a marked key whose value is still plaintext is masked and
+annotated `~ marked, not encrypted`, while the file itself stays as it is.
+`enver export` is always unmasked so `eval "$(enver export <profile>)"` applies
+to the current shell. `--format fish` emits `set -gx K 'V'` for fish
 (`enver export <profile> --format fish | source`); `--format powershell`
 emits `$env:K = 'V'` for PowerShell
 (`enver export <profile> --format powershell | iex`); `bash` is the default.
