@@ -43,6 +43,107 @@ func TestImportEnvMergeAndReplaceSummary(t *testing.T) {
 	}
 }
 
+// globalParentOnly marks GH_TOKEN in a parent no target profile extends.
+const globalParentOnly = "profiles:\n  base:\n    env:\n      ~GH_TOKEN: parent\n"
+
+// globalWithParent also gives work the extends only the merged view can see, so
+// the target file on its own knows nothing of the marking parent.
+const globalWithParent = globalParentOnly + "  work:\n    extends: base\n"
+
+// TestImportEnvKeepsInheritedMark pins the cross-layer case: the parent that
+// marks GH_TOKEN lives in the other layer, so the writer rewriting this file
+// cannot see it. The merged view decides the mark — inherited where the profile
+// defines no entry of its own, defeated by an own unmarked entry, and still
+// inherited by --replace when the profile keeps the extends.
+func TestImportEnvKeepsInheritedMark(t *testing.T) {
+	tests := []struct {
+		name       string
+		global     string
+		target     string
+		replace    bool
+		wantMarked bool
+	}{
+		{
+			name:       "inherited mark",
+			global:     globalWithParent,
+			target:     "profiles:\n  work:\n    env:\n      OTHER: x\n",
+			wantMarked: true,
+		},
+		{
+			name:       "own unmarked entry wins",
+			global:     globalWithParent,
+			target:     "profiles:\n  work:\n    env:\n      GH_TOKEN: old\n",
+			wantMarked: false,
+		},
+		{
+			name:       "replace keeps an extends the target declares",
+			global:     globalParentOnly,
+			target:     "profiles:\n  work:\n    extends: base\n    env:\n      OTHER: x\n",
+			replace:    true,
+			wantMarked: true,
+		},
+		{
+			name:       "replace clears an extends the target does not declare",
+			global:     globalWithParent,
+			target:     "profiles:\n  work:\n    env:\n      OTHER: x\n",
+			replace:    true,
+			wantMarked: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			globalPath := filepath.Join(dir, "global.yaml")
+			targetPath := filepath.Join(dir, ".enver.yaml")
+			writeFile(t, globalPath, tt.global)
+			writeFile(t, targetPath, tt.target)
+
+			globalCfg, err := config.LoadFile(globalPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			targetCfg, err := config.LoadFile(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			merged := config.Merge(globalCfg, targetCfg)
+			if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), targetPath, "work", "", ImportOptions{
+				Replace: tt.replace,
+				Force:   true,
+				Config:  &merged,
+			}); err != nil {
+				t.Fatalf("ImportEnv: %v", err)
+			}
+
+			got, err := config.LoadFile(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v := got.Profiles["work"].Env["GH_TOKEN"]; v != "new" {
+				t.Fatalf("GH_TOKEN = %q, want new", v)
+			}
+			if marked := got.Profiles["work"].Marked["GH_TOKEN"]; marked != tt.wantMarked {
+				t.Fatalf("GH_TOKEN marked = %t, want %t (%#v)", marked, tt.wantMarked, got.Profiles["work"].Marked)
+			}
+			data, err := os.ReadFile(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wroteMarked := strings.Contains(string(data), "~GH_TOKEN"); wroteMarked != tt.wantMarked {
+				t.Fatalf("file writes the mark = %t, want %t:\n%s", wroteMarked, tt.wantMarked, data)
+			}
+		})
+	}
+}
+
+// writeFile seeds a config file a test reads back.
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestSkippedLineNote pins the import appendix: the singular noun at one
 // skip, the full line list at two, and the cap-at-3 fold with a remaining
 // count beyond that.

@@ -66,15 +66,16 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
+		// Parents, cycles, and the inherited secret marks are all judged on the
+		// merged view: resolution spans both layers, so a global pick can loop
+		// through a local parent and vice versa, and the file being rewritten
+		// cannot see an ancestor in the other layer.
+		merged, err := app.Load(appOpts())
+		if err != nil {
+			return err
+		}
 		if importExtends != "" {
 			parents := app.SplitExtends(importExtends)
-			// Parents and cycles are judged on the merged view: resolution
-			// spans both layers, so a global pick can loop through a local
-			// parent and vice versa.
-			merged, err := app.Load(appOpts())
-			if err != nil {
-				return err
-			}
 			for _, p := range parents {
 				if _, ok := merged.Profiles[p]; !ok {
 					return fmt.Errorf("extends profile %q does not exist", p)
@@ -89,6 +90,7 @@ var importCmd = &cobra.Command{
 			Force:   importForce,
 			Confirm: ui.Confirm,
 			Resolve: effectiveResolve,
+			Config:  &merged,
 		})
 		if err != nil {
 			return err
