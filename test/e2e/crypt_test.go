@@ -86,11 +86,10 @@ func TestDecryptKeepsMarkThroughRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSecretMarkEndToEnd walks the whole marked-variable story through the
-// binary: the mark widens what encrypt seals without touching the runtime name,
-// text show masks it and says it is still plaintext, and export hands the child
-// the bare key. The file keeps the mark in every step, so the candidate survives
-// a round trip.
+// TestSecretMarkEndToEnd pins the mark's user-visible story: a marked plaintext
+// value masks and says it is not encrypted yet, encrypt seals it under the
+// marked key, the note then goes away, --no-mask reveals it, and export spells
+// the bare runtime name.
 func TestSecretMarkEndToEnd(t *testing.T) {
 	s := newSandbox(t)
 	s.writeGlobal("profiles:\n  work:\n    env:\n      ~PROJECT_PATH: /home/anna/enver\n      PLAIN: x\n")

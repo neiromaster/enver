@@ -35,10 +35,10 @@ with the old key first if you need to migrate them.
 
 ## Marking arbitrary values
 
-Encryption and masking key off names (`key|token|secret|password|passwd|auth|
-credential`) and values that embed URL credentials. A leading `~` on an env key
-marks any other variable a secret candidate — a path carrying a username, a
-login, an internal hostname:
+Encryption and masking key off names
+(`key|token|secret|password|passwd|auth|credential`) and values that embed URL
+credentials. A leading `~` on an env key marks any other variable a secret
+candidate — a path carrying a username, a login, an internal hostname:
 
 ```yaml
 profiles:
@@ -70,9 +70,11 @@ PROJECT_PATH=/hom…(len=16)  # from work (global) ~ marked, not encrypted
 value, and the annotation disappears once the value is ciphertext. `enver
 decrypt` restores the plaintext and **keeps the mark**, so a marked variable
 stays a candidate and the next `encrypt` picks it up again. Remove the `~` to
-drop the key from the candidate set for good. While a marked key is stored in
-plaintext, `enver validate` reports a warning (`"PROJECT_PATH" is marked secret
-but stored in plaintext`); warnings do not change its exit code.
+drop the key from the candidate set for good — a value that is already sealed
+stays sealed and masked until you `decrypt` it, so un-marking is not
+un-encrypting. While a marked key is stored in plaintext, `enver validate`
+reports a warning (`"PROJECT_PATH" is marked secret but stored in plaintext`);
+warnings do not change its exit code.
 
 ### The mark follows the winning entry
 
@@ -98,11 +100,11 @@ profiles:
 `add` and `edit` accept a leading `~` in the variable-name field, and `edit`
 sets marks through its **Secrets…** menu, which covers own and inherited
 variables; confirming stages the toggles and only **Done** writes them. The
-menus spell a marked key as `~KEY`, so the mark is visible where it is set,
-while everything that reaches a command or a file stays bare. A mark saved
-this way is still only a mark — the value stays plaintext until `encrypt`
-runs. The menu's **Encrypt now** runs after that commit, against the file the
-commit just wrote.
+menus spell a marked key as `~KEY`, so the mark is visible where it is set: the
+file keeps the spelled key, while the runtime name stays bare in `x`, `export`,
+`dotenv` and `show`. A mark saved this way is still only a mark — the value
+stays plaintext until `encrypt` runs. The menu's **Encrypt now** runs after that
+commit, against the file the commit just wrote.
 
 `enver edit` decrypts encrypted values when a key resolves and re-encrypts them
 on save, so changing a sealed value no longer needs an `enver decrypt` round
