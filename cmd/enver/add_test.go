@@ -15,7 +15,7 @@ import (
 
 func TestValidateProfileName(t *testing.T) {
 	good := []string{"a", "anth", "glm-2", "prod_db", "A1", "0base", "llm/ollama"}
-	bad := []string{"", "-x", "x y", "x!", ".y", "café", "llm/a/b", "/x", "llm/", "llm//x"}
+	bad := []string{"", "-x", "x y", "x!", ".y", "café", "llm/a/b", "/x", "llm/", "llm//x", "llm/-x", "llm/café"}
 	for _, n := range good {
 		if err := validateProfileName(n); err != nil {
 			t.Errorf("good name %q rejected: %v", n, err)
