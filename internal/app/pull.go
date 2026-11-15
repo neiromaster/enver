@@ -94,7 +94,10 @@ func Pull(rawSource, name string, opts PullOptions) (string, error) {
 
 // PullUpdate re-fetches one registered remote from the source its effective
 // record names. The record is not rewritten: an update refreshes content, while
-// the source and the pull mode stay whatever the config declares.
+// the source and the pull mode stay whatever the config declares. A record whose
+// stored content the sidecar says came from another source is a takeover when
+// patch profiles sit under its prefix, exactly as a re-registration is, and is
+// confirmed before anything is fetched.
 func PullUpdate(name string, opts PullOptions) (string, error) {
 	rec, ok := opts.Merged.Remotes[name]
 	if !ok {
@@ -103,26 +106,47 @@ func PullUpdate(name string, opts PullOptions) (string, error) {
 	if opts.NoPrefix {
 		return "", fmt.Errorf("--no-prefix applies only when registering a source; remote %q keeps the mode stored in its record", name)
 	}
+	changes, proceed, err := confirmRefetch(name, rec, opts)
+	if err != nil {
+		return "", err
+	}
+	if !proceed {
+		return "", nil
+	}
 	res, err := pullRecord(name, rec, opts)
 	if err != nil {
 		return "", err
 	}
+	res.changes = changes
 	return res.render(), nil
 }
 
 // PullAll re-fetches every remote the merged view registers, in sorted record
 // order. One failing remote does not stop the rest: every record is attempted,
-// each outcome is reported, and the run fails if any of them did.
+// each outcome is reported, and the run fails if any of them did. Each record
+// passes the same takeover gate a single re-fetch does before it is fetched.
 func PullAll(opts PullOptions) (string, error) {
 	var b strings.Builder
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(opts.Merged.Remotes)) {
-		res, err := pullRecord(name, opts.Merged.Remotes[name], opts)
+		rec := opts.Merged.Remotes[name]
+		changes, proceed, err := confirmRefetch(name, rec, opts)
 		if err != nil {
 			fmt.Fprintf(&b, "\n✗ %v\n", err)
 			errs = append(errs, err)
 			continue
 		}
+		if !proceed {
+			fmt.Fprintf(&b, "\n- remote %q left unchanged: takeover declined\n", name)
+			continue
+		}
+		res, err := pullRecord(name, rec, opts)
+		if err != nil {
+			fmt.Fprintf(&b, "\n✗ %v\n", err)
+			errs = append(errs, err)
+			continue
+		}
+		res.changes = changes
 		b.WriteString(res.render())
 	}
 	return b.String(), errors.Join(errs...)
@@ -257,10 +281,11 @@ func checkNewRecord(name string, rec config.RemoteRecord, opts PullOptions) erro
 // as a re-point, since the patches stop meeting the profiles they were written
 // against.
 func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (changes []string, proceed bool, err error) {
-	before, declared := opts.Merged.Remotes[name]
+	effective, declared := opts.Merged.Remotes[name]
 	if !declared {
 		return nil, true, nil
 	}
+	before := storedSource(name, effective)
 	sourceChanged := !sameSource(before, rec)
 	if sourceChanged {
 		changes = append(changes, fmt.Sprintf("source changed from %s to %s", recordSource(before), recordSource(rec)))
@@ -276,20 +301,87 @@ func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (ch
 		return changes, true, nil
 	}
 	warning := takeoverWarning(name, before, rec, patches, sourceChanged)
-	if opts.Force {
-		return append(changes, warning), true, nil
+	proceed, err = gateTakeover(warning, opts)
+	if err != nil {
+		return nil, false, err
 	}
-	if opts.Confirm == nil {
-		return nil, false, fmt.Errorf("%s; pass --force to accept without confirming", warning)
-	}
-	ok, confirmErr := opts.Confirm(warning, false)
-	if confirmErr != nil {
-		return nil, false, fmt.Errorf("%w; pass --force to accept without confirming", confirmErr)
-	}
-	if !ok {
+	if !proceed {
 		return nil, false, nil
 	}
 	return append(changes, warning), true, nil
+}
+
+// confirmRefetch decides whether re-fetching rec may proceed, and returns the
+// summary lines describing why it asked. The stored content is the thing being
+// replaced, so the comparison keys off the sidecar, which records the source it
+// was actually fetched from: the effective record alone cannot tell a re-fetch
+// from a first pull into a re-declared name, and after a project re-declares a
+// global record it already names the new source. When the two disagree and
+// user-layer patch profiles sit under the prefix, the fetch is a takeover and is
+// confirmed (or accepted under Force) before any network call. With no sidecar
+// there is nothing to disagree with, so the fetch proceeds: unverifiable
+// provenance is the load path's advisory, not a takeover.
+func confirmRefetch(name string, rec config.RemoteRecord, opts PullOptions) (changes []string, proceed bool, err error) {
+	url, ref, resolveErr := remote.ResolveRecord(rec)
+	if resolveErr != nil {
+		return nil, true, nil // pullRecord reports the unusable source
+	}
+	st, ok := config.ReadRemoteState(name)
+	if !ok || (st.URL == url && st.Ref == ref) {
+		return nil, true, nil
+	}
+	stored := config.RemoteRecord{URL: st.URL, Ref: st.Ref}
+	changes = append(changes, fmt.Sprintf("stored content came from %s, but the record now points at %s", recordSource(stored), recordSource(rec)))
+	patches := patchProfiles(name, opts.Target, opts.Other)
+	if len(patches) == 0 {
+		return changes, true, nil
+	}
+	warning := takeoverWarning(name, stored, rec, patches, true)
+	proceed, err = gateTakeover(warning, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	if !proceed {
+		return nil, false, nil
+	}
+	return append(changes, warning), true, nil
+}
+
+// gateTakeover asks the user about a takeover warning: --force accepts without
+// asking and keeps the warning in the summary, a nil Confirm is the
+// non-interactive path and fails with the --force hint, and a declined prompt
+// reports proceed=false without an error.
+func gateTakeover(warning string, opts PullOptions) (bool, error) {
+	if opts.Force {
+		return true, nil
+	}
+	if opts.Confirm == nil {
+		return false, fmt.Errorf("%s; pass --force to accept without confirming", warning)
+	}
+	ok, err := opts.Confirm(warning, false)
+	if err != nil {
+		return false, fmt.Errorf("%w; pass --force to accept without confirming", err)
+	}
+	return ok, nil
+}
+
+// storedSource is where name's stored content came from as far as the sidecar
+// attests: the record itself when the record still resolves to what the sidecar
+// recorded, so the summary keeps the spelling the user wrote, or the sidecar's
+// source when the merged view already moved on. The sidecar is the only
+// trustworthy record of the content's origin — after a re-declaration the merged
+// record names the new source, so comparing against it would call a poisoned
+// record unchanged. A record with no sidecar is its own prior source.
+func storedSource(name string, rec config.RemoteRecord) config.RemoteRecord {
+	st, ok := config.ReadRemoteState(name)
+	if !ok {
+		return rec
+	}
+	url, ref, err := remote.ResolveRecord(rec)
+	if err == nil && st.URL == url && st.Ref == ref {
+		return rec
+	}
+	return config.RemoteRecord{URL: st.URL, Ref: st.Ref, NoPrefix: rec.NoPrefix}
 }
 
 // takeoverWarning names what the record now does differently, the profiles whose
