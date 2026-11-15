@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/crypto"
@@ -193,6 +194,174 @@ func hasIssue(issues []Issue, kind IssueKind) bool {
 		}
 	}
 	return false
+}
+
+// TestValidateRemoteDanglingWarns pins the grading a remote's passthrough
+// extends gets: the passthrough rule deliberately lets a remote name a parent
+// the user or another remote provides, so a parent no layer defines yet is the
+// remote's gap — a warning that says which remote expects it — never an error
+// that fails the user's validate before the parent exists.
+func TestValidateRemoteDanglingWarns(t *testing.T) {
+	t.Run("remote-declared profile warns and names its remote", func(t *testing.T) {
+		cfg := Config{
+			Profiles: map[string]Profile{
+				"llm/qwen": {Extends: Extends{"base"}, Env: map[string]string{"MODEL": "qwen"}},
+			},
+			ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+		}
+		issues := Validate(cfg)
+		if len(issues) != 1 {
+			t.Fatalf("issues = %+v, want exactly the dangling finding", issues)
+		}
+		got := issues[0]
+		if got.Kind != KindDanglingExtends || got.Target != "base" {
+			t.Fatalf("issue = %+v, want dangling-extends on base", got)
+		}
+		if got.Severity != SeverityWarning {
+			t.Fatalf("severity = %q, want warning: a remote's gap must not fail the user's validate", got.Severity)
+		}
+		if !strings.Contains(got.String(), `remote "llm"`) {
+			t.Errorf("issue text %q does not name the remote expecting the parent", got.String())
+		}
+	})
+
+	t.Run("an unpulled provider adds the pull hint", func(t *testing.T) {
+		defer remotesDirIn(t.TempDir())()
+		cfg := Config{
+			Profiles: map[string]Profile{
+				"llm/qwen": {Extends: Extends{"other/base"}},
+			},
+			ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+			Remotes:      map[string]RemoteRecord{"other": {URL: "https://example.com/other.yaml"}},
+		}
+		issues := Validate(cfg)
+		if len(issues) != 1 {
+			t.Fatalf("issues = %+v, want one dangling warning", issues)
+		}
+		if got := issues[0].String(); !strings.Contains(got, `enver pull other`) {
+			t.Errorf("issue text %q lacks the pull that would supply the parent", got)
+		}
+	})
+
+	t.Run("a pulled provider adds no pull hint", func(t *testing.T) {
+		defer remotesDirIn(t.TempDir())()
+		if err := WriteRemoteContent("other", []byte("profiles:\n  base:\n    env:\n      K: v\n")); err != nil {
+			t.Fatal(err)
+		}
+		cfg := Config{
+			Profiles: map[string]Profile{
+				"llm/qwen": {Extends: Extends{"other/base"}},
+			},
+			ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+			Remotes:      map[string]RemoteRecord{"other": {URL: "https://example.com/other.yaml"}},
+		}
+		issues := Validate(cfg)
+		if len(issues) != 1 {
+			t.Fatalf("issues = %+v, want one dangling warning", issues)
+		}
+		if got := issues[0].String(); strings.Contains(got, "enver pull") {
+			t.Errorf("issue text %q promises a pull that cannot supply a missing upstream profile", got)
+		}
+	})
+
+	t.Run("user-declared dangling stays an error", func(t *testing.T) {
+		defer remotesDirIn(t.TempDir())()
+		cfg := Config{
+			Profiles: map[string]Profile{"mine": {Extends: Extends{"other/base"}}},
+			Remotes:  map[string]RemoteRecord{"other": {URL: "https://example.com/other.yaml"}},
+		}
+		issues := Validate(cfg)
+		if len(issues) != 1 {
+			t.Fatalf("issues = %+v, want exactly the dangling finding", issues)
+		}
+		got := issues[0]
+		if got.Severity != SeverityError {
+			t.Fatalf("severity = %q, want error: the user's own declaration is theirs to fix", got.Severity)
+		}
+		if !strings.Contains(got.String(), `enver pull other`) {
+			t.Errorf("issue text %q lacks the pull that would supply the unpulled parent", got.String())
+		}
+	})
+}
+
+// TestRemoteDanglingIssues pins what counts as a remote's gap for a caller that
+// must keep failing on everything else: a break the user's own profiles cause,
+// a cycle, and a healthy chain are not the remote's to answer for.
+func TestRemoteDanglingIssues(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     Config
+		profile string
+		want    []string
+	}{
+		{
+			name: "a remote-declared profile with a missing parent",
+			cfg: Config{
+				Profiles:     map[string]Profile{"llm/qwen": {Extends: Extends{"base"}}},
+				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+			},
+			profile: "llm/qwen",
+			want:    []string{"base"},
+		},
+		{
+			name: "a user profile reaching a remote gap",
+			cfg: Config{
+				Profiles: map[string]Profile{
+					"llm/qwen": {Extends: Extends{"base"}},
+					"wrapper":  {Extends: Extends{"llm/qwen"}},
+				},
+				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+			},
+			profile: "wrapper",
+			want:    []string{"base"},
+		},
+		{
+			name:    "the user's own missing parent",
+			cfg:     Config{Profiles: map[string]Profile{"mine": {Extends: Extends{"ghost"}}}},
+			profile: "mine",
+		},
+		{
+			name: "a user-caused break under a remote profile",
+			cfg: Config{
+				Profiles: map[string]Profile{
+					"llm/qwen": {Extends: Extends{"mine", "base"}},
+					"mine":     {Extends: Extends{"ghost"}},
+				},
+				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
+			},
+			profile: "llm/qwen",
+		},
+		{
+			name: "a cycle among remote profiles",
+			cfg: Config{
+				Profiles: map[string]Profile{
+					"llm/a": {Extends: Extends{"llm/b"}},
+					"llm/b": {Extends: Extends{"llm/a"}},
+				},
+				ProfileLayer: map[string]string{
+					"llm/a": RemoteLayer("llm"),
+					"llm/b": RemoteLayer("llm"),
+				},
+			},
+			profile: "llm/a",
+		},
+		{
+			name:    "a healthy profile",
+			cfg:     Config{Profiles: map[string]Profile{"ok": {Env: map[string]string{"K": "v"}}}},
+			profile: "ok",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, is := range tc.cfg.RemoteDanglingIssues(tc.profile) {
+				got = append(got, is.Target)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("dangling targets = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestValidateUnsetLayerMatrix pins every layer × direction cell of the

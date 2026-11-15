@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
+	"github.com/spf13/cobra"
 )
 
 func TestDoListVarsColumn(t *testing.T) {
@@ -249,6 +251,97 @@ func TestDoListJSONBrokenResolve(t *testing.T) {
 	if err := doListJSON(&out); err == nil {
 		t.Fatalf("doListJSON must fail on an unresolvable extends chain, got:\n%s", out.String())
 	}
+}
+
+// TestListJSONSkipsRemoteDangling pins the machine-output tolerance the
+// passthrough rule needs: a profile a remote's dangling extends leaves
+// unresolvable is left out with a note on stderr — exit 0, the resolvable
+// profiles still in the document — while a break the user's own profiles cause
+// still fails the listing.
+func TestListJSONSkipsRemoteDangling(t *testing.T) {
+	t.Run("the remote gap skips, the resolvable profile still lists", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath,
+			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
+				"profiles:\n  good:\n    env:\n      K: v\n  wrapper:\n    extends: llm/qwen\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		notes := captureListNotes(t)
+
+		var out bytes.Buffer
+		if err := runListJSON(t, &out); err != nil {
+			t.Fatalf("list --format json must skip the remote gap, got: %v\n%s", err, out.String())
+		}
+		var got listJSON
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+		}
+		var names []string
+		for _, p := range got.Profiles {
+			names = append(names, p.Name)
+		}
+		if want := []string{"good"}; !reflect.DeepEqual(names, want) {
+			t.Fatalf("profiles = %v, want %v", names, want)
+		}
+		for _, want := range []string{
+			`skipping profile "llm/qwen"`,
+			`skipping profile "wrapper"`,
+			`remote "llm"`,
+			`"base"`,
+		} {
+			if !strings.Contains(notes.String(), want) {
+				t.Errorf("stderr note misses %q:\n%s", want, notes.String())
+			}
+		}
+		if strings.Contains(out.String(), "note:") {
+			t.Fatalf("the skip note leaked onto stdout:\n%s", out.String())
+		}
+	})
+
+	t.Run("a user-authored break still fails", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath,
+			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
+				"profiles:\n  good:\n    env:\n      K: v\n  broken:\n    extends: ghost\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		captureListNotes(t)
+
+		var out bytes.Buffer
+		if err := runListJSON(t, &out); err == nil {
+			t.Fatalf("a user-authored dangling extends must fail the JSON listing:\n%s", out.String())
+		}
+	})
+}
+
+// runListJSON invokes the JSON listing the way a test can: RunE directly, with
+// the format flag set as a caller would set it.
+func runListJSON(t *testing.T, out io.Writer) error {
+	t.Helper()
+	prev := listFormat
+	listFormat = "json"
+	t.Cleanup(func() { listFormat = prev })
+	cmd := &cobra.Command{}
+	cmd.SetOut(out)
+	return listCmd.RunE(cmd, nil)
+}
+
+// captureListNotes swaps the JSON listing's note stream for a buffer.
+func captureListNotes(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := listNotesOut
+	listNotesOut = &buf
+	t.Cleanup(func() { listNotesOut = prev })
+	return &buf
 }
 
 func findListLine(out, profile string) string {
