@@ -146,12 +146,24 @@ const (
 	LayerLocal  = "local"
 )
 
+// remoteLayerPrefix heads the label a remote's content carries, followed by the
+// record name.
+const remoteLayerPrefix = "remote:"
+
+// IsRemoteLayer reports whether layer names content a remote supplied. Callers
+// that must tell a remote's values from the user's own — a decrypt failure a
+// consumer may not be able to fix, say — read it here rather than spell the
+// prefix themselves.
+func IsRemoteLayer(layer string) bool {
+	return strings.HasPrefix(layer, remoteLayerPrefix)
+}
+
 // LayerEra ranks a layer label by its height in the fold: remote content is
 // the lowest base, global folds over it, local highest. An unrecognized label
 // ranks as global, the layer the attribution fallbacks already assume.
 func LayerEra(layer string) int {
 	switch {
-	case strings.HasPrefix(layer, "remote:"):
+	case IsRemoteLayer(layer):
 		return 0
 	case layer == LayerLocal:
 		return 2

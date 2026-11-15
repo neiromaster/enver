@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
@@ -296,6 +297,119 @@ func TestResolveToleranceDoesNotSwallowWrongKey(t *testing.T) {
 		t.Fatalf("a wrong key is not a missing key: %v", err)
 	} else if !strings.Contains(err.Error(), "TOKEN") {
 		t.Fatalf("the decrypt failure must name the key: %v", err)
+	}
+}
+
+// wrongKeyFile generates a key file no fixture ciphertext was written for.
+func wrongKeyFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "wrong-key")
+	if err := crypto.GenerateKey(path, true); err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return path
+}
+
+// remoteCiphertextFixture lands a pulled remote whose content holds a value only
+// its author's key can read, and writes the global config declaring the record.
+// It returns the global config path and the projected profile name.
+func remoteCiphertextFixture(t *testing.T) (cfgPath, profile string) {
+	t.Helper()
+	dir := t.TempDir()
+	remotes := filepath.Join(dir, "remotes")
+	prev := config.RemotesDir
+	config.RemotesDir = func() string { return remotes }
+	t.Cleanup(func() { config.RemotesDir = prev })
+
+	content := fmt.Sprintf("profiles:\n  app:\n    env:\n      REMOTE_TOKEN: %s\n      PLAIN: remote-value\n      AUTH: 'Bearer $REMOTE_TOKEN'\n", encV3(t, "author-secret"))
+	if err := config.WriteRemoteContent("llm", []byte(content)); err != nil {
+		t.Fatalf("write remote content: %v", err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/enver.yaml", PulledAt: time.Now()}); err != nil {
+		t.Fatalf("write remote state: %v", err)
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("remotes:\n  llm:\n    url: https://example.com/enver.yaml\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path, "llm/app"
+}
+
+// TestRemoteWrongKeyDegrades pins the remote-provenance degradation: ciphertext a
+// remote supplied that the local key cannot read costs only its own key, so the
+// display paths work and report it per key while the exec path refuses loudly.
+func TestRemoteWrongKeyDegrades(t *testing.T) {
+	t.Setenv("ENVER_KEY", "")
+	cfgPath, profile := remoteCiphertextFixture(t)
+	keyPath := wrongKeyFile(t)
+
+	displayOpts := Options{
+		ConfigPath:             cfgPath,
+		NoLocal:                true,
+		KeyPath:                keyPath,
+		TolerateMissingKey:     true,
+		TolerateRemoteWrongKey: true,
+	}
+	_, r, err := ResolveDefault(displayOpts, profile)
+	if err != nil {
+		t.Fatalf("a wrong key on remote content must degrade, not fail: %v", err)
+	}
+	if got := r.Undecryptable["REMOTE_TOKEN"]; got != "wrong key (remote)" {
+		t.Fatalf("Undecryptable[REMOTE_TOKEN] = %q, want the remote wrong-key reason (%#v)", got, r.Undecryptable)
+	}
+	if _, ok := r.Undecryptable["PLAIN"]; ok {
+		t.Fatalf("a readable value must not be reported: %#v", r.Undecryptable)
+	}
+	if !crypto.IsEncrypted(r.Env["REMOTE_TOKEN"]) {
+		t.Fatalf("the unread ciphertext must stay in place, got %q", r.Env["REMOTE_TOKEN"])
+	}
+	if r.Env["PLAIN"] != "remote-value" {
+		t.Fatalf("PLAIN = %q, want remote-value: readable remote values still resolve", r.Env["PLAIN"])
+	}
+	if r.Env["AUTH"] != "Bearer " {
+		t.Fatalf("AUTH = %q, want %q: an unreadable key must not leak ciphertext into a value that interpolates it", r.Env["AUTH"], "Bearer ")
+	}
+
+	execOpts := Options{ConfigPath: cfgPath, NoLocal: true, KeyPath: keyPath, Name: "enver x"}
+	_, _, err = ResolveDefault(execOpts, profile)
+	if err == nil {
+		t.Fatal("the exec path must refuse rather than run a child with a secret missing")
+	}
+	for _, want := range []string{"REMOTE_TOKEN", "remote ciphertext", "patch"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal %q misses %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "enc:v3:") {
+		t.Fatalf("the refusal must not echo ciphertext: %v", err)
+	}
+	// The guard above proves resolve fails here, so Run cannot reach exec.
+	if rerr := Run([]string{profile, "--", "env"}, 1, execOpts); rerr == nil {
+		t.Fatal("enver x must refuse before starting the child")
+	}
+}
+
+// TestOwnWrongKeyStillHardFails pins the scope of the degradation: a user-layer
+// value the key cannot read is a key mismatch about the user's own file, so no
+// display tolerance may swallow it.
+func TestOwnWrongKeyStillHardFails(t *testing.T) {
+	cfgPath := noKeyFixture(t)
+	opts := Options{
+		ConfigPath:             cfgPath,
+		NoLocal:                true,
+		KeyPath:                wrongKeyFile(t),
+		TolerateMissingKey:     true,
+		TolerateRemoteWrongKey: true,
+	}
+	_, _, err := ResolveDefault(opts, "work")
+	if err == nil {
+		t.Fatal("user-layer ciphertext a wrong key cannot read must stay a hard error")
+	}
+	if errors.Is(err, ErrNoKey) {
+		t.Fatalf("a wrong key is not a missing key: %v", err)
+	}
+	if !strings.Contains(err.Error(), "decrypt TOKEN") {
+		t.Fatalf("err = %v, want the unchanged decrypt failure naming TOKEN", err)
 	}
 }
 
