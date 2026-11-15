@@ -101,7 +101,8 @@ store, inherits like code, and hands the result to a single child process.
 
 | Feature | Doc |
 |---|---|
-| Two-layer configs: global store ⊕ project file, per-key overlay, no walk-up | [`config.md`](docs/config.md) |
+| Layered configs: remote content ⊕ global store ⊕ project file, per-key overlay, no walk-up | [`config.md`](docs/config.md#layers) |
+| Remote configs: `enver pull` a shared YAML, patch its profiles in place, keep working offline | [`config.md`](docs/config.md#remotes) |
 | Multi-parent `extends`: mixins composed left-to-right, transitive inheritance | [`config.md`](docs/config.md#multiple-parents) |
 | `unset` fences: keys enver must never set; shell values pass through untouched | [`config.md`](docs/config.md#suppressing-variables-unset) |
 | Provenance: every value annotated `# from <profile> (<layer>)` in `show` | [`cli.md`](docs/cli.md#preview-and-masking) |
@@ -111,7 +112,8 @@ store, inherits like code, and hands the result to a single child process.
 
 ## How it works
 
-1. Load the global config, overlay the local `./.enver.yaml`.
+1. Load every pulled remote's stored content, overlay the global config, then
+   the local `./.enver.yaml`.
 2. Resolve the selected profile walking `extends` with cycle detection — root
    first, child overrides parent.
 3. For `enver x`: child env = current environment ⊕ profile env, then exec
@@ -119,7 +121,7 @@ store, inherits like code, and hands the result to a single child process.
 
 ## Full manual
 
-- [`docs/config.md`](docs/config.md) — layers, merge rules, `extends`,
+- [`docs/config.md`](docs/config.md) — layers, remotes, merge rules, `extends`,
   suppressing variables
 - [`docs/profiles.md`](docs/profiles.md) — `add`, `edit`, remove/rename/
   duplicate/default, `validate`

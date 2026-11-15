@@ -10,7 +10,9 @@ target — `./.enver.yaml` by default, the global config under `--global` —
 preserving any existing structure and comments:
 
 - **Profile name** — letters, digits, `-`, `_`; must start with a letter or
-  digit. Pass it as an argument (`enver add glm`) to skip this prompt.
+  digit. A bare name is your own; one `/` inside it names a remote's profile,
+  `record/profile` (see [Remote-projected profiles](#remote-projected-profiles)).
+  Pass it as an argument (`enver add glm`) to skip this prompt.
 - **Extends** — one or more parents picked from a list of existing profiles,
   in inheritance order; reorder in place with `<`/`>` or `←`/`→`, confirm
   nothing picked for no `extends`. Skipped when no profiles exist yet. A pick
@@ -40,14 +42,15 @@ Mutating commands (`add`, `edit`, `remove`, `rename`, `duplicate`, `default`,
 `import`, `encrypt`, `decrypt`) write to `./.enver.yaml` by default; pass
 `--global` (`-g`) to write the user config instead. `enver add` creates the
 local file if it is absent. When authoring locally, the `extends` picker lists
-both local and global profiles; under `--global` it lists global profiles only
-(a global profile must not extend a local one, which would break outside this
-directory).
+the merged view — local and global profiles plus the projected profiles of every
+pulled remote; under `--global` it lists global profiles only (a global profile
+must not extend a local one, which would break outside this directory), so a
+remote-provided parent shows up there as a dimmed `(external)` row.
 
 Profile completion follows the same split: read commands (`show`, `export`,
-`dotenv`, `x`) complete against both layers, while mutating commands complete
-only the profiles they can write — the local file, or the global file under
-`--global`.
+`dotenv`, `x`) complete against the merged view — both user layers plus every
+remote-projected name — while mutating commands complete only the profiles the
+write target declares.
 
 ## Editing profiles
 
@@ -104,6 +107,32 @@ the menu:
 Cancelling exits without writing. A profile must keep at least one variable,
 an `extends`, or an `unset`, so **Done** is rejected on an empty profile.
 
+## Remote-projected profiles
+
+A pulled remote contributes profiles under its record prefix (`llm/ollama`,
+`llm/qwen`) without living in any file you edit: remote content is a read-only
+base below your own layers. The rules that follow from that, and the commands
+that carry them, are in [`config.md`](./config.md#remotes).
+
+- **Patch with `add`.** `enver add llm/ollama` on a name only remote content
+  provides writes your copy of the projected name into the write target — the
+  patch the feature exists for. Its summary says which remote it patches.
+- **Remote content is never a write target.** Every other mutator (`edit`,
+  `remove`, `rename`, `duplicate`, `default`, `encrypt`, `decrypt`) refuses a
+  remote-only name and points at that same `add`; deleting remote content is
+  `enver pull --rm <record>`.
+- **Patches in the other user layer keep the scope hint.** When the other user
+  layer already declares the name, `add` refuses with the usual scope hint
+  (re-run with `-g`, or without it) rather than writing a second patch that
+  would shadow your own per key — a patch is written in the layer that owns it.
+- **A prefixed name is addressed in full.** There is no bare-name matching:
+  `enver x llm/qwen` runs it, and `llm/qwen` is what the pickers and completion
+  offer.
+
+Pulled content is replaced wholesale on every re-pull, so a patch is the only
+way to make a remote profile yours: never hand-edit the stored file — it lives
+in `$XDG_CONFIG_HOME/enver/remotes/` and the next pull overwrites it.
+
 ## remove · rename · duplicate · default
 
 - **`enver remove [profile]`** — delete a profile. Refused while other
@@ -128,6 +157,15 @@ an `extends`, or an `unset`, so **Done** is rejected on an empty profile.
 cycles (errors); profiles with nothing to contribute — no env, no extends, no
 unset (warning); a profile that both defines and unsets the same key in
 one layer (`contradictory-unset`, warning); and a `~`-marked key still stored in
-plaintext (`plaintext-secret`, warning). It also checks the global file in
-isolation and flags a global profile that extends a local-only name (fine in
-this directory, broken elsewhere). Exits non-zero if any error is found.
+plaintext (`plaintext-secret`, warning). It also checks the global file against
+the remote content it sits on (a global profile may extend a remote-provided
+name; extending a local-only one is flagged, since it is fine in this directory
+and broken elsewhere). Exits non-zero if any error is found.
+
+Authorship decides how a dangling `extends` is graded: a parent missing because
+**your own** config names it is an error, while one a **remote** authored is a
+warning carrying a hint — which remote expects the parent, and the `enver pull`
+that would supply it. A remote may legitimately extend a profile you provide, so
+an unpulled parent is a config to complete, not a broken one. `enver list
+--format json` grades the same way: such profiles are left out of `profiles` and
+named in `skipped`, with a note on stderr, instead of failing the listing.
