@@ -30,7 +30,7 @@ func TestMerge(t *testing.T) {
 			"c": {Extends: Extends{"a"}, Env: map[string]string{"K5": "over"}},
 		},
 	}
-	got := Merge(base, over)
+	got := Merge(base, over, LayerGlobal, LayerLocal)
 	if got.Default != "c" {
 		t.Fatalf("default = %q, want c", got.Default)
 	}
@@ -67,7 +67,7 @@ func TestMergeExtends(t *testing.T) {
 	// A profile defined in both layers composes extends as [global…, local…].
 	base := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"g"}, Env: map[string]string{"K": "base"}}}}
 	over := Config{Profiles: map[string]Profile{"p": {Extends: Extends{"l"}, Env: map[string]string{"K2": "over"}}}}
-	merged := Merge(base, over)
+	merged := Merge(base, over, LayerGlobal, LayerLocal)
 	if got := merged.Profiles["p"].Extends; !slices.Equal(got, Extends{"g", "l"}) {
 		t.Fatalf("merged extends = %v, want [g l]", got)
 	}
@@ -693,7 +693,7 @@ func TestCommentProvenanceMatchesValueProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := Merge(g, l).ResolveProfile("self")
+	r, err := Merge(g, l, LayerGlobal, LayerLocal).ResolveProfile("self")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +764,7 @@ func TestMergeCommentsSticky(t *testing.T) {
 			Comments: map[string]string{"C": "local c"},
 		},
 	}}
-	got := Merge(base, over).Profiles["p"]
+	got := Merge(base, over, LayerGlobal, LayerLocal).Profiles["p"]
 	if v := got.Comments["A"]; v != "global a" {
 		t.Fatalf("A comment = %q, want %q (redefined without comment keeps base)", v, "global a")
 	}
@@ -863,7 +863,7 @@ func TestLoadRejectsInvalidEnvNames(t *testing.T) {
 func TestMergeCaseVariantOverlay(t *testing.T) {
 	base := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"PATH": "g"}}}}
 	over := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"Path": "l"}}}}
-	got := Merge(base, over).Profiles["p"].Env
+	got := Merge(base, over, LayerGlobal, LayerLocal).Profiles["p"].Env
 	if runtime.GOOS == "windows" {
 		if len(got) != 1 || got["Path"] != "l" {
 			t.Fatalf("merged env = %v, want the local variant only: {Path: l}", got)
@@ -911,7 +911,7 @@ func TestUnsetDedupCaseVariants(t *testing.T) {
 func TestMergeExtendsKeepsCaseDistinctNames(t *testing.T) {
 	base := Config{Profiles: map[string]Profile{"c": {Extends: Extends{"prod"}}}}
 	over := Config{Profiles: map[string]Profile{"c": {Extends: Extends{"Prod"}}}}
-	got := Merge(base, over).Profiles["c"].Extends
+	got := Merge(base, over, LayerGlobal, LayerLocal).Profiles["c"].Extends
 	if !reflect.DeepEqual([]string(got), []string{"prod", "Prod"}) {
 		t.Fatalf("extends = %v, want [prod Prod] (names are case-sensitive everywhere)", got)
 	}
@@ -927,12 +927,13 @@ func TestMergeDoesNotMutateInputs(t *testing.T) {
 	},
 		Origins:      map[string]map[string]string{"shared": {"A": LayerGlobal}},
 		UnsetOrigins: map[string]map[string]string{"shared": {"B": LayerGlobal}},
+		ProfileLayer: map[string]string{"shared": LayerGlobal, "quiet": LayerGlobal},
 	}
 	override := Config{Profiles: map[string]Profile{
 		"shared": {Env: map[string]string{"A": "9"}, Unset: Unsets{"A"}},
 	}}
 
-	merged := Merge(base, override)
+	merged := Merge(base, override, LayerGlobal, LayerLocal)
 
 	// Base profiles unchanged.
 	if !maps.Equal(base.Profiles["shared"].Env, map[string]string{"A": "1", "B": "2"}) {
@@ -952,6 +953,9 @@ func TestMergeDoesNotMutateInputs(t *testing.T) {
 	if !maps.Equal(base.UnsetOrigins["shared"], map[string]string{"B": LayerGlobal}) {
 		t.Errorf("base.UnsetOrigins[shared] mutated: %v", base.UnsetOrigins["shared"])
 	}
+	if !maps.Equal(base.ProfileLayer, map[string]string{"shared": LayerGlobal, "quiet": LayerGlobal}) {
+		t.Errorf("base.ProfileLayer mutated: %v", base.ProfileLayer)
+	}
 
 	// Override unchanged.
 	if !maps.Equal(override.Profiles["shared"].Env, map[string]string{"A": "9"}) {
@@ -967,6 +971,162 @@ func TestMergeDoesNotMutateInputs(t *testing.T) {
 	}
 	if _, ok := merged.Profiles["shared"].Env["B"]; ok {
 		t.Errorf("merged shared.B survived the inherited fence: %v", merged.Profiles["shared"].Env)
+	}
+}
+
+// TestMergeThreeLayerFences pins the carried-fence gate across the three-layer
+// fold: a fence strips every mention from its own era or lower and goes silent
+// the moment a higher layer owns the key. The positional stamping this test
+// replaces mislabeled global content as local under a remote base, so the gate
+// misfired and the fenced value resurrected — the case the era-ranked gate
+// exists to keep fenced.
+func TestMergeThreeLayerFences(t *testing.T) {
+	const remoteLabel = "remote:llm"
+	fold := func(remote, global, local Config) Config {
+		return Merge(Merge(remote, global, remoteLabel, LayerGlobal), local, LayerGlobal, LayerLocal)
+	}
+	remoteFence := Config{Profiles: map[string]Profile{
+		"vic":  {Env: map[string]string{"K": "r"}},
+		"leaf": {Extends: Extends{"vic"}, Unset: Unsets{"K"}},
+	}}
+	globalFence := Config{Profiles: map[string]Profile{
+		"vic":  {Env: map[string]string{"K": "g"}},
+		"leaf": {Extends: Extends{"vic"}, Unset: Unsets{"K"}},
+	}}
+	cases := []struct {
+		name       string
+		remote     Config
+		global     Config
+		local      Config
+		wantK      string // "" means fenced: K absent with a tombstone
+		wantFence  string // expected Unsets[K].Layer when K is fenced
+		wantSource string // expected Sources[K].Layer when K is exported
+	}{
+		{
+			name:      "remote fence fences a remote victim",
+			remote:    remoteFence,
+			wantK:     "",
+			wantFence: remoteLabel,
+		},
+		{
+			name:   "remote fence goes silent before a global redefinition",
+			remote: remoteFence,
+			global: Config{Profiles: map[string]Profile{"vic": {Env: map[string]string{"K": "g"}}}},
+			wantK:  "g", wantSource: LayerGlobal,
+		},
+		{
+			name:   "remote fence goes silent before a local redefinition",
+			remote: remoteFence,
+			local:  Config{Profiles: map[string]Profile{"vic": {Env: map[string]string{"K": "l"}}}},
+			wantK:  "l", wantSource: LayerLocal,
+		},
+		{
+			name:   "global fence fences a global extends victim over a remote base",
+			remote: Config{Profiles: map[string]Profile{"unref": {Env: map[string]string{"X": "r"}}}},
+			global: globalFence,
+			wantK:  "", wantFence: LayerGlobal,
+		},
+		{
+			name:   "global fence goes silent before a local redefinition",
+			global: globalFence,
+			local:  Config{Profiles: map[string]Profile{"vic": {Env: map[string]string{"K": "l"}}}},
+			wantK:  "l", wantSource: LayerLocal,
+		},
+	}
+	for _, tc := range cases {
+		r, err := fold(tc.remote, tc.global, tc.local).ResolveProfile("leaf")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if tc.wantK == "" {
+			if v, ok := r.Env["K"]; ok {
+				t.Errorf("%s: K = %q exported, want fenced: %v", tc.name, v, r.Env)
+			}
+			if s := r.Unsets["K"]; s != (Source{Profile: "leaf", Layer: tc.wantFence}) {
+				t.Errorf("%s: K tombstone = %+v, want {leaf %s}", tc.name, s, tc.wantFence)
+			}
+			continue
+		}
+		if v := r.Env["K"]; v != tc.wantK {
+			t.Errorf("%s: K = %q, want %q: the user redefinition must win", tc.name, v, tc.wantK)
+		}
+		if s := r.Sources["K"]; s.Layer != tc.wantSource {
+			t.Errorf("%s: K source = %+v, want layer %s", tc.name, s, tc.wantSource)
+		}
+		if _, ok := r.Unsets["K"]; ok {
+			t.Errorf("%s: K carries a tombstone next to a live value: %v", tc.name, r.Unsets)
+		}
+	}
+
+	// Invariant: a remote base must not change the resolution of a chain that
+	// never references remote content — the three-layer fold must answer what
+	// the two-layer fold answers, sources and tombstones included.
+	invGlobal := Config{Profiles: map[string]Profile{
+		"vic":   {Env: map[string]string{"K": "g"}},
+		"leaf":  {Extends: Extends{"vic"}, Unset: Unsets{"K"}},
+		"plain": {Extends: Extends{"vic"}},
+	}}
+	invLocal := Config{Profiles: map[string]Profile{"other": {Env: map[string]string{"Y": "l"}}}}
+	invRemote := Config{Profiles: map[string]Profile{"unref": {Env: map[string]string{"X": "r"}}}}
+	for _, name := range []string{"leaf", "plain"} {
+		two, err := Merge(invGlobal, invLocal, LayerGlobal, LayerLocal).ResolveProfile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		three, err := fold(invRemote, invGlobal, invLocal).ResolveProfile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !maps.Equal(two.Env, three.Env) || !maps.Equal(two.Unsets, three.Unsets) ||
+			!reflect.DeepEqual(two.Sources, three.Sources) {
+			t.Errorf("%s: remote base changed resolution: two-layer %v/%v, three-layer %v/%v",
+				name, two.Env, two.Unsets, three.Env, three.Unsets)
+		}
+	}
+}
+
+// TestMergeProfileLayerStamping pins the per-profile declaring layer across the
+// nested fold: an overriding copy restamps the name, a carried entry keeps its
+// layer, and a remote-only profile must not decay to the outer fold's base
+// label.
+func TestMergeProfileLayerStamping(t *testing.T) {
+	const remoteLabel = "remote:llm"
+	remote := Config{Profiles: map[string]Profile{
+		"only": {Env: map[string]string{"A": "r"}},
+		"both": {Env: map[string]string{"B": "r"}},
+	}}
+	global := Config{Profiles: map[string]Profile{
+		"both": {Env: map[string]string{"B": "g"}},
+		"gn":   {Env: map[string]string{"C": "g"}},
+	}}
+	local := Config{Profiles: map[string]Profile{"ln": {Env: map[string]string{"D": "l"}}}}
+	merged := Merge(Merge(remote, global, remoteLabel, LayerGlobal), local, LayerGlobal, LayerLocal)
+	want := map[string]string{
+		"only": remoteLabel,
+		"both": LayerGlobal,
+		"gn":   LayerGlobal,
+		"ln":   LayerLocal,
+	}
+	if !maps.Equal(merged.ProfileLayer, want) {
+		t.Fatalf("ProfileLayer = %v, want %v", merged.ProfileLayer, want)
+	}
+}
+
+func TestLayerEra(t *testing.T) {
+	cases := []struct {
+		layer string
+		want  int
+	}{
+		{"remote:llm", 0},
+		{"remote:", 0},
+		{LayerGlobal, 1},
+		{"", 1},
+		{LayerLocal, 2},
+	}
+	for _, tc := range cases {
+		if got := LayerEra(tc.layer); got != tc.want {
+			t.Errorf("LayerEra(%q) = %d, want %d", tc.layer, got, tc.want)
+		}
 	}
 }
 
@@ -1213,7 +1373,7 @@ func profileConfig(name string, env map[string]string, markedKey string) Config 
 func TestMergeLocalPlainKeyClearsInheritedMark(t *testing.T) {
 	base := profileConfig("work", map[string]string{"TOKEN": "a"}, "TOKEN")
 	local := profileConfig("work", map[string]string{"TOKEN": "b"}, "")
-	got := Merge(base, local).Profiles["work"]
+	got := Merge(base, local, LayerGlobal, LayerLocal).Profiles["work"]
 	if got.Marked["TOKEN"] {
 		t.Fatal("local unmarked override must clear the mark")
 	}
@@ -1308,7 +1468,7 @@ func TestCarriedFenceDropsMark(t *testing.T) {
 		"work": {Extends: Extends{"base"}, Unset: Unsets{"TOKEN"}},
 	}}
 	local := profileConfig("work", map[string]string{"OTHER": "b"}, "")
-	r, err := Merge(global, local).ResolveProfile("work")
+	r, err := Merge(global, local, LayerGlobal, LayerLocal).ResolveProfile("work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1325,7 +1485,7 @@ func TestMergeFencedOwnKeyDropsMark(t *testing.T) {
 		"work": {Env: map[string]string{"TOKEN": "a"}, Marked: map[string]bool{"TOKEN": true}, Unset: Unsets{"TOKEN"}},
 	}}
 	local := profileConfig("work", map[string]string{"OTHER": "b"}, "")
-	got := Merge(base, local).Profiles["work"]
+	got := Merge(base, local, LayerGlobal, LayerLocal).Profiles["work"]
 	if _, ok := got.Env["TOKEN"]; ok {
 		t.Fatalf("the fence must strip the profile's own value: %#v", got.Env)
 	}

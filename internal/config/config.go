@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/envname"
 	"github.com/neiromaster/enver/internal/xdg"
@@ -145,9 +146,23 @@ const (
 	LayerLocal  = "local"
 )
 
+// LayerEra ranks a layer label by its height in the fold: remote content is
+// the lowest base, global folds over it, local highest. An unrecognized label
+// ranks as global, the layer the attribution fallbacks already assume.
+func LayerEra(layer string) int {
+	switch {
+	case strings.HasPrefix(layer, "remote:"):
+		return 0
+	case layer == LayerLocal:
+		return 2
+	default:
+		return 1
+	}
+}
+
 // Config is the merged top-level document. Origins records, per profile and env
-// key, which layer ("global" or "local") provided the winning value; it is
-// filled by Merge and never serialized.
+// key, which layer ("global", "local", or "remote:<name>") provided the winning
+// value; it is filled by Merge and never serialized.
 type Config struct {
 	Default  string                       `yaml:"default"`
 	Profiles map[string]Profile           `yaml:"profiles"`
@@ -157,6 +172,10 @@ type Config struct {
 	// serialized. Attribution is by exact spelling: Merge records the override
 	// layer's entries under their own spelling.
 	UnsetOrigins map[string]map[string]string `yaml:"-"`
+	// ProfileLayer records, per profile name, the layer whose copy declares
+	// it; like Origins it is filled by Merge and never serialized. An
+	// overriding copy restamps the name, a carried entry keeps its layer.
+	ProfileLayer map[string]string `yaml:"-"`
 }
 
 // GlobalPath resolves the user-level config location:
@@ -242,25 +261,32 @@ func findLocal() []string {
 	return []string{p}
 }
 
-// Merge folds override into base: override wins for default and per-key env,
-// except that an empty override Default never clears the base default —
-// clearing is per-layer (`enver default --clear` writes the owning file);
-// extends concatenates as [base…, override…] deduped, so local mixins compose
-// with rather than replace global ones. Unsets are layer-scoped, not unioned:
-// folding a shared profile applies the inherited copy's fence to its own env
-// right here — the overriding copy may refill those keys — while a fence whose
-// target arrives only through extends ancestors moves to Profile.Carried,
-// where resolveEnv applies it era-gated after the inherited fold. The merged
-// profile's declared list is the overriding layer's own, and UnsetOrigins
-// attributes exactly those entries; profiles absent from the override shed
-// their earlier-era declared fences the same way. Merge never mutates its
-// inputs: the fold writes into clones, so the returned config shares no state
-// with base or override.
-func Merge(base, override Config) Config {
+// Merge folds override into base under per-call layer labels, baseLabel for
+// the base layer and overrideLabel for the overriding one, so a fold deeper
+// than two layers stamps content with the layer that really authored it
+// instead of positional defaults. The override's env keys and declared unsets
+// carry overrideLabel; base entries no earlier fold attributed — fences, env
+// keys, profile names — carry baseLabel, so a lower base layer keeps its own
+// era rather than reading as the next fold's base. Otherwise override wins
+// for default and per-key env, except that an empty override Default never
+// clears the base default — clearing is per-layer (`enver default --clear`
+// writes the owning file); extends concatenates as [base…, override…] deduped,
+// so local mixins compose with rather than replace global ones. Unsets are
+// layer-scoped, not unioned: folding a shared profile applies the inherited
+// copy's fence to its own env right here — the overriding copy may refill
+// those keys — while a fence whose target arrives only through extends
+// ancestors moves to Profile.Carried, where resolveEnv applies it era-gated
+// after the inherited fold. The merged profile's declared list is the
+// overriding layer's own, and UnsetOrigins attributes exactly those entries;
+// profiles absent from the override shed their earlier-era declared fences the
+// same way. Merge never mutates its inputs: the fold writes into clones, so
+// the returned config shares no state with base or override.
+func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 	out := base
 	out.Profiles = cloneProfiles(base.Profiles)
 	out.Origins = cloneProvenance(base.Origins)
 	out.UnsetOrigins = cloneProvenance(base.UnsetOrigins)
+	out.ProfileLayer = maps.Clone(base.ProfileLayer)
 	if override.Default != "" {
 		out.Default = override.Default
 	}
@@ -270,7 +296,7 @@ func Merge(base, override Config) Config {
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
-		splitUnsets(&bp, p.Unset, base.UnsetOrigins[name])
+		splitUnsets(&bp, p.Unset, base.UnsetOrigins[name], baseLabel)
 		for _, u := range p.Unset {
 			if out.UnsetOrigins == nil {
 				out.UnsetOrigins = map[string]map[string]string{}
@@ -280,7 +306,7 @@ func Merge(base, override Config) Config {
 				m = map[string]string{}
 				out.UnsetOrigins[name] = m
 			}
-			m[u] = LayerLocal
+			m[u] = overrideLabel
 		}
 		if bp.Env == nil {
 			bp.Env = map[string]string{}
@@ -303,7 +329,7 @@ func Merge(base, override Config) Config {
 				m = map[string]string{}
 				out.Origins[name] = m
 			}
-			envname.Set(m, k, LayerLocal)
+			envname.Set(m, k, overrideLabel)
 		}
 		for _, k := range ownKeys {
 			if c := p.Comments[k]; c != "" {
@@ -315,6 +341,10 @@ func Merge(base, override Config) Config {
 		}
 		bp.Marked = markedOrNil(bp.Marked)
 		out.Profiles[name] = bp
+		if out.ProfileLayer == nil {
+			out.ProfileLayer = map[string]string{}
+		}
+		out.ProfileLayer[name] = overrideLabel
 	}
 	// Profiles without an overriding copy resolve exactly as before; only
 	// their era-declared fences need the same consume-or-carry split.
@@ -323,9 +353,34 @@ func Merge(base, override Config) Config {
 			continue
 		}
 		bp := out.Profiles[name]
-		splitUnsets(&bp, nil, base.UnsetOrigins[name])
+		splitUnsets(&bp, nil, base.UnsetOrigins[name], baseLabel)
 		bp.Marked = markedOrNil(bp.Marked)
 		out.Profiles[name] = bp
+	}
+	// What no earlier fold attributed is the base layer's own: stamp env keys
+	// and profile names that carry no recorded layer with baseLabel, so a
+	// lower base layer keeps its era instead of falling back to global.
+	for name, bp := range out.Profiles {
+		m := out.Origins[name]
+		for _, k := range slices.Sorted(maps.Keys(bp.Env)) {
+			if _, ok := envname.Get(m, k); ok {
+				continue
+			}
+			if out.Origins == nil {
+				out.Origins = map[string]map[string]string{}
+			}
+			if m == nil {
+				m = map[string]string{}
+				out.Origins[name] = m
+			}
+			envname.Set(m, k, baseLabel)
+		}
+		if _, ok := out.ProfileLayer[name]; !ok {
+			if out.ProfileLayer == nil {
+				out.ProfileLayer = map[string]string{}
+			}
+			out.ProfileLayer[name] = baseLabel
+		}
 	}
 	return out
 }
@@ -372,13 +427,13 @@ func cloneProvenance(in map[string]map[string]string) map[string]map[string]stri
 // every inherited declared fence rides forward in Carried for era-gated
 // application at resolve time (so an ancestor's value cannot resurface just
 // because a local file exists), stamped with the layer that declared it — the
-// unset provenance of the config whose copy the fences leave, global where
+// unset provenance of the config whose copy the fences leave, baseLabel where
 // nothing is recorded — and a fence whose target sits in this copy's own env
 // additionally drops that entry right at the fold — leaving it would
 // resurrect the value through the own-env overlay.
-func splitUnsets(bp *Profile, fresh Unsets, inheritedOrigins map[string]string) {
+func splitUnsets(bp *Profile, fresh Unsets, inheritedOrigins map[string]string, baseLabel string) {
 	for _, u := range bp.Unset {
-		layer := LayerGlobal
+		layer := baseLabel
 		if l, ok := envname.Get(inheritedOrigins, u); ok {
 			layer = l
 		}
@@ -432,15 +487,15 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 		if err != nil {
 			return cfg, err
 		}
-		cfg = Merge(cfg, overlay)
+		cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 	}
 	return cfg, nil
 }
 
 // Source identifies where a resolved env value came from: the profile that last
-// set it along the chain, and the layer ("global" or "local") whose copy of
-// that profile carried the winning value. A key overridden by a closer parent
-// or child reports the override, matching value provenance.
+// set it along the chain, and the layer whose copy of that profile carried the
+// winning value ("global", "local", or "remote:<name>"). A key overridden by a
+// closer parent or child reports the override, matching value provenance.
 type Source struct {
 	Profile string `json:"profile"`
 	Layer   string `json:"layer"`
@@ -571,12 +626,13 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	delete(visiting, name)
 	// Carried earlier-era fences act between the inherited contributions and
 	// this profile's own entries: they strip what the earlier layer supplied,
-	// and go silent the moment a later-era mention owns the key. Every
-	// unsilenced fence reports a tombstone attributed to this profile at the
-	// layer whose copy declared the fence: a fence with no victim alive still
-	// carries that declaration's intent.
+	// and go silent the moment a mention from a higher layer owns the key —
+	// LayerEra ranks the two labels, so a fence bites its own era and below.
+	// Every unsilenced fence reports a tombstone attributed to this profile
+	// at the layer whose copy declared the fence: a fence with no victim
+	// alive still carries that declaration's intent.
 	for _, u := range p.Carried {
-		if s, ok := envname.Get(out.sources, u.Key); ok && s.Layer == LayerLocal {
+		if s, ok := envname.Get(out.sources, u.Key); ok && LayerEra(s.Layer) > LayerEra(u.Layer) {
 			continue
 		}
 		envname.Delete(out.env, u.Key)
@@ -670,9 +726,9 @@ func appendUniq(dst []string, add ...string) []string {
 	return dst
 }
 
-// layerOf reports which layer ("global" or "local") defined key in profile's
-// own env. Merge records local for keys the local layer overrode; everything
-// else is global by default.
+// layerOf reports which layer ("global", "local", or "remote:<name>") defined
+// key in profile's own env. Merge records the layer that overrode or authored
+// the key; everything unrecorded is global by default.
 func (c Config) layerOf(profile, key string) string {
 	if l, ok := envname.Get(c.Origins[profile], key); ok {
 		return l

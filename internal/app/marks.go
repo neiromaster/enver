@@ -55,9 +55,9 @@ func WriteMarks(q WriteQuery) map[string]bool {
 	projected.Profiles[q.Name] = p
 	var view config.Config
 	if q.TargetIsGlobal {
-		view = config.Merge(projected, *q.Other)
+		view = config.Merge(projected, *q.Other, config.LayerGlobal, config.LayerLocal)
 	} else {
-		view = config.Merge(*q.Other, projected)
+		view = config.Merge(*q.Other, projected, config.LayerGlobal, config.LayerLocal)
 	}
 	return config.MarksForWrite(view, q.Name, q.Keys)
 }
