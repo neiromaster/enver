@@ -19,6 +19,12 @@ func ResolveRecord(rec config.RemoteRecord) (string, string, error) {
 	return source.ResolveRecord(rec.URL, rec.Ref)
 }
 
+// Unpinned reports whether a resolved ref floats; source.Unpinned carries the
+// rule.
+func Unpinned(ref string) bool {
+	return source.Unpinned(ref)
+}
+
 // SplitRef splits a source spelling into the part a record stores and the ref
 // spelled inline in it; source.SplitRef documents why the stored part keeps the
 // spelling rather than the resolved URL.

@@ -592,8 +592,14 @@ func recordSource(rec config.RemoteRecord) string {
 // the resolved URL, but the spelling is what the user typed, so the ref is
 // restated rather than left for the reader to infer.
 func sourceLabel(rec config.RemoteRecord, ref string) string {
+	return sourceLabelURL(rec.URL, ref)
+}
+
+// sourceLabelURL is sourceLabel for a URL that already stands on its own, such
+// as the resolved URL a sidecar records.
+func sourceLabelURL(url, ref string) string {
 	if ref == "" {
-		return rec.URL
+		return url
 	}
-	return rec.URL + " at ref " + ref
+	return url + " at ref " + ref
 }

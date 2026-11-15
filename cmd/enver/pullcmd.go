@@ -23,6 +23,7 @@ var (
 	pullNoPrefix bool
 	pullRm       bool
 	pullForce    bool
+	pullList     bool
 )
 
 var pullCmd = &cobra.Command{
@@ -34,6 +35,7 @@ loads it as the lowest layer.
   enver pull <source> --as <name>       register a source and fetch it now
   enver pull <name>                     re-fetch one registered remote
   enver pull                            re-fetch every registered remote
+  enver pull --list                     list registered remotes and their last pull
   enver pull --rm <name>                remove the record (and its content)
 
 A source is github:owner/repo[@ref], optionally with a path inside the repo, or
@@ -53,6 +55,9 @@ closest declaration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if pullLocal && globalFlags.global {
 			return fmt.Errorf("--local and --global conflict; pick the layer the record belongs to")
+		}
+		if pullList {
+			return runPullList(cmd, args)
 		}
 		if pullRm {
 			if len(args) == 0 {
@@ -188,4 +193,5 @@ func init() {
 	pullCmd.Flags().BoolVar(&pullNoPrefix, "no-prefix", false, "store the remote's profiles under their bare upstream names")
 	pullCmd.Flags().BoolVar(&pullRm, "rm", false, "remove the record (and its content when no layer still declares it)")
 	pullCmd.Flags().BoolVar(&pullForce, "force", false, "accept a takeover of existing profiles without confirming")
+	pullCmd.Flags().BoolVar(&pullList, "list", false, "list registered remotes and their last-pulled commit and time")
 }

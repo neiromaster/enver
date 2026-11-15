@@ -61,6 +61,14 @@ func ResolveRecord(raw, ref string) (string, string, error) {
 	return src.resolve(ref)
 }
 
+// Unpinned reports whether a resolved ref leaves the content floating: no ref at
+// all on an https source, or the HEAD default a github source resolves to. Such
+// a source can serve different content at any time, so the commit a pull
+// resolved is the only fixed point worth reporting back to the user.
+func Unpinned(ref string) bool {
+	return ref == "" || ref == githubDefaultRef
+}
+
 // SplitRef separates a source spelling into the part a record stores and the ref
 // spelled inline in it. The stored part keeps the form the user wrote — a
 // github record reads github:owner/repo, not the resolved raw URL — so editing
