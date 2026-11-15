@@ -109,8 +109,12 @@ func ownVars(p config.Profile) int {
 }
 
 // listJSON is the machine-readable shape of `enver list --format json`.
+// Skipped records the profiles the document leaves out and why, so a consumer
+// can tell an absent profile — including one the default names — from a config
+// that has none.
 type listJSON struct {
-	Profiles []listJSONEntry `json:"profiles"`
+	Profiles []listJSONEntry   `json:"profiles"`
+	Skipped  []listJSONSkipped `json:"skipped,omitempty"`
 }
 
 type listJSONEntry struct {
@@ -119,6 +123,11 @@ type listJSONEntry struct {
 	Extends  []string `json:"extends,omitempty"`
 	Vars     int      `json:"vars"`
 	Resolved int      `json:"resolved"`
+}
+
+type listJSONSkipped struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
 }
 
 // listNotesOut is where the JSON listing reports the profiles it leaves out:
@@ -145,9 +154,7 @@ func doListJSON(w io.Writer) error {
 			if len(dangling) == 0 {
 				return err
 			}
-			for _, is := range dangling {
-				_, _ = fmt.Fprintln(listNotesOut, skipNote(n, is))
-			}
+			out.Skipped = append(out.Skipped, listJSONSkipped{Name: n, Reason: skipReason(n, dangling)})
 			continue
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
@@ -158,18 +165,25 @@ func doListJSON(w io.Writer) error {
 			Resolved: len(r.Env),
 		})
 	}
+	for _, s := range out.Skipped {
+		_, _ = fmt.Fprintf(listNotesOut, "note: skipping profile %q: %s\n", s.Name, s.Reason)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }
 
-// skipNote renders one omitted profile: the skipped profile names its own
-// reason when it is the one that dangles, and the broken link when the gap sits
-// deeper in its chain.
-func skipNote(skipped string, is config.Issue) string {
-	reason := is.Reason()
-	if is.Profile != skipped {
-		reason = is.String()
+// skipReason renders why one profile is left out: it names its own reason when
+// it is the one that dangles, and each broken link when the gap sits deeper in
+// its chain.
+func skipReason(skipped string, issues []config.Issue) string {
+	reasons := make([]string, 0, len(issues))
+	for _, is := range issues {
+		if is.Profile == skipped {
+			reasons = append(reasons, is.Reason())
+			continue
+		}
+		reasons = append(reasons, is.String())
 	}
-	return fmt.Sprintf("note: skipping profile %q: %s", skipped, reason)
+	return strings.Join(reasons, "; ")
 }

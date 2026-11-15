@@ -1126,6 +1126,44 @@ func TestMergeProfileLayerStamping(t *testing.T) {
 	}
 }
 
+// TestMergeExtendsOriginsStamping pins the authorship of each extends target
+// across the fold: projection attributes the references a remote's file
+// declares to that remote, a user patch takes over the profile name without
+// inheriting authorship of references it did not write, and a target the patch
+// writes itself is the patch's.
+func TestMergeExtendsOriginsStamping(t *testing.T) {
+	remote := Project(Config{Profiles: map[string]Profile{
+		"ollama": {Env: map[string]string{"OLLAMA_HOST": "localhost"}},
+		"qwen":   {Extends: Extends{"ollama", "base"}},
+	}}, "llm", false)
+	wantRemote := map[string]string{
+		"llm/ollama": RemoteLayer("llm"),
+		"base":       RemoteLayer("llm"),
+	}
+	if got := remote.ExtendsOrigins["llm/qwen"]; !maps.Equal(got, wantRemote) {
+		t.Fatalf("projected ExtendsOrigins = %v, want %v", got, wantRemote)
+	}
+
+	patch := Config{Profiles: map[string]Profile{
+		"llm/qwen": {Extends: Extends{"mine"}, Env: map[string]string{"MODEL": "mine"}},
+	}}
+	merged := Merge(remote, patch, RemoteLayer("llm"), LayerGlobal)
+	want := map[string]string{
+		"llm/ollama": RemoteLayer("llm"),
+		"base":       RemoteLayer("llm"),
+		"mine":       LayerGlobal,
+	}
+	if got := merged.ExtendsOrigins["llm/qwen"]; !maps.Equal(got, want) {
+		t.Fatalf("patched ExtendsOrigins = %v, want %v", got, want)
+	}
+	if got := merged.ProfileLayer["llm/qwen"]; got != LayerGlobal {
+		t.Fatalf("ProfileLayer = %q, want the patch to own the name", got)
+	}
+	if got := merged.ExtendsOrigins["llm/ollama"]; got != nil {
+		t.Fatalf("ExtendsOrigins[llm/ollama] = %v, want no entries for a profile without extends", got)
+	}
+}
+
 func TestLayerEra(t *testing.T) {
 	cases := []struct {
 		layer string

@@ -458,6 +458,7 @@ func gateView(merged config.Config, name string) config.Config {
 	out := merged
 	out.Profiles = make(map[string]config.Profile, len(merged.Profiles))
 	out.ProfileLayer = make(map[string]string, len(merged.ProfileLayer))
+	out.ExtendsOrigins = make(map[string]map[string]string, len(merged.ExtendsOrigins))
 	for profile, p := range merged.Profiles {
 		if merged.ProfileLayer[profile] == own {
 			continue
@@ -465,6 +466,9 @@ func gateView(merged config.Config, name string) config.Config {
 		out.Profiles[profile] = p
 		if layer, ok := merged.ProfileLayer[profile]; ok {
 			out.ProfileLayer[profile] = layer
+		}
+		if origins, ok := merged.ExtendsOrigins[profile]; ok {
+			out.ExtendsOrigins[profile] = origins
 		}
 	}
 	return out

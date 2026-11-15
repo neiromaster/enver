@@ -216,6 +216,51 @@ func TestShowWrongKeyRemote(t *testing.T) {
 	}
 }
 
+// TestUnpulledRemoteReferenceNamesPull pins the actionable not-found the
+// display and runner share: a name under a declared but unpulled record is a
+// fetch away, so the message names the remote and the command. An undeclared
+// prefix and a pulled record that simply lacks the profile keep the plain miss —
+// no pull can fix either.
+func TestUnpulledRemoteReferenceNamesPull(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+	cfgPath := filepath.Join(dir, "config.yaml")
+	writeDoc(t, cfgPath, "remotes:\n  other:\n    url: https://example.com/other.yaml\n")
+	// The fixture declares an unpulled record on purpose; keep its load advisory
+	// out of the test log.
+	prevWarnings := loadWarningsOut
+	loadWarningsOut = io.Discard
+	t.Cleanup(func() { loadWarningsOut = prevWarnings })
+
+	for _, args := range [][]string{
+		{"show", "other/base"},
+		{"x", "other/base", "--", "true"},
+	} {
+		_, err := runCommand(t, append([]string{"--config", cfgPath, "--chdir", dir}, args...)...)
+		if err == nil {
+			t.Fatalf("%v resolved a profile no layer holds", args)
+		}
+		for _, want := range []string{`profile "other/base" not found`, `remote "other"`, "enver pull other"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%v error misses %q: %v", args, want, err)
+			}
+		}
+	}
+	if _, err := runCommand(t, "--config", cfgPath, "--chdir", dir, "show", "nosuch/base"); err == nil || strings.Contains(err.Error(), "enver pull") {
+		t.Fatalf("an undeclared prefix must keep the plain miss, got: %v", err)
+	}
+
+	if err := config.WriteRemoteContent("other", []byte("profiles:\n  app:\n    env:\n      K: v\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCommand(t, "--config", cfgPath, "--chdir", dir, "show", "other/base"); err == nil || strings.Contains(err.Error(), "enver pull") {
+		t.Fatalf("a pulled record that lacks the profile must keep the plain miss, got: %v", err)
+	}
+}
+
 // TestPrintEnvJSON pins the JSON contract: machine-readable output is always
 // unmasked. Text masking is for human eyes; a consumer piping JSON to a tool
 // needs the real values, and --no-mask stays a text-output concern.
