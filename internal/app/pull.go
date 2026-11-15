@@ -39,6 +39,11 @@ type PullOptions struct {
 	// LayerPinned marks an explicit -g/--local choice, so a removal targets that
 	// layer instead of the closest declaration.
 	LayerPinned bool
+	// OtherHidden marks the other layer as out of view, as --no-local puts the
+	// project file for a removal: the write layer is then the only declaration a
+	// removal may target, while the hidden layer's record still protects stored
+	// content from deletion.
+	OtherHidden bool
 	// Confirm asks the user about a takeover; nil on a non-interactive path,
 	// where Force is the only way through. A nil error with ok=false aborts.
 	Confirm func(msg string, def bool) (bool, error)
@@ -123,14 +128,15 @@ func PullAll(opts PullOptions) (string, error) {
 	return b.String(), errors.Join(errs...)
 }
 
-// PullRemove removes one declaration of name and reports what is left. Without
-// LayerPinned it removes the closest declaration — the one that controls the
-// source right now — and an explicit layer targets that layer instead. Stored
-// content is deleted only when no visible layer still declares the name:
-// deleting content a surviving record needs would blank every profile under the
-// prefix. The summary names a surviving declaration and its source, and lists
-// user-layer profiles under the prefix, which survive as standalone profiles but
-// lose every inherited key.
+// PullRemove removes one declaration of name and reports what is left. An
+// explicit layer targets that layer; otherwise the closest declaration goes —
+// the one that controls the source right now. A layer marked OtherHidden takes no
+// part in that choice: it is the write layer or nothing. Stored content is
+// deleted only when no declaration anywhere still needs it, hidden layers
+// included, since deleting content a surviving record needs would blank every
+// profile under the prefix. The summary names a surviving declaration and its
+// source, and lists user-layer profiles under the prefix, which survive as
+// standalone profiles but lose every inherited key.
 func PullRemove(name string, opts PullOptions) (string, error) {
 	if !config.ValidRecordName(name) {
 		return "", fmt.Errorf("remote name %q is not a valid record name", name)
@@ -144,22 +150,24 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 		closest, farthest = other, target
 	}
 	from, into := target, other
-	if opts.LayerPinned {
+	switch {
+	case opts.LayerPinned:
 		if !declaresRemote(from.cfg, name) {
 			if declaresRemote(into.cfg, name) {
 				return "", fmt.Errorf("remote %q is not declared in the %s; it is declared in the %s — run without the layer flag to target it", name, layerName(from.global), layerName(into.global))
 			}
 			return "", fmt.Errorf("remote %q is not declared in the %s", name, layerName(from.global))
 		}
-	} else {
-		switch {
-		case declaresRemote(closest.cfg, name):
-			from, into = closest, farthest
-		case declaresRemote(farthest.cfg, name):
-			from, into = farthest, closest
-		default:
+	case opts.OtherHidden:
+		if !declaresRemote(target.cfg, name) {
 			return "", notRegistered(name)
 		}
+	case declaresRemote(closest.cfg, name):
+		from, into = closest, farthest
+	case declaresRemote(farthest.cfg, name):
+		from, into = farthest, closest
+	default:
+		return "", notRegistered(name)
 	}
 	next := maps.Clone(from.cfg.Remotes)
 	delete(next, name)
@@ -287,15 +295,19 @@ func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (ch
 // takeoverWarning names what the record now does differently, the profiles whose
 // meaning the change touches, and what the user is being asked to decide. A
 // mode change leaves the source alone, so its consequence is spelled out for
-// what actually happens: the patches stop meeting the profiles they were written
-// against.
+// what actually happens in that direction: a prefix dropped means the patches
+// stop meeting the profiles they were written against, a prefix added means they
+// start meeting profiles they did not patch before.
 func takeoverWarning(name string, before, after config.RemoteRecord, patches []string, sourceChanged bool) string {
 	list := strings.Join(patches, ", ")
 	what := fmt.Sprintf("now points at %s instead of %s", recordSource(after), recordSource(before))
 	effect := list + " will now compose with content from that source"
 	if !sourceChanged {
 		what = fmt.Sprintf("now stores %s instead of %s", pullMode(after.NoPrefix), pullMode(before.NoPrefix))
-		effect = list + " will no longer patch the remote's profiles under the names they use"
+		effect = list + " will now patch the remote's profiles under the prefix they are stored with"
+		if after.NoPrefix {
+			effect = list + " will no longer patch the remote's profiles under the names they use"
+		}
 	}
 	return fmt.Sprintf("remote %q %s; %s, so review before trusting it with your credentials", name, what, effect)
 }

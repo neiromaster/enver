@@ -61,11 +61,18 @@ closest declaration.`,
 			if pullAs != "" {
 				return fmt.Errorf("--as names a record being registered; --rm removes a record that already exists")
 			}
+			if pullNoPrefix {
+				return fmt.Errorf("--no-prefix sets how a registration stores its profiles; --rm removes a record instead")
+			}
+			if pullForce {
+				return fmt.Errorf("--force accepts a takeover without confirming; --rm removes the record without a prompt")
+			}
 			opts, err := pullOptions()
 			if err != nil {
 				return err
 			}
 			opts.LayerPinned = pullLocal || globalFlags.global
+			opts.OtherHidden = globalFlags.noLocal
 			summary, err := app.PullRemove(args[0], opts)
 			if err != nil {
 				return err

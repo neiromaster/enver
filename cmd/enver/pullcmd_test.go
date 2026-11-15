@@ -303,6 +303,18 @@ func TestPullCmdRejectsRmConflicts(t *testing.T) {
 	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "--as") {
 		t.Fatalf("err = %v, want --rm to reject --as", err)
 	}
+	pullAs = ""
+
+	pullNoPrefix = true
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "--no-prefix") {
+		t.Fatalf("err = %v, want --rm to reject --no-prefix", err)
+	}
+	pullNoPrefix = false
+
+	pullForce = true
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want --rm to reject --force", err)
+	}
 
 	for _, path := range []string{f.globalPath, f.localPath} {
 		if _, ok := pullRemotes(t, path)["llm"]; !ok {
@@ -347,6 +359,44 @@ func TestPullCmdRemoveNoLocalSeesTheProjectFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "local") {
 		t.Errorf("summary should name the surviving layer:\n%s", out)
+	}
+}
+
+// --no-local means the global scope: the removal targets the global declaration,
+// while the project file stays visible for the content decision.
+func TestPullCmdRemoveNoLocalTargetsGlobal(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\n")
+	writePullFile(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+	if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/local.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	withPullFlags(t, nil)
+	pullRm = true
+	globalFlags.noLocal = true
+
+	out, err := runPull(t, "llm")
+	if err != nil {
+		t.Fatalf("pull --rm --no-local: %v", err)
+	}
+	if _, ok := pullRemotes(t, f.globalPath)["llm"]; ok {
+		t.Fatal("--no-local targets the global declaration")
+	}
+	if _, ok := pullRemotes(t, f.localPath)["llm"]; !ok {
+		t.Fatal("the project file's declaration is out of view and must survive")
+	}
+	if _, err := os.Stat(config.RemoteContentPath("llm")); err != nil {
+		t.Fatalf("content must survive a declaration the hidden layer still needs: %v", err)
+	}
+	if _, err := os.Stat(config.RemoteStatePath("llm")); err != nil {
+		t.Fatalf("sidecar must survive a declaration the hidden layer still needs: %v", err)
+	}
+	if !strings.Contains(out, "still declared in the local") {
+		t.Errorf("summary should name the surviving local declaration:\n%s", out)
 	}
 }
 
