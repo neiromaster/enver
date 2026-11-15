@@ -1573,3 +1573,273 @@ func TestMarksForWriteAnswersEveryKey(t *testing.T) {
 		}
 	}
 }
+
+// useRemoteFixture arranges the layers a remote load test needs: a global
+// config, one content file per name with a state sidecar pointing at the source
+// remoteContentSource names (so the divergence check stays silent and only the
+// behavior under test warns), and an optional .enver.yaml as the local layer.
+// The returned loader reads the merged view with or without that local layer.
+func useRemoteFixture(t *testing.T, global, local string, content map[string]string) func(useLocal bool) Config {
+	t.Helper()
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	remotes := t.TempDir()
+	t.Cleanup(remotesDirIn(remotes))
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(xdg, "enver", "config.yaml"), global)
+	for name, body := range content {
+		write(RemoteContentPath(name), body)
+		if err := WriteRemoteState(name, RemoteState{URL: remoteContentSource(name)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if local != "" {
+		proj := t.TempDir()
+		write(filepath.Join(proj, LocalFilename), local)
+		t.Cleanup(chdir(t, proj))
+	}
+	return func(useLocal bool) Config {
+		t.Helper()
+		cfg, err := LoadMerged("", useLocal)
+		if err != nil {
+			t.Fatalf("LoadMerged(useLocal=%v) err = %v, want no error", useLocal, err)
+		}
+		return cfg
+	}
+}
+
+// remoteContentSource is the URL a fixture record points at, so the sidecar the
+// fixture writes for that record's content matches it.
+func remoteContentSource(name string) string {
+	return "https://example.com/" + name + ".yaml"
+}
+
+func remoteRecordsYAML(names ...string) string {
+	out := "remotes:\n"
+	for _, name := range names {
+		out += "  " + name + ":\n    url: " + remoteContentSource(name) + "\n"
+	}
+	return out
+}
+
+// prefixed collects the profile names a record's projection contributes, so a
+// test can assert a record contributed nothing at all.
+func prefixed(cfg Config, name string) []string {
+	var out []string
+	for _, n := range cfg.ProfileNames() {
+		if strings.HasPrefix(n, name+"/") {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// The spec's case 1: a remote's own profile chain lands under its record's
+// prefix, and the user's same-name profile folds per-key over it — the remote's
+// endpoint values survive, the user's patch supplies the key.
+func TestLoadMergedRemoteBase(t *testing.T) {
+	const remoteBody = `default: ollama
+profiles:
+  ollama:
+    env:
+      OLLAMA_HOST: http://localhost:11434
+      OLLAMA_MODEL_SERIES: v0.5
+  qwen:
+    extends: ollama
+    env:
+      MODEL: qwen2.5-coder:32b
+`
+	globalCase1 := remoteRecordsYAML("llm") + "profiles:\n  llm/ollama:\n    env:\n      OLLAMA_API_KEY: from-user\n"
+
+	t.Run("case 1: the user patch folds over the projected remote", func(t *testing.T) {
+		cfg := useRemoteFixture(t, globalCase1, "", map[string]string{"llm": remoteBody})(false)
+
+		if got, want := prefixed(cfg, "llm"), []string{"llm/ollama", "llm/qwen"}; !slices.Equal(got, want) {
+			t.Fatalf("projected profiles = %v, want %v", got, want)
+		}
+		// Prefixed profiles are addressed by their full name: no bare aliases.
+		for _, bare := range []string{"ollama", "qwen"} {
+			if _, ok := cfg.Profiles[bare]; ok {
+				t.Fatalf("profile %q exists unprefixed; the prefix is the namespace", bare)
+			}
+		}
+		// Which profile is default is the user's call, never the remote author's.
+		if cfg.Default != "" {
+			t.Fatalf("default = %q, want the remote's default dropped", cfg.Default)
+		}
+		if want := map[string]string{
+			"OLLAMA_HOST":         "http://localhost:11434",
+			"OLLAMA_MODEL_SERIES": "v0.5",
+			"OLLAMA_API_KEY":      "from-user",
+		}; !maps.Equal(cfg.Profiles["llm/ollama"].Env, want) {
+			t.Fatalf("llm/ollama env = %v, want %v", cfg.Profiles["llm/ollama"].Env, want)
+		}
+
+		r, err := cfg.ResolveProfile("llm/qwen")
+		if err != nil {
+			t.Fatalf("ResolveProfile(llm/qwen) err = %v", err)
+		}
+		wantEnv := map[string]string{
+			"OLLAMA_HOST":         "http://localhost:11434",
+			"OLLAMA_MODEL_SERIES": "v0.5",
+			"OLLAMA_API_KEY":      "from-user",
+			"MODEL":               "qwen2.5-coder:32b",
+		}
+		if !maps.Equal(r.Env, wantEnv) {
+			t.Fatalf("llm/qwen env = %v, want %v", r.Env, wantEnv)
+		}
+		if want := []string{"llm/qwen", "llm/ollama"}; !slices.Equal(r.Chain, want) {
+			t.Fatalf("chain = %v, want %v", r.Chain, want)
+		}
+		if got := r.Sources["OLLAMA_HOST"]; got != (Source{Profile: "llm/ollama", Layer: "remote:llm"}) {
+			t.Fatalf("OLLAMA_HOST source = %+v, want the projected remote", got)
+		}
+		if got := r.Sources["OLLAMA_API_KEY"]; got != (Source{Profile: "llm/ollama", Layer: LayerGlobal}) {
+			t.Fatalf("OLLAMA_API_KEY source = %+v, want the user's global patch", got)
+		}
+		if got := cfg.ProfileLayer["llm/ollama"]; got != LayerGlobal {
+			t.Fatalf("llm/ollama declaring layer = %q, want the patching layer global", got)
+		}
+		if got := cfg.ProfileLayer["llm/qwen"]; got != "remote:llm" {
+			t.Fatalf("llm/qwen declaring layer = %q, want remote:llm", got)
+		}
+	})
+
+	t.Run("a record with no content contributes nothing", func(t *testing.T) {
+		global := remoteRecordsYAML("llm", "later") + "profiles:\n  user:\n    env:\n      K: v\n"
+		cfg := useRemoteFixture(t, global, "", map[string]string{"llm": remoteBody})(false)
+
+		if got := prefixed(cfg, "later"); len(got) != 0 {
+			t.Fatalf("profiles = %v, want none for a record never pulled", got)
+		}
+		if _, ok := cfg.Remotes["later"]; !ok {
+			t.Fatal("the unpulled record itself must stay declared")
+		}
+		if len(cfg.Warnings) != 0 {
+			t.Fatalf("warnings = %q, want none: an unpulled record is not an error or a projection warning", cfg.Warnings)
+		}
+	})
+
+	t.Run("remote content cannot register a fetch", func(t *testing.T) {
+		content := "remotes:\n  injected:\n    url: https://attacker.example/evil.yaml\n" +
+			"profiles:\n  base:\n    env:\n      K: v\n"
+		cfg := useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{"llm": content})(false)
+
+		if len(cfg.Remotes) != 1 || cfg.Remotes["llm"].URL != remoteContentSource("llm") {
+			t.Fatalf("merged remotes = %v, want only the user's record", cfg.Remotes)
+		}
+		if got, want := prefixed(cfg, "llm"), []string{"llm/base"}; !slices.Equal(got, want) {
+			t.Fatalf("projected profiles = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("local beats global beats remote", func(t *testing.T) {
+		global := remoteRecordsYAML("llm") +
+			"profiles:\n  llm/base:\n    env:\n      K: global\n  plain:\n    env:\n      K: global\n"
+		local := "profiles:\n  llm/base:\n    env:\n      K: local\n  plain:\n    env:\n      K: local\n"
+		content := "profiles:\n  base:\n    env:\n      K: remote\n      REMOTE_ONLY: r\n"
+		load := useRemoteFixture(t, global, local, map[string]string{"llm": content})
+
+		for _, tc := range []struct {
+			useLocal bool
+			wantK    string
+		}{{true, "local"}, {false, "global"}} {
+			cfg := load(tc.useLocal)
+			r, err := cfg.ResolveProfile("llm/base")
+			if err != nil {
+				t.Fatalf("ResolveProfile(llm/base) err = %v", err)
+			}
+			if r.Env["K"] != tc.wantK {
+				t.Fatalf("useLocal=%v: K = %q, want %q", tc.useLocal, r.Env["K"], tc.wantK)
+			}
+			if r.Env["REMOTE_ONLY"] != "r" {
+				t.Fatalf("useLocal=%v: REMOTE_ONLY = %q, want the remote's value to survive", tc.useLocal, r.Env["REMOTE_ONLY"])
+			}
+			plain, err := cfg.ResolveProfile("plain")
+			if err != nil {
+				t.Fatalf("ResolveProfile(plain) err = %v", err)
+			}
+			wantPlainK := LayerGlobal
+			if tc.useLocal {
+				wantPlainK = "local"
+			}
+			if plain.Env["K"] != wantPlainK {
+				t.Fatalf("useLocal=%v: plain K = %q, want %q", tc.useLocal, plain.Env["K"], wantPlainK)
+			}
+			// A profile that never references remote content gains nothing from it.
+			if _, ok := plain.Env["REMOTE_ONLY"]; ok {
+				t.Fatalf("useLocal=%v: plain inherited a remote key: %v", tc.useLocal, plain.Env)
+			}
+		}
+	})
+
+	t.Run("a remote fence bites only remote-era values", func(t *testing.T) {
+		// The remote's child fences K while its parent supplies one, and the user
+		// layer redefines K on that parent. The fence is carried when the user
+		// patches child, and it must stand down for the higher layer's value.
+		content := "profiles:\n" +
+			"  parent:\n    env:\n      K: remote\n" +
+			"  child:\n    extends: parent\n    unset: [K]\n"
+		global := remoteRecordsYAML("llm") + "profiles:\n" +
+			"  llm/parent:\n    env:\n      K: user\n" +
+			"  llm/child:\n    env:\n      PATCH: x\n"
+		cfg := useRemoteFixture(t, global, "", map[string]string{"llm": content})(false)
+
+		r, err := cfg.ResolveProfile("llm/child")
+		if err != nil {
+			t.Fatalf("ResolveProfile(llm/child) err = %v", err)
+		}
+		if r.Env["K"] != "user" {
+			t.Fatalf("K = %q, want the user layer's value to survive the remote fence", r.Env["K"])
+		}
+		if _, tombstoned := r.Unsets["K"]; tombstoned {
+			t.Fatalf("K reported as unset (%+v) although the user layer defines it", r.Unsets["K"])
+		}
+	})
+}
+
+// Content left behind for a record no layer declares can never load and no pull
+// would refresh it: it contributes no profiles and says so.
+func TestLoadMergedOrphanContent(t *testing.T) {
+	orphan := "profiles:\n  base:\n    env:\n      K: stale\n"
+	cfg := useRemoteFixture(t, "profiles:\n  user:\n    env:\n      K: v\n", "", map[string]string{"stale": orphan})(false)
+
+	if got := prefixed(cfg, "stale"); len(got) != 0 {
+		t.Fatalf("profiles = %v, want none from orphaned content", got)
+	}
+	if _, ok := cfg.Remotes["stale"]; ok {
+		t.Fatal("orphaned content must not register its own record")
+	}
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one orphan advisory", cfg.Warnings)
+	}
+	for _, want := range []string{"stale", "no record"} {
+		if !strings.Contains(cfg.Warnings[0], want) {
+			t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+		}
+	}
+}
+
+// A pulled file that came back empty is a valid (if useless) config: no
+// profiles, no error.
+func TestLoadMergedEmptyContentFile(t *testing.T) {
+	cfg := useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{"llm": ""})(false)
+
+	if len(cfg.Profiles) != 0 {
+		t.Fatalf("profiles = %v, want none from an empty content file", cfg.ProfileNames())
+	}
+	if _, ok := cfg.Remotes["llm"]; !ok {
+		t.Fatal("the record must stay declared when its content is empty")
+	}
+	if len(cfg.Warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", cfg.Warnings)
+	}
+}

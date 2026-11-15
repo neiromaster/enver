@@ -1,9 +1,11 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -393,4 +395,132 @@ func TestDivergenceUninspectableContentWarns(t *testing.T) {
 			t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
 		}
 	}
+}
+
+// loadProjectFixture parses content the way a pull lands it, so projection is
+// exercised against a decoded file, marks and comments included.
+func loadProjectFixture(t *testing.T, body string) Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "content.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile err = %v", err)
+	}
+	return cfg
+}
+
+// Projection is the whole namespace story for remote content: profiles move
+// under the record's prefix, same-file extends targets move with them while
+// targets the file does not define keep binding the user's namespace, and the
+// two sections a remote author must never own — default and remotes — are
+// dropped.
+func TestProject(t *testing.T) {
+	t.Run("rename, rewrite, passthrough and drops", func(t *testing.T) {
+		cfg := loadProjectFixture(t, `default: ollama
+remotes:
+  injected:
+    url: https://attacker.example/evil.yaml
+profiles:
+  ollama:
+    unset: [LEGACY_HOST]
+    env:
+      OLLAMA_HOST: http://localhost:11434
+      ~OLLAMA_TOKEN: s3cret
+  qwen:
+    extends: ollama
+    env:
+      MODEL: qwen2.5-coder:32b
+  mine:
+    extends: [provider/base, team/other]
+    env:
+      OWN: x
+`)
+		proj := Project(cfg, "llm")
+
+		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"llm/mine", "llm/ollama", "llm/qwen"}; !slices.Equal(got, want) {
+			t.Fatalf("projected profiles = %v, want %v", got, want)
+		}
+		wantExtends := Extends{"llm/ollama"}
+		if got := proj.Profiles["llm/qwen"].Extends; !slices.Equal(got, wantExtends) {
+			t.Fatalf("llm/qwen extends = %v, want %v (same-file target rewritten)", got, wantExtends)
+		}
+		wantPassthrough := Extends{"provider/base", "team/other"}
+		if got := proj.Profiles["llm/mine"].Extends; !slices.Equal(got, wantPassthrough) {
+			t.Fatalf("llm/mine extends = %v, want %v (foreign targets unchanged)", got, wantPassthrough)
+		}
+
+		ollama := proj.Profiles["llm/ollama"]
+		// An unset entry names an env key, never a profile: it stays as authored.
+		wantUnset := Unsets{"LEGACY_HOST"}
+		if !slices.Equal(ollama.Unset, wantUnset) {
+			t.Fatalf("llm/ollama unset = %v, want %v", ollama.Unset, wantUnset)
+		}
+		if want := map[string]string{"OLLAMA_HOST": "http://localhost:11434", "OLLAMA_TOKEN": "s3cret"}; !maps.Equal(ollama.Env, want) {
+			t.Fatalf("llm/ollama env = %v, want %v", ollama.Env, want)
+		}
+		// The mark is not a secret: it rides through so a patch written over the
+		// remote value stays masked and remains an encrypt candidate.
+		if !ollama.Marked["OLLAMA_TOKEN"] || len(ollama.Marked) != 1 {
+			t.Fatalf("llm/ollama marked = %v, want only OLLAMA_TOKEN", ollama.Marked)
+		}
+
+		if proj.Default != "" {
+			t.Fatalf("projected default = %q, want dropped", proj.Default)
+		}
+		if len(proj.Remotes) != 0 {
+			t.Fatalf("projected remotes = %v, want dropped: a remote can never register a fetch", proj.Remotes)
+		}
+		if got := proj.ProfileLayer["llm/ollama"]; got != "remote:llm" {
+			t.Fatalf("llm/ollama layer = %q, want remote:llm", got)
+		}
+
+		// The input is the pulled file's parsed view; projection never edits it.
+		if _, ok := cfg.Profiles["ollama"]; !ok {
+			t.Fatal("projection removed the source profile from its input")
+		}
+		if _, ok := cfg.Remotes["injected"]; !ok {
+			t.Fatal("projection removed the source remotes section from its input")
+		}
+	})
+
+	t.Run("control characters", func(t *testing.T) {
+		content := Config{Profiles: map[string]Profile{
+			"ol\x1blama": {
+				Extends:  Extends{"ol\x1blama2", "provider\x07/base"},
+				Unset:    Unsets{"LEG\x07ACY"},
+				Env:      map[string]string{"HOST\x1b": "http://x\x07y", "TLS\x1b": "line1\nline2"},
+				Comments: map[string]string{"HOST\x1b": "hi\x1b[31mred\x07\n# second line"},
+				Marked:   map[string]bool{"HOST\x1b": true},
+			},
+			"ol\x1blama2": {Env: map[string]string{"K": "v"}},
+		}}
+		proj := Project(content, "llm")
+
+		p, ok := proj.Profiles["llm/ollama"]
+		if !ok {
+			t.Fatalf("projected profiles = %v, want a cleaned llm/ollama", slices.Sorted(maps.Keys(proj.Profiles)))
+		}
+		wantExtends := Extends{"llm/ollama2", "provider/base"}
+		if !slices.Equal(p.Extends, wantExtends) {
+			t.Fatalf("extends = %v, want %v", p.Extends, wantExtends)
+		}
+		wantUnset := Unsets{"LEGACY"}
+		if !slices.Equal(p.Unset, wantUnset) {
+			t.Fatalf("unset = %v, want %v", p.Unset, wantUnset)
+		}
+		// Newlines survive: a multi-line value (a PEM bundle) and a multi-line
+		// comment are structure, not terminal escapes.
+		if want := map[string]string{"HOST": "http://xy", "TLS": "line1\nline2"}; !maps.Equal(p.Env, want) {
+			t.Fatalf("env = %v, want %v", p.Env, want)
+		}
+		if got, want := p.Comments["HOST"], "hi[31mred\n# second line"; got != want {
+			t.Fatalf("comment = %q, want %q", got, want)
+		}
+		if !p.Marked["HOST"] || len(p.Marked) != 1 {
+			t.Fatalf("marked = %v, want only HOST", p.Marked)
+		}
+	})
 }

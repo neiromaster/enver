@@ -198,14 +198,22 @@ func GlobalPath(override string) string {
 
 // load reads a single YAML file. A missing file yields an empty Config, no error.
 func load(path string) (Config, error) {
-	var c Config
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c, nil
+			return Config{}, nil
 		}
-		return c, fmt.Errorf("read %s: %w", path, err)
+		return Config{}, fmt.Errorf("read %s: %w", path, err)
 	}
+	return parseConfig(path, data)
+}
+
+// parseConfig decodes one config document and applies the load-time name
+// validation every enver config file gets. Remote content goes through it too:
+// a remote is just a config file, so invalid names a pull somehow landed are
+// refused at load rather than resolved.
+func parseConfig(path string, data []byte) (Config, error) {
+	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return c, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -494,25 +502,49 @@ func mergeExtends(base, add Extends) Extends {
 	return Extends(out)
 }
 
-// LoadMerged loads the global config then applies local .enver.yaml layers, and
-// fills Config.Warnings with the advisories the merged records raise: content
-// pulled from a source the record no longer points at, content no sidecar
-// records, and content whose record no longer resolves.
+// LoadMerged loads the global config, folds the content of every pulled remote
+// in below it, then applies local .enver.yaml layers. Layer order is fixed no
+// matter which layer declares a record — local above global above remote — so a
+// remote never changes what a user-authored profile resolves to, and adding one
+// cannot disturb a profile chain that never references remote content. The
+// fold's top-level default comes from the user layers only: projection drops a
+// remote's default, which is the user's decision to make.
+// Config.Warnings is filled last, with the advisories the merged view raises:
+// content pulled from a source the record no longer points at, content no
+// sidecar records, content whose record no longer resolves, and stored content
+// no record declares. Merge drops warnings by design, so nothing may assign
+// them before the fold is done.
 func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
-	cfg, err := load(GlobalPath(globalOverride))
+	global, err := load(GlobalPath(globalOverride))
 	if err != nil {
-		return cfg, err
+		return global, err
 	}
+	var locals []Config
 	if useLocal {
 		for _, p := range findLocal() {
 			overlay, err := load(p)
 			if err != nil {
-				return cfg, err
+				return global, err
 			}
-			cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
+			locals = append(locals, overlay)
 		}
 	}
-	cfg.Warnings = remoteWarnings(cfg.Remotes)
+	records := global.Remotes
+	for _, overlay := range locals {
+		records = mergeRemotes(records, overlay.Remotes)
+	}
+	base, remoteBaseLabel, err := remoteBase(records)
+	if err != nil {
+		return global, err
+	}
+	if remoteBaseLabel == "" {
+		remoteBaseLabel = LayerGlobal
+	}
+	cfg := Merge(base, global, remoteBaseLabel, LayerGlobal)
+	for _, overlay := range locals {
+		cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
+	}
+	cfg.Warnings = append(orphanWarnings(records), remoteWarnings(cfg.Remotes)...)
 	return cfg, nil
 }
 
