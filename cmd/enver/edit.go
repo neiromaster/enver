@@ -106,11 +106,12 @@ func newEditState(name string, prof config.Profile, comments map[string]string, 
 // overwrite the secret with it.
 const cannotDecryptNote = "cannot decrypt: no key"
 
-// editCardBlocked reports whether an entry's card must stay shut. The
-// encryption flag alone is not the reason — a resolved crypter makes the value
-// readable — so only the absence of a key blocks.
+// editCardBlocked reports whether an entry's card must stay shut. What the card
+// holds decides, not the sealed flag: a resolved crypter already made an own
+// sealed value readable, and a typed replacement of an inherited sealed row is
+// sealed only when written, so only ciphertext with no key to open it blocks.
 func editCardBlocked(e ui.EnvEntry, crypter *valueCrypter) bool {
-	return e.Encrypted && crypter == nil
+	return crypto.IsEncrypted(e.Value) && crypter == nil
 }
 
 // find returns the working copy's entry for key, matched by envname.Equal: on
@@ -288,7 +289,8 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 // overrideSeed builds the EnvEntry used to seed EnvCard when overriding an
 // inherited variable: the inherited value (drawn from the menu's inherited set)
 // plus its resolved comment, so the user sees what they are deviating from, and
-// its secret mark, so deviating does not silently declassify the variable.
+// its secret mark and sealed flag, so deviating neither silently declassifies the
+// variable nor writes its replacement in the clear.
 func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key string) ui.EnvEntry {
 	seed := ui.EnvEntry{Key: key}
 	for _, e := range inherited {
@@ -325,8 +327,9 @@ func (s *editState) addEntry(entry ui.EnvEntry, inherited []ui.EnvEntry) {
 
 // carriedEncryption reports whether the copy already holds key as an encrypted
 // entry. A collected Add entry cannot express the encryption state, so replacing
-// an encrypted value must not write the typed text to the file in the clear.
-// Inherited entries are resolved raw values and never carry the state.
+// an encrypted value must not write the typed text to the file in the clear. Only
+// the working copy is consulted, and it is enough: an inherited sealed row does
+// carry the state, which overrideSeed puts on the seed the card edits.
 func (s *editState) carriedEncryption(key string) bool {
 	for _, e := range s.entries {
 		if envname.Equal(e.Key, key) {
@@ -761,7 +764,8 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	}
 	wasDefault := isDefault
 
-	crypter, err := crypterForProfile(path, prof)
+	onDemand := newEditCrypter(path)
+	crypter, err := onDemand.own(prof)
 	if err != nil {
 		return err
 	}
@@ -791,7 +795,12 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		case "action":
 			switch key {
 			case actionDone:
-				if err := commitEdit(path, cfg, s, wasDefault, crypter); err != nil {
+				commitCrypter, cerr := onDemand.sealing(s.plaintextSecrets())
+				if cerr != nil {
+					fmt.Fprintf(os.Stderr, "\n%v\n", cerr)
+					continue
+				}
+				if err := commitEdit(path, cfg, s, wasDefault, commitCrypter); err != nil {
 					fmt.Fprintf(os.Stderr, "\n%v\n", err)
 					continue
 				}
@@ -992,23 +1001,54 @@ func (c *valueCrypter) Encrypt(plain string) (string, error) {
 	return crypto.EncryptValueWithParams(plain, c.Key, c.Salt, c.Params)
 }
 
-// crypterForProfile resolves the crypter the editor needs for a profile's own
-// encrypted values. A profile with none needs no key, so opening it neither
-// resolves nor prompts for one. An absent key — and a declined passphrase, which
-// is the same absence — leaves the ciphertext in place; a wrong key is a
-// misconfiguration and propagates.
-func crypterForProfile(path string, prof config.Profile) (*valueCrypter, error) {
+// editCrypter resolves the crypter the editor writes with on first demand and
+// remembers the answer. The key is loaded only when the session actually has
+// something to seal or unseal: opening a profile that merely extends sealed
+// content never prompts for a key, while a typed value replacing an inherited
+// sealed row still gets the key it must be sealed under — the profile's own env
+// is not what decides. An absent key, and a declined passphrase, which is the
+// same absence, answer nil so the session carries on with the ciphertext in
+// place; a wrong key is a misconfiguration and propagates.
+type editCrypter struct {
+	path     string
+	resolved bool
+	value    *valueCrypter
+	err      error
+}
+
+func newEditCrypter(path string) *editCrypter {
+	return &editCrypter{path: path}
+}
+
+// own answers the crypter a profile's own sealed values need to open for
+// editing, or nil when the profile owns none.
+func (c *editCrypter) own(prof config.Profile) (*valueCrypter, error) {
 	if !slices.ContainsFunc(slices.Collect(maps.Values(prof.Env)), crypto.IsEncrypted) {
 		return nil, nil
 	}
-	crypter, err := crypterFor(path)
-	if errors.Is(err, app.ErrNoKey) || errors.Is(err, ui.ErrCanceled) {
+	return c.resolve()
+}
+
+// sealing answers the crypter needed to seal keys, or nil when nothing has to be
+// sealed. The keys come from the working copy, so a value typed over an inherited
+// sealed row counts exactly as an own sealed value does.
+func (c *editCrypter) sealing(keys []string) (*valueCrypter, error) {
+	if len(keys) == 0 {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	return c.resolve()
+}
+
+func (c *editCrypter) resolve() (*valueCrypter, error) {
+	if c.resolved {
+		return c.value, c.err
 	}
-	return crypter, nil
+	c.resolved = true
+	c.value, c.err = crypterFor(c.path)
+	if errors.Is(c.err, app.ErrNoKey) || errors.Is(c.err, ui.ErrCanceled) {
+		c.value, c.err = nil, nil
+	}
+	return c.value, c.err
 }
 
 // crypterFor resolves the key and era for writing encrypted values in path. The
@@ -1071,8 +1111,9 @@ func editTitle(s editState) string {
 // entry carried and flagged when the value is sealed at rest. Resolution never
 // decrypts, so an inherited value arriving as ciphertext keeps that flag: the
 // menu masks the row instead of printing enc:v3: text, and a value taken from
-// such a row carries the flag, so the commit re-seals rather than writing what
-// nobody could read in the clear.
+// such a row carries the flag, so the commit seals the typed replacement under
+// the session's key instead of writing what nobody could read in the clear — and
+// refuses to write at all when no key can seal it.
 func inheritedEntries(resolved map[string]string, marked map[string]bool, own map[string]string) []ui.EnvEntry {
 	var out []ui.EnvEntry
 	for k, v := range resolved {

@@ -498,6 +498,27 @@ func TestOverrideSeedFillsValueAndComment(t *testing.T) {
 	}
 }
 
+// TestOverrideSeedCarriesSealedFlag pins the carry that makes the re-seal real:
+// a row that reached the menu sealed seeds the card with its sealed flag, so a
+// typed replacement is committed sealed instead of in the clear, while a readable
+// row seeds no flag.
+func TestOverrideSeedCarriesSealedFlag(t *testing.T) {
+	sealed := sealedValue(t, "author-secret")
+	inherited := []ui.EnvEntry{{Key: "REMOTE_DATA", Value: sealed, Secret: true, Encrypted: true}}
+	seed := overrideSeed(inherited, map[string]string{"REMOTE_DATA": "why"}, "REMOTE_DATA")
+	if !seed.Encrypted {
+		t.Fatalf("seed = %+v, want the inherited sealed flag carried", seed)
+	}
+	if seed.Value != sealed || !seed.Secret || seed.Comment != "why" {
+		t.Fatalf("seed = %+v, want value, mark and comment carried too", seed)
+	}
+
+	plain := overrideSeed([]ui.EnvEntry{{Key: "REMOTE_PLAIN", Value: "visible"}}, nil, "REMOTE_PLAIN")
+	if plain.Encrypted {
+		t.Fatalf("seed = %+v, a readable row must not seed a sealed flag", plain)
+	}
+}
+
 func TestDeleteVarOptionsMarksFences(t *testing.T) {
 	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"FKEY": "v", "OWN": "x"}, Unset: config.Unsets{"FKEY"}},
@@ -978,6 +999,105 @@ func TestEditOverrideInheritsMark(t *testing.T) {
 	}
 	if !got.Marked["GH_TOKEN"] {
 		t.Fatalf("override written without its inherited mark: env=%#v marks=%#v", got.Env, got.Marked)
+	}
+}
+
+// TestEditOverrideResealsInheritedCiphertext pins the write half of the
+// inherited-ciphertext transaction end to end: a profile whose own values are all
+// plaintext still gets a key when a typed value replaces an inherited sealed row,
+// so the override lands in the user's layer sealed and readable with the local
+// key. Deciding the key from the profile's own env alone starves exactly this
+// archetype and refuses the save with "no key is available" while a key sits
+// right there.
+func TestEditOverrideResealsInheritedCiphertext(t *testing.T) {
+	dir := t.TempDir()
+	saveGlobalFlags(t)
+	t.Setenv("ENVER_KEY", "")
+	keyPath := filepath.Join(dir, "key")
+	if err := crypto.GenerateKey(keyPath, true); err != nil {
+		t.Fatal(err)
+	}
+	globalFlags.keyPath = keyPath
+	key, _, err := crypto.LoadKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "config.yaml")
+	if err := config.UpsertProfile(path, "llm/local", config.Profile{
+		Extends: config.Extends{"llm/base"}, Env: map[string]string{"OWN": "x"},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	prof, isDefault, ok, err := config.ReadProfile(path, "llm/local")
+	if err != nil || !ok {
+		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
+	}
+
+	remote := config.Project(config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"REMOTE_DATA": sealedValue(t, "author-secret")}},
+	}}, "llm", false)
+	cfg := config.Merge(remote, config.Config{Profiles: map[string]config.Profile{"llm/local": prof}}, "remote:llm", "global")
+	pr, err := cfg.ResolveProfile("llm/local")
+	if err != nil {
+		t.Fatalf("resolve the user profile: %v", err)
+	}
+	if src := pr.Sources["REMOTE_DATA"]; !config.IsRemoteLayer(src.Layer) {
+		t.Fatalf("fixture premise broken: REMOTE_DATA layer = %q, want a remote layer", src.Layer)
+	}
+
+	s := plainState(t, "llm/local", prof, prof.Comments, isDefault)
+	onDemand := newEditCrypter(path)
+	if c, cerr := onDemand.own(prof); c != nil || cerr != nil {
+		t.Fatalf("fixture premise broken: the profile's own env holds no sealed value, got (%v, %v)", c, cerr)
+	}
+	inherited := listedInheritedForState(cfg, s)
+	var row ui.EnvEntry
+	for _, e := range inherited {
+		if e.Key == "REMOTE_DATA" {
+			row = e
+		}
+	}
+	if !row.Encrypted || !crypto.IsEncrypted(row.Value) {
+		t.Fatalf("fixture premise broken: the inherited row must arrive sealed, got %+v", row)
+	}
+
+	edited := overrideSeed(inherited, nil, "REMOTE_DATA")
+	edited.Value = "mine" // the user types a replacement over the sealed row
+	settleDefineFence(&s, edited.Key)
+	s.upsert(edited)
+	if keys := s.plaintextSecrets(); !slices.Equal(keys, []string{"REMOTE_DATA"}) {
+		t.Fatalf("fixture premise broken: the typed value is what has to be sealed, got %q", keys)
+	}
+
+	crypter, err := onDemand.sealing(s.plaintextSecrets())
+	if err != nil {
+		t.Fatalf("resolving the sealing key: %v", err)
+	}
+	if crypter == nil {
+		t.Fatal("a typed value over an inherited sealed row must get a key to seal it")
+	}
+	if err := commitEdit(path, cfg, s, false, crypter); err != nil {
+		t.Fatalf("commitEdit: %v", err)
+	}
+
+	got, _, _, err := config.ReadProfile(path, "llm/local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := got.Env["REMOTE_DATA"]
+	if !crypto.IsEncrypted(written) {
+		t.Fatalf("the override landed in the clear: %q", written)
+	}
+	plain, err := crypto.DecryptValue(written, key)
+	if err != nil {
+		t.Fatalf("the override must be readable with the local key: %v", err)
+	}
+	if plain != "mine" {
+		t.Fatalf("decrypted override = %q, want mine", plain)
+	}
+	if got.Env["OWN"] != "x" {
+		t.Fatalf("the commit dropped an untouched value: env=%#v", got.Env)
 	}
 }
 
@@ -1664,10 +1784,11 @@ func TestEditCannotReencryptWithEnvKey(t *testing.T) {
 	}
 }
 
-// TestEditCrypterForProfileNeedsNoKey pins the prompt discipline: a profile with
-// nothing encrypted never resolves a key, and an encrypted one whose key is
-// absent degrades to a nil crypter instead of failing.
-func TestEditCrypterForProfileNeedsNoKey(t *testing.T) {
+// TestEditCrypterNeedsNoKey pins the prompt discipline: a profile with nothing
+// encrypted, and a commit with nothing to seal, never resolve a key, and a
+// session that does need one degrades to a nil crypter when the key is absent
+// instead of failing.
+func TestEditCrypterNeedsNoKey(t *testing.T) {
 	dir := t.TempDir()
 	saveGlobalFlags(t)
 	t.Setenv("ENVER_KEY", "")
@@ -1689,20 +1810,26 @@ func TestEditCrypterForProfileNeedsNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, err := crypterForProfile(path, config.Profile{Env: map[string]string{"PLAIN": "1"}})
+	onDemand := newEditCrypter(path)
+	c, err := onDemand.own(config.Profile{Env: map[string]string{"PLAIN": "1"}})
 	if c != nil || err != nil {
 		t.Fatalf("a profile with no encrypted value = (%v, %v), want no key and no error", c, err)
 	}
-	c, err = crypterForProfile(path, prof)
+	c, err = onDemand.sealing(nil)
+	if c != nil || err != nil {
+		t.Fatalf("a commit with nothing to seal = (%v, %v), want no key and no error", c, err)
+	}
+	c, err = onDemand.own(prof)
 	if c != nil || err != nil {
 		t.Fatalf("an absent key must degrade = (%v, %v), want nil, nil", c, err)
 	}
 }
 
 // TestEditCardBlockedWithoutCrypter pins the one thing that keeps a card shut:
-// the flag alone is not enough — only the absence of a key is.
+// ciphertext in hand with no key to open it. A sealed flag over a readable value
+// — the typed replacement of an inherited sealed row — must leave it open.
 func TestEditCardBlockedWithoutCrypter(t *testing.T) {
-	encrypted := ui.EnvEntry{Key: "K", Value: "ciphertext", Encrypted: true}
+	encrypted := ui.EnvEntry{Key: "K", Value: sealedValue(t, "hunter2"), Encrypted: true}
 	if !editCardBlocked(encrypted, nil) {
 		t.Fatal("an encrypted entry without a crypter must not open its card")
 	}
@@ -1711,6 +1838,9 @@ func TestEditCardBlockedWithoutCrypter(t *testing.T) {
 	}
 	if editCardBlocked(ui.EnvEntry{Key: "K", Value: "v"}, nil) {
 		t.Fatal("a plaintext entry needs no key")
+	}
+	if editCardBlocked(ui.EnvEntry{Key: "K", Value: "typed", Encrypted: true}, nil) {
+		t.Fatal("a typed replacement of a sealed row is readable now; its flag only seals it on write")
 	}
 }
 
