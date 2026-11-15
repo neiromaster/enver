@@ -36,7 +36,7 @@ func promptProfileName(title string, input func(string) (string, error)) (string
 		}
 		n = strings.TrimSpace(n)
 		if err := validateProfileName(n); err != nil {
-			fmt.Println(`  invalid: use letters, digits, '-' or '_', with at most one '/' splitting name/remote-profile; each segment must start with a letter or digit`)
+			fmt.Println(`  invalid: use letters, digits, '-' or '_', with at most one '/' splitting remote-name/profile; each segment must start with a letter or digit`)
 			continue
 		}
 		return n, true
