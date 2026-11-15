@@ -293,6 +293,49 @@ func TestGateTreatsOwnRecordPrefixedExtendsAsInFile(t *testing.T) {
 	})
 }
 
+// An own-record spelling the file does not define is still a passthrough, so it
+// classifies through the merged view like any other: a user profile may legally
+// carry one slash, and a record prefix may be another record's namespace. The
+// own-record note is the fallback for what nothing in the merged view binds.
+func TestGateClassifiesUndeclaredOwnRecordTarget(t *testing.T) {
+	content := []byte("profiles:\n  a:\n    extends: llm/missing\n    env:\n      K: v\n")
+	t.Run("no binding in the merged view", func(t *testing.T) {
+		warnings, err := Gate(content, GateOpts{Record: "llm"})
+		if err != nil {
+			t.Fatalf("Gate refused an own-record passthrough: %v", err)
+		}
+		gateRequireWarning(t, warnings, `"llm/missing"`, "the remote's own prefix names no profile the file defines")
+	})
+	t.Run("a user profile may carry the slash", func(t *testing.T) {
+		merged := config.Config{
+			Profiles:     map[string]config.Profile{"llm/missing": {Env: map[string]string{"M": "1"}}},
+			ProfileLayer: map[string]string{"llm/missing": config.LayerLocal},
+		}
+		warnings, err := Gate(content, GateOpts{Record: "llm", Merged: merged})
+		if err != nil {
+			t.Fatalf("Gate refused a user-profile passthrough: %v", err)
+		}
+		gateRequireWarning(t, warnings, `"llm/missing"`, "your local profile of that name")
+		if gateWarning(warnings, "the remote's own prefix names no profile") {
+			t.Fatalf("a bound user profile was reported as unresolvable: %q", warnings)
+		}
+	})
+	t.Run("another record's namespace binds it", func(t *testing.T) {
+		merged := config.Config{
+			Profiles:     map[string]config.Profile{"llm/missing": {Env: map[string]string{"M": "1"}}},
+			ProfileLayer: map[string]string{"llm/missing": "remote:other"},
+		}
+		warnings, err := Gate(content, GateOpts{Record: "llm", Merged: merged})
+		if err != nil {
+			t.Fatalf("Gate refused a cross-remote passthrough: %v", err)
+		}
+		gateRequireWarning(t, warnings, `"llm/missing"`, `another remote, "other"`)
+		if gateWarning(warnings, "the remote's own prefix names no profile") {
+			t.Fatalf("a bound remote profile was reported as unresolvable: %q", warnings)
+		}
+	})
+}
+
 func TestGateRejectsForeignEraCiphertext(t *testing.T) {
 	current := gateSeal(t, crypto.CurrentParams)
 	cases := []struct {

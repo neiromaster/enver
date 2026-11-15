@@ -406,6 +406,9 @@ func topLevelHasKey(root *yaml.Node, key string) bool {
 // once per target, with what it binds in the merged view. A remote extending the
 // user's own profiles is the designed composition, but it must never happen
 // silently: the target decides hosts and endpoints the user's secrets attach to.
+// A target spelled under the pulled record's own prefix carries the own-record
+// note only when the merged view binds nothing, since the file cannot be the
+// source of that namespace.
 func passthroughWarnings(cfg config.Config, opts GateOpts) []string {
 	label := gateLabel(opts.Record)
 	defined := make(map[string]struct{}, len(cfg.Profiles))
@@ -423,8 +426,8 @@ func passthroughWarnings(cfg config.Config, opts GateOpts) []string {
 				continue
 			}
 			seen[target] = struct{}{}
-			binding := bindDescription(target, opts.Merged)
-			if ownRecordTarget(target, opts.Record, opts.NoPrefix) {
+			binding, bound := bindDescription(target, opts.Merged)
+			if !bound && ownRecordTarget(target, opts.Record, opts.NoPrefix) {
 				binding = "it is currently unresolvable: the remote's own prefix names no profile the file defines"
 			}
 			warnings = append(warnings, fmt.Sprintf("%s: profile %s extends %s, which the remote does not define; %s", label, quoteName(name), quoteName(target), binding))
@@ -434,23 +437,26 @@ func passthroughWarnings(cfg config.Config, opts GateOpts) []string {
 }
 
 // bindDescription says what a passthrough target resolves against right now: a
-// user profile, another remote's projection, or nothing yet.
-func bindDescription(target string, merged config.Config) string {
+// user profile, another remote's projection, or nothing yet. A user profile may
+// legally carry one slash, so a target spelled under a record prefix binds a real
+// profile whenever the merged view defines it; reported tells the caller whether
+// the description names a binding.
+func bindDescription(target string, merged config.Config) (description string, reported bool) {
 	if layer, ok := merged.ProfileLayer[target]; ok {
 		if name, isRemote := strings.CutPrefix(layer, "remote:"); isRemote {
-			return fmt.Sprintf("it binds to another remote, %q", name)
+			return fmt.Sprintf("it binds to another remote, %q", name), true
 		}
 		switch layer {
 		case config.LayerLocal:
-			return "it binds to your local profile of that name"
+			return "it binds to your local profile of that name", true
 		case config.LayerGlobal:
-			return "it binds to your global profile of that name"
+			return "it binds to your global profile of that name", true
 		}
 	}
 	if _, ok := merged.Profiles[target]; ok {
-		return "it binds to your profile of that name"
+		return "it binds to your profile of that name", true
 	}
-	return "it is currently unresolvable: no profile of that name exists in your merged config"
+	return "it is currently unresolvable: no profile of that name exists in your merged config", false
 }
 
 // collisionWarning reports every bare name a no-prefix pull would land on top of
