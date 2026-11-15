@@ -28,6 +28,9 @@
 //   - encrypt, decrypt and keygen manage encryption of secret values; a key
 //     written with a leading ~ mark is an encrypt candidate whatever its
 //     name, and the mark stays in the file across encrypt and decrypt.
+//   - pull fetches a remote config, validates it, and stores it as the
+//     lowest layer, so profiles can extend names another machine
+//     publishes; nothing is fetched while a profile is read.
 //   - update updates the enver binary to the latest release; --check only
 //     reports whether an update is available.
 //
@@ -79,6 +82,7 @@ environment injected, without mutating any tool's own config.
   enver duplicate <src> [new]           copy a profile
   enver default [profile]               set/show the default (--clear to clear)
   enver validate                        check config health
+  enver pull <source> --as <name>       fetch and register a remote config
   enver update [--check]                update enver to the latest release
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
@@ -103,7 +107,7 @@ func init() {
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
 
-	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd, updateCmd)
+	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd, updateCmd, pullCmd)
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		return applyChdir()
@@ -111,6 +115,22 @@ func init() {
 
 	app.Interactive = ui.Interactive
 	app.PromptPassphrase = ui.Password
+	app.LoadWarnings = renderLoadWarnings
+}
+
+// loadWarningsOut is where the advisories a merged load collects are printed:
+// stderr, so a command's stdout stays the machine-readable output it promises.
+// A var so tests can capture the stream.
+var loadWarningsOut io.Writer = os.Stderr
+
+// renderLoadWarnings is the one sink for load-time advisories, wired to
+// app.LoadWarnings: every read command, TUI entry, and the x path before it hands
+// the process to the child reports them the same way, and none of them needs its
+// own copy of the wiring.
+func renderLoadWarnings(warnings []string) {
+	for _, warning := range warnings {
+		_, _ = fmt.Fprintf(loadWarningsOut, "warning: %s\n", warning)
+	}
 }
 
 func main() {

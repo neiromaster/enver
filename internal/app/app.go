@@ -59,9 +59,27 @@ var Interactive = func() bool { return false }
 // (cmd/enver sets it to ui.Password).
 var PromptPassphrase func(prompt string) (string, error)
 
-// Load resolves the global config plus any local .enver.yaml layers.
+// LoadWarnings receives the advisories a merged load collects: content pulled
+// from a source its record no longer points at, content no record declares, and
+// bare-name fold collisions. The CLI wires it to stderr; a nil sink drops them,
+// which is what a shell completion wants.
+var LoadWarnings func(warnings []string)
+
+// Load resolves the global config plus any local .enver.yaml layers, and reports
+// the advisories the merged view raises.
 func Load(opts Options) (config.Config, error) {
-	return config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
+	return loadMerged(opts, true)
+}
+
+// loadMerged is the one merged load, so a path that reads the config either
+// reports the advisories or deliberately stays silent — there is no third
+// behavior to keep in sync.
+func loadMerged(opts Options, report bool) (config.Config, error) {
+	cfg, err := config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
+	if report && LoadWarnings != nil {
+		LoadWarnings(cfg.Warnings)
+	}
+	return cfg, err
 }
 
 // ResolveDefault is the read-side trio: load the merged config, apply the
@@ -300,9 +318,11 @@ func recoverKey(salt []byte, p crypto.Argon2Params, sample string) ([]byte, erro
 
 // MatchingProfiles returns profile names beginning with toComplete, for shell
 // completion. CLI wrappers map the result onto their framework's directives
-// (cobra ShellCompDirective), keeping this package free of cobra.
+// (cobra ShellCompDirective), keeping this package free of cobra. Completion is
+// a silent read: the candidates are the whole output, so a load warning would be
+// injected into the shell's own stream.
 func MatchingProfiles(opts Options, toComplete string) []string {
-	cfg, err := Load(opts)
+	cfg, err := loadMerged(opts, false)
 	if err != nil {
 		return nil
 	}
