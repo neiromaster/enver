@@ -490,6 +490,8 @@ func stripControlsKeepLines(s string) string {
 // the source the record points at: content fetched from another URL or ref, or
 // content with no recorded provenance at all. Resolution stays offline and keeps
 // serving what is on disk — the warning is how a mismatch stops being silent.
+// A record that pins no ref also reports the commit its content came from: with
+// no fixed ref, that sha is the only thing the stale content can be held to.
 // A record with no content yet has nothing to disagree with and contributes
 // nothing.
 func remoteWarnings(records map[string]RemoteRecord) []string {
@@ -515,7 +517,11 @@ func remoteWarnings(records map[string]RemoteRecord) []string {
 		if url == st.URL && ref == st.Ref {
 			continue
 		}
-		out = append(out, fmt.Sprintf("remote %q: content was fetched from %s, but the record now points at %s; run \"enver pull %s\" to re-sync", name, sourceLabel(st.URL, st.Ref), sourceLabel(url, ref), name))
+		warning := fmt.Sprintf("remote %q: content was fetched from %s, but the record now points at %s", name, sourceLabel(st.URL, st.Ref), sourceLabel(url, ref))
+		if source.Unpinned(ref) && st.Commit != "" {
+			warning += fmt.Sprintf("; the record pins no ref, so that source can serve different content at any time and the stored content is commit %s", st.Commit)
+		}
+		out = append(out, warning+fmt.Sprintf("; run \"enver pull %s\" to re-sync", name))
 	}
 	return out
 }

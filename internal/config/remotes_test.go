@@ -248,6 +248,7 @@ func TestDivergenceWarning(t *testing.T) {
 		content bool
 		state   *RemoteState
 		want    []string // substrings the single warning must carry; nil wants none
+		notWant []string // substrings the warning must not carry
 	}{
 		{
 			name:    "record re-pointed at another source",
@@ -255,6 +256,21 @@ func TestDivergenceWarning(t *testing.T) {
 			content: true,
 			state:   &RemoteState{URL: "https://example.com/a.yaml", Ref: "v2"},
 			want:    []string{"llm", "https://example.com/a.yaml", "v2", "https://example.com/b.yaml", "v3", "enver pull llm"},
+		},
+		{
+			name:    "unpinned record reports the commit its content came from",
+			record:  "remotes:\n  llm:\n    url: https://example.com/b.yaml\n",
+			content: true,
+			state:   &RemoteState{URL: "https://example.com/a.yaml", Commit: "9f2c1ab"},
+			want:    []string{"https://example.com/a.yaml", "https://example.com/b.yaml", "pins no ref", "9f2c1ab", "enver pull llm"},
+		},
+		{
+			name:    "pinned record needs no commit in the divergence warning",
+			record:  "remotes:\n  llm:\n    url: https://example.com/b.yaml\n    ref: v2\n",
+			content: true,
+			state:   &RemoteState{URL: "https://example.com/a.yaml", Ref: "v1", Commit: "9f2c1ab"},
+			want:    []string{"https://example.com/a.yaml", "https://example.com/b.yaml", "enver pull llm"},
+			notWant: []string{"9f2c1ab"},
 		},
 		{
 			name:    "github ref bumped in the record",
@@ -359,6 +375,11 @@ func TestDivergenceWarning(t *testing.T) {
 			for _, want := range tc.want {
 				if !strings.Contains(cfg.Warnings[0], want) {
 					t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+				}
+			}
+			for _, unwanted := range tc.notWant {
+				if strings.Contains(cfg.Warnings[0], unwanted) {
+					t.Fatalf("warning %q should not mention %q", cfg.Warnings[0], unwanted)
 				}
 			}
 		})

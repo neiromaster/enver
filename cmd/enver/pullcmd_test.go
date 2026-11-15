@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/remote"
 	"github.com/spf13/cobra"
@@ -66,13 +68,13 @@ func newPullCmdFixture(t *testing.T) *pullCmdFixture {
 // installs an injected fetch that serves pullContent.
 func withPullFlags(t *testing.T, fetch func(url, ref string) ([]byte, string, error)) {
 	t.Helper()
-	prevAs, prevLocal, prevNoPrefix, prevRm, prevForce := pullAs, pullLocal, pullNoPrefix, pullRm, pullForce
+	prevAs, prevLocal, prevNoPrefix, prevRm, prevForce, prevList := pullAs, pullLocal, pullNoPrefix, pullRm, pullForce, pullList
 	prevFetch := pullFetch
 	t.Cleanup(func() {
-		pullAs, pullLocal, pullNoPrefix, pullRm, pullForce = prevAs, prevLocal, prevNoPrefix, prevRm, prevForce
+		pullAs, pullLocal, pullNoPrefix, pullRm, pullForce, pullList = prevAs, prevLocal, prevNoPrefix, prevRm, prevForce, prevList
 		pullFetch = prevFetch
 	})
-	pullAs, pullLocal, pullNoPrefix, pullRm, pullForce = "", false, false, false, false
+	pullAs, pullLocal, pullNoPrefix, pullRm, pullForce, pullList = "", false, false, false, false, false
 	if fetch == nil {
 		fetch = func(string, string) ([]byte, string, error) {
 			t.Error("no fetch expected on this path")
@@ -611,6 +613,177 @@ func TestPullCmdRefetchTakeoverNeedsForceWhenNonInteractive(t *testing.T) {
 	for _, want := range []string{"will now compose with content from", "stored content came from https://example.com/global.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("forced re-fetch misses %q:\n%s", want, out)
+		}
+	}
+}
+
+// enver pull --list is the freshness view: each record's source, whether it is
+// pinned, and what the sidecar recorded for the last pull. It fetches nothing
+// and writes nothing, and the unpinned marker carries the commit an unpinned
+// record is actually held to.
+func TestPullCmdListsFreshness(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	pulledAt := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	prevNow := pullListNow
+	t.Cleanup(func() { pullListNow = prevNow })
+	pullListNow = func() time.Time { return pulledAt.Add(3 * time.Hour) }
+
+	writePullFile(t, f.globalPath, "remotes:\n  team:\n    url: https://example.com/team.yaml\n  llm:\n    url: github:someone/llm-profiles\n")
+	if err := config.WriteRemoteState("llm", config.RemoteState{
+		URL:      "https://raw.githubusercontent.com/someone/llm-profiles/HEAD/enver.yaml",
+		Ref:      "HEAD",
+		Commit:   "9f2c1ab",
+		PulledAt: pulledAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(f.globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPullFlags(t, nil) // a listing must not fetch
+	pullList = true
+
+	out, err := runPull(t)
+	if err != nil {
+		t.Fatalf("pull --list: %v", err)
+	}
+	for _, want := range []string{
+		"# remotes: 2",
+		"llm  github:someone/llm-profiles",
+		"unpinned",
+		"last pulled commit 9f2c1ab",
+		"pulled 2026-11-15 09:00 UTC (3h ago)",
+		"team  https://example.com/team.yaml",
+		"never pulled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing misses %q:\n%s", want, out)
+		}
+	}
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("a redirected listing carries ANSI escapes: %q", out)
+	}
+	if after, err := os.ReadFile(f.globalPath); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("a listing must not rewrite the config: %v", err)
+	}
+	if _, err := os.Stat(config.RemoteContentPath("team")); !os.IsNotExist(err) {
+		t.Fatalf("a listing must not fetch: team content = %v", err)
+	}
+}
+
+// An empty registry says so instead of printing a bare header.
+func TestPullCmdListEmpty(t *testing.T) {
+	setNonInteractive(t)
+	newPullCmdFixture(t)
+	withPullFlags(t, nil)
+	pullList = true
+
+	out, err := runPull(t)
+	if err != nil {
+		t.Fatalf("pull --list: %v", err)
+	}
+	if !strings.Contains(out, "no remotes registered") {
+		t.Fatalf("empty listing misses the hint:\n%s", out)
+	}
+}
+
+// The listing is a view, not an action: every flag that changes the registry is
+// refused instead of silently ignored.
+func TestPullCmdListRejectsChangingFlags(t *testing.T) {
+	setNonInteractive(t)
+	newPullCmdFixture(t)
+	withPullFlags(t, nil)
+	pullList = true
+
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "no source") {
+		t.Fatalf("err = %v, want --list to take no argument", err)
+	}
+	for _, tc := range []struct {
+		flag  string
+		set   func()
+		clear func()
+	}{
+		{"--as", func() { pullAs = "llm" }, func() { pullAs = "" }},
+		{"--no-prefix", func() { pullNoPrefix = true }, func() { pullNoPrefix = false }},
+		{"--rm", func() { pullRm = true }, func() { pullRm = false }},
+		{"--force", func() { pullForce = true }, func() { pullForce = false }},
+	} {
+		tc.set()
+		if _, err := runPull(t); err == nil || !strings.Contains(err.Error(), tc.flag) {
+			t.Fatalf("err = %v, want --list to refuse %s", err, tc.flag)
+		}
+		tc.clear()
+	}
+	pullLocal = true
+	if _, err := runPull(t); err == nil || !strings.Contains(err.Error(), "--local") {
+		t.Fatalf("err = %v, want --list to refuse --local", err)
+	}
+}
+
+// TestPrintRemoteStatusesColor pins the styling contract: the record name is the
+// key and renders bold, the source stays plain, and the freshness note renders
+// dim.
+func TestPrintRemoteStatusesColor(t *testing.T) {
+	const (
+		ansiBold  = "\x1b[1m"
+		ansiDim   = "\x1b[2m"
+		ansiReset = "\x1b[m"
+	)
+	pulledAt := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	prevNow := pullListNow
+	t.Cleanup(func() { pullListNow = prevNow })
+	pullListNow = func() time.Time { return pulledAt.Add(3 * time.Hour) }
+	rows := []app.RemoteStatus{{
+		Name:     "llm",
+		Source:   "github:someone/llm-profiles",
+		Pulled:   true,
+		Commit:   "9f2c1ab",
+		PulledAt: pulledAt,
+	}}
+
+	var plain bytes.Buffer
+	if err := printRemoteStatuses(&plain, rows); err != nil {
+		t.Fatalf("printRemoteStatuses: %v", err)
+	}
+	if strings.ContainsRune(plain.String(), '\x1b') {
+		t.Fatalf("a non-terminal writer got styling: %q", plain.String())
+	}
+	if !strings.Contains(plain.String(), "llm  github:someone/llm-profiles") {
+		t.Fatalf("plain listing lost the row: %q", plain.String())
+	}
+
+	orig := writerIsTTY
+	t.Cleanup(func() { writerIsTTY = orig })
+	writerIsTTY = func(io.Writer) bool { return true }
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	colored := filepath.Join(t.TempDir(), "listing.txt")
+	if err := os.WriteFile(colored, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(colored, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := printRemoteStatuses(f, rows); err != nil {
+		t.Fatalf("printRemoteStatuses: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(colored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"name":   ansiBold + "llm" + ansiReset,
+		"note":   ansiDim + "# unpinned · last pulled commit 9f2c1ab",
+		"source": "  github:someone/llm-profiles  ",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("colored listing missing %s: want %q in %q", name, want, out)
 		}
 	}
 }
