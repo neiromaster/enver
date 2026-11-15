@@ -100,6 +100,9 @@ func redirectPolicy(origin *url.URL) func(*http.Request, []*http.Request) error 
 		default:
 			return fmt.Errorf("remote source %s redirects to scheme %q: %s", origin, req.URL.Scheme, req.URL)
 		}
+		// Compared exactly, on the authority: a hop spelling the host with a
+		// different case or an explicit :443 is refused too. Failing closed is
+		// the point — a hostname-only comparison would reopen port smuggling.
 		if req.URL.Host != origin.Host {
 			return fmt.Errorf("%w: %s redirects to %s", ErrCrossHostRedirect, origin, req.URL)
 		}

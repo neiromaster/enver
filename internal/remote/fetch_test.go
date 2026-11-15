@@ -139,6 +139,38 @@ func TestFetchTooLarge(t *testing.T) {
 	}
 }
 
+func TestFetchSizeCapBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		size    int
+		wantErr error
+	}{
+		{name: "at the cap", size: maxBodyBytes},
+		{name: "one byte over the cap", size: maxBodyBytes + 1, wantErr: ErrTooLarge},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := bytes.Repeat([]byte("x"), tc.size)
+			srv := newTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(payload)
+			}))
+			body, _, err := Fetch(srv.URL+"/c.yaml", "")
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("Fetch err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Fetch err = %v, want a %d-byte body fetched", err, tc.size)
+			}
+			if len(body) != tc.size {
+				t.Fatalf("Fetch body = %d bytes, want %d", len(body), tc.size)
+			}
+		})
+	}
+}
+
 func TestFetchResolvesCommit(t *testing.T) {
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 	mux := http.NewServeMux()
