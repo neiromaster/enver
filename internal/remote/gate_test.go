@@ -145,6 +145,14 @@ func TestGateRejectsUpstreamProfileNames(t *testing.T) {
 			}
 		})
 	}
+	t.Run("long name truncates on a rune boundary", func(t *testing.T) {
+		name := strings.Repeat("a", 47) + "é"
+		_, err := Gate(gateEnvFile(name, "K", "v"), GateOpts{Record: "llm"})
+		gateRequireError(t, err, "bare upstream profile name")
+		if strings.Contains(err.Error(), `\xc3`) || strings.Contains(err.Error(), `\xa9`) {
+			t.Fatalf("truncation split a rune: %q", err)
+		}
+	})
 }
 
 func TestGateRejectsUnshapedExtends(t *testing.T) {
@@ -221,28 +229,88 @@ func TestGateRejectsInFileExtendsCycles(t *testing.T) {
 	}
 }
 
+// A target spelled under the pulled record's own prefix denotes the file's own
+// profile: projection renames the profile to that form and leaves the target as
+// written, so the pre-projection file holds an in-file edge the bare-name set
+// alone does not reveal.
+func TestGateTreatsOwnRecordPrefixedExtendsAsInFile(t *testing.T) {
+	t.Run("self cycle through the record prefix", func(t *testing.T) {
+		content := []byte("profiles:\n  base:\n    extends: llm/base\n    env:\n      K: v\n")
+		_, err := Gate(content, GateOpts{Record: "llm"})
+		if !errors.Is(err, config.ErrExtendsCycle) {
+			t.Fatalf("Gate error = %v, want config.ErrExtendsCycle", err)
+		}
+	})
+	t.Run("two profiles cycle through the record prefix", func(t *testing.T) {
+		content := []byte(`profiles:
+  a:
+    extends: llm/b
+    env:
+      K: v
+  b:
+    extends: a
+    env:
+      J: w
+`)
+		_, err := Gate(content, GateOpts{Record: "llm"})
+		if !errors.Is(err, config.ErrExtendsCycle) {
+			t.Fatalf("Gate error = %v, want config.ErrExtendsCycle", err)
+		}
+	})
+	t.Run("prefixed sibling is a same-file edge", func(t *testing.T) {
+		content := []byte(`profiles:
+  a:
+    extends: llm/b
+    env:
+      K: v
+  b:
+    env:
+      J: w
+`)
+		warnings, err := Gate(content, GateOpts{Record: "llm"})
+		if err != nil {
+			t.Fatalf("Gate refused a same-file edge: %v", err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("a same-file edge was classified as passthrough: %q", warnings)
+		}
+	})
+	t.Run("no-prefix keeps the prefixed target a passthrough", func(t *testing.T) {
+		content := []byte(`profiles:
+  a:
+    extends: llm/b
+    env:
+      K: v
+  b:
+    env:
+      J: w
+`)
+		warnings, err := Gate(content, GateOpts{Record: "llm", NoPrefix: true})
+		if err != nil {
+			t.Fatalf("Gate refused a no-prefix passthrough: %v", err)
+		}
+		gateRequireWarning(t, warnings, `"llm/b"`, "unresolvable")
+	})
+}
+
 func TestGateRejectsForeignEraCiphertext(t *testing.T) {
 	current := gateSeal(t, crypto.CurrentParams)
 	cases := []struct {
-		name   string
-		pairs  []string
-		reason string
-		prefix string
+		name  string
+		pairs []string
+		want  []string
 	}{
-		{"v1", []string{"TOKEN", "enc:v1:YWJj"}, "cannot read", "enc:v1:"},
-		{"v2", []string{"TOKEN", "enc:v2:YWJj"}, "cannot read", "enc:v2:"},
-		{"mixed eras", []string{"TOKEN", "enc:v2:YWJj", "API_KEY", current}, "mixes ciphertext eras", "enc:v2:"},
+		{"v1", []string{"TOKEN", "enc:v1:YWJj"}, []string{"cannot read", "enc:v1:"}},
+		{"v2", []string{"TOKEN", "enc:v2:YWJj"}, []string{"cannot read", "enc:v2:"}},
+		{"two foreign eras", []string{"TOKEN", "enc:v1:YWJj", "API_KEY", "enc:v2:YWJj"}, []string{"cannot read", "enc:v1:", "enc:v2:"}},
+		{"mixed eras", []string{"TOKEN", "enc:v2:YWJj", "API_KEY", current}, []string{"mixes ciphertext eras", "enc:v2:", "enc:v3"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Gate(gateEnvFile("a", tc.pairs...), GateOpts{Record: "llm"})
-			gateRequireError(t, err, tc.reason, tc.prefix)
+			gateRequireError(t, err, tc.want...)
 		})
 	}
-	t.Run("mixed eras names the current era too", func(t *testing.T) {
-		_, err := Gate(gateEnvFile("a", "TOKEN", "enc:v2:YWJj", "API_KEY", current), GateOpts{Record: "llm"})
-		gateRequireError(t, err, "enc:v3")
-	})
 }
 
 func TestGateRejectsEncryptedValueCount(t *testing.T) {
@@ -274,6 +342,7 @@ func TestGateChecksKDFParams(t *testing.T) {
 		{"current parameters stay quiet", gateSeal(t, crypto.CurrentParams), nil, nil},
 		{"above the defaults warns", gateSeal(t, crypto.Argon2Params{Time: 4, Memory: 65536, Threads: 4}), nil, []string{"KDF parameters above"}},
 		{"at the parse caps warns", gateSeal(t, crypto.Argon2Params{Time: 32, Memory: 98304, Threads: 4}), nil, []string{"KDF parameters above"}},
+		{"only parallelism above the default warns", gateSeal(t, crypto.Argon2Params{Time: 3, Memory: 65536, Threads: 8}), nil, []string{"KDF parameters above", "a higher t or m makes every resolve cost more"}},
 		{"over the time cap", "enc:v3:argon2id:33:65536:4:AAAA", []string{"must be <= 32"}, nil},
 		{"over the memory cap", "enc:v3:argon2id:3:1048577:4:AAAA", []string{"must be <= 1048576"}, nil},
 		{"over the thread cap", "enc:v3:argon2id:3:65536:33:AAAA", []string{"must be <= 32"}, nil},
@@ -446,8 +515,7 @@ func TestGateAcceptsCurrentEraCiphertext(t *testing.T) {
 	gateRequireWarning(t, warnings,
 		"base/TOKEN",
 		"child/API_KEY",
-		"plaintext",
-		"encrypt only after every foreign value is replaced",
+		"patch these keys with plaintext values while foreign ciphertext remains, and encrypt only after every foreign value is replaced - your ciphertext beside the author's puts two salts in one profile and breaks passphrase recovery",
 	)
 }
 
