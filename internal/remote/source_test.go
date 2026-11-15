@@ -288,3 +288,56 @@ func TestResolveRecord(t *testing.T) {
 		})
 	}
 }
+
+// SplitRef keeps the spelling the user wrote, minus an inline ref, so a record
+// stores github:u/r rather than the resolved raw URL: a later ref edit must
+// re-target the fetch instead of freezing one ref inside a URL.
+func TestSplitRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		body    string
+		ref     string
+		wantErr string
+	}{
+		{name: "github without a ref", raw: "github:u/r", body: "github:u/r"},
+		{name: "github with a ref", raw: "github:u/r@v2", body: "github:u/r", ref: "v2"},
+		{name: "github path and ref", raw: "github:u/r/models.yaml@v2", body: "github:u/r/models.yaml", ref: "v2"},
+		{name: "https without a ref", raw: "https://example.com/c.yaml", body: "https://example.com/c.yaml"},
+		{name: "https with a ref", raw: "https://example.com/c.yaml@v2", body: "https://example.com/c.yaml", ref: "v2"},
+		{name: "https query at-sign is part of the address", raw: "https://example.com/c.yaml?sig=a@1", body: "https://example.com/c.yaml?sig=a@1"},
+		{name: "plain http is refused", raw: "http://example.com/c.yaml", wantErr: "https"},
+		{name: "no scheme is refused", raw: "llm", wantErr: "scheme"},
+		{name: "unusable ref is refused", raw: "github:u/r@a/b", wantErr: "ref"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, ref, err := SplitRef(tc.raw)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("SplitRef(%q) err = %v, want it to mention %q", tc.raw, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SplitRef(%q) err = %v", tc.raw, err)
+			}
+			if body != tc.body || ref != tc.ref {
+				t.Fatalf("SplitRef(%q) = (%q, %q), want (%q, %q)", tc.raw, body, ref, tc.body, tc.ref)
+			}
+			// The body must still resolve to the same fetch as the raw spelling:
+			// storing it drops the inline ref from the record instead of the fetch.
+			url, resolvedRef, err := ResolveRecord(config.RemoteRecord{URL: body, Ref: ref})
+			if err != nil {
+				t.Fatalf("ResolveRecord(%q, %q) err = %v", body, ref, err)
+			}
+			wantURL, wantRef, err := ParseSource(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if url != wantURL || resolvedRef != wantRef {
+				t.Fatalf("record (%q, %q) resolves (%q, %q), want (%q, %q)", body, ref, url, resolvedRef, wantURL, wantRef)
+			}
+		})
+	}
+}

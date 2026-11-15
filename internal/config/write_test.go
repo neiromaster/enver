@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,5 +376,133 @@ func TestDeleteProfileBoolSpelledName(t *testing.T) {
 	}
 	if _, ok := cfg.Profiles["true"]; ok {
 		t.Fatal("profile `true` survived deletion")
+	}
+}
+
+func TestWriteRemotesReplacesSectionWhole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	in := `default: dev
+# team remotes
+remotes:
+  old:
+    url: https://example.com/old.yaml
+  stale:
+    url: https://example.com/stale.yaml
+profiles:
+  dev:
+    env:
+      A: "1"
+`
+	if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	remotes := map[string]RemoteRecord{
+		"llm":  {URL: "github:someone/llm-profiles", Ref: "v2"},
+		"bare": {URL: "https://example.com/team.yaml", NoPrefix: true},
+	}
+	if err := WriteRemotes(path, remotes); err != nil {
+		t.Fatalf("WriteRemotes: %v", err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !maps.Equal(cfg.Remotes, remotes) {
+		t.Fatalf("remotes = %+v, want exactly %+v", cfg.Remotes, remotes)
+	}
+	// The section is the unit: records the caller left out are gone, and the
+	// rest of the file is untouched.
+	if _, ok := cfg.Profiles["dev"]; !ok || cfg.Default != "dev" {
+		t.Fatalf("profiles/default = %v/%q, want them preserved", cfg.Profiles, cfg.Default)
+	}
+	body := string(mustRead(t, path))
+	if !strings.Contains(body, `no_prefix: true`) {
+		t.Fatalf("no_prefix not written:\n%s", body)
+	}
+	if !strings.Contains(body, "# team remotes") {
+		t.Fatalf("section comment dropped:\n%s", body)
+	}
+
+	// An empty map removes the section outright rather than leaving remotes: {}.
+	if err := WriteRemotes(path, map[string]RemoteRecord{}); err != nil {
+		t.Fatalf("WriteRemotes empty: %v", err)
+	}
+	body = string(mustRead(t, path))
+	if strings.Contains(body, "remotes") {
+		t.Fatalf("empty remotes left a section:\n%s", body)
+	}
+	if cfg, err = LoadFile(path); err != nil || cfg.Remotes != nil {
+		t.Fatalf("reload = %+v, %v; want no remotes and a loadable file", cfg.Remotes, err)
+	}
+}
+
+func TestWriteRemotesRejectsUnwritableRecords(t *testing.T) {
+	valid := RemoteRecord{URL: "https://example.com/a.yaml"}
+	tests := []struct {
+		name    string
+		remotes map[string]RemoteRecord
+		want    []string
+	}{
+		{
+			name:    "invalid record name",
+			remotes: map[string]RemoteRecord{"a/b": valid},
+			want:    []string{`"a/b"`, "not a valid record name"},
+		},
+		{
+			name:    "names differing only in case",
+			remotes: map[string]RemoteRecord{"llm": valid, "LLM": valid},
+			want:    []string{`"LLM"`, `"llm"`, "case"},
+		},
+		{
+			name:    "reserved Windows device name",
+			remotes: map[string]RemoteRecord{"nul": valid},
+			want:    []string{`"nul"`, "device"},
+		},
+		{
+			name:    "reserved Windows device name in another case",
+			remotes: map[string]RemoteRecord{"COM1": valid},
+			want:    []string{`"COM1"`, "device"},
+		},
+		{
+			name:    "empty url",
+			remotes: map[string]RemoteRecord{"llm": {}},
+			want:    []string{`"llm"`, "url"},
+		},
+		{
+			name:    "plain http url",
+			remotes: map[string]RemoteRecord{"llm": {URL: "http://example.com/a.yaml"}},
+			want:    []string{"https"},
+		},
+		{
+			name:    "sourceless url",
+			remotes: map[string]RemoteRecord{"llm": {URL: "example.com/a.yaml"}},
+			want:    []string{"scheme"},
+		},
+		{
+			name:    "unusable ref",
+			remotes: map[string]RemoteRecord{"llm": {URL: "https://example.com/a.yaml", Ref: "a/b"}},
+			want:    []string{"ref"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			original := "profiles:\n  dev:\n    env:\n      A: \"1\"\n"
+			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := WriteRemotes(path, tc.remotes)
+			if err == nil {
+				t.Fatal("WriteRemotes accepted a record a pull could never use")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v, want it to mention %q", err, want)
+				}
+			}
+			if got := string(mustRead(t, path)); got != original {
+				t.Fatalf("rejected write changed the file:\n%s", got)
+			}
+		})
 	}
 }

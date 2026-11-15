@@ -23,6 +23,12 @@ import (
 type RemoteRecord struct {
 	URL string `yaml:"url"`
 	Ref string `yaml:"ref,omitempty"`
+	// NoPrefix is the pull mode the content was stored under: its profiles keep
+	// their bare upstream names instead of landing under the record prefix. The
+	// mode lives in the record because it is how the namespace already reads — a
+	// re-pull that guessed from flags would silently rewrite what profiles
+	// resolve to.
+	NoPrefix bool `yaml:"no_prefix,omitempty"`
 }
 
 // recordNameRe matches a single-level record name: the name becomes a profile
@@ -74,8 +80,10 @@ func RemoteContentPath(name string) string {
 	return filepath.Join(RemotesDir(), name+".yaml")
 }
 
-// remoteStatePath is the sidecar recording what name's content was fetched from.
-func remoteStatePath(name string) string {
+// RemoteStatePath is the sidecar recording what name's content was fetched from.
+// Callers that need to inspect or remove the file use this rather than build the
+// name themselves, so the layout stays in one place.
+func RemoteStatePath(name string) string {
 	return filepath.Join(RemotesDir(), name+".meta")
 }
 
@@ -89,7 +97,7 @@ func ReadRemoteState(name string) (RemoteState, bool) {
 	if !ValidRecordName(name) {
 		return RemoteState{}, false
 	}
-	data, err := os.ReadFile(remoteStatePath(name))
+	data, err := os.ReadFile(RemoteStatePath(name))
 	if err != nil {
 		return RemoteState{}, false
 	}
@@ -115,7 +123,7 @@ func WriteRemoteState(name string, st RemoteState) error {
 	if err != nil {
 		return fmt.Errorf("remote %q: encode state: %w", name, err)
 	}
-	if err := writeFileAtomic(remoteStatePath(name), data); err != nil {
+	if err := writeFileAtomic(RemoteStatePath(name), data, 0o600); err != nil {
 		return fmt.Errorf("remote %q: write state: %w", name, err)
 	}
 	return nil
@@ -129,7 +137,7 @@ func WriteRemoteContent(name string, data []byte) error {
 	if !ValidRecordName(name) {
 		return fmt.Errorf("remote %q: not a valid record name", name)
 	}
-	if err := writeFileAtomic(RemoteContentPath(name), data); err != nil {
+	if err := writeFileAtomic(RemoteContentPath(name), data, 0o600); err != nil {
 		return fmt.Errorf("remote %q: write content: %w", name, err)
 	}
 	return nil
@@ -145,7 +153,7 @@ func RemoveRemoteContent(name string) error {
 // RemoveRemoteState deletes name's state sidecar, with the same absent-is-done
 // contract as RemoveRemoteContent.
 func RemoveRemoteState(name string) error {
-	return removeRemoteFile(name, remoteStatePath(name), "state")
+	return removeRemoteFile(name, RemoteStatePath(name), "state")
 }
 
 // removeRemoteFile deletes one of name's remote files, treating an already
@@ -162,11 +170,16 @@ func removeRemoteFile(name, path, kind string) error {
 }
 
 // writeFileAtomic replaces path with data through a temp file in the same
-// directory, so a reader sees either the old bytes or the new ones.
-func writeFileAtomic(path string, data []byte) error {
+// directory, so a reader sees either the old bytes or the new ones. A file that
+// already exists keeps its mode: replacing content must never widen or narrow
+// permission a user chose for it. A new file gets perm.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
+	}
+	if fi, err := os.Stat(path); err == nil {
+		perm = fi.Mode().Perm()
 	}
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*")
 	if err != nil {
@@ -180,11 +193,17 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if err := os.Chmod(tmp.Name(), perm); err != nil {
+		return err
+	}
 	return os.Rename(tmp.Name(), path)
 }
 
-// remoteLayer is the provenance label the content of remote name carries.
-func remoteLayer(name string) string {
+// RemoteLayer is the provenance label the content of remote name carries. It
+// appears in Config.ProfileLayer and in the sources a resolved value reports, so
+// callers that need to tell one remote's profiles from another read it here
+// rather than spelling the prefix themselves.
+func RemoteLayer(name string) string {
 	return "remote:" + name
 }
 
@@ -220,11 +239,14 @@ func loadRemoteContent(name string) (content Config, ok bool, warning string, er
 // record with no content contributes nothing. The returned label names the
 // topmost remote folded, the base label the next fold needs; it is empty when no
 // remote contributed, leaving that label for the caller to pick. The warnings
-// cover content that is on disk but unreadable, which resolution had to skip.
+// cover content that is on disk but unreadable, which resolution had to skip, and
+// a bare-name collision between two no-prefix records, where the sorted fold
+// makes one record's version of a profile unreachable.
 func remoteBase(records map[string]RemoteRecord) (Config, string, []string, error) {
 	var base Config
 	var warnings []string
 	label := ""
+	bareOwner := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(records)) {
 		content, ok, warning, err := loadRemoteContent(name)
 		if err != nil {
@@ -236,15 +258,35 @@ func remoteBase(records map[string]RemoteRecord) (Config, string, []string, erro
 		if !ok {
 			continue
 		}
+		rec := records[name]
+		projected := Project(content, name, rec.NoPrefix)
+		if rec.NoPrefix {
+			warnings = append(warnings, bareNameWarnings(name, projected, bareOwner)...)
+		}
 		if label == "" {
 			// The accumulator opens empty, so the first remote has no layer below
 			// it to name; its own label stands in and nothing is left to stamp.
-			label = remoteLayer(name)
+			label = RemoteLayer(name)
 		}
-		base = Merge(base, Project(content, name), label, remoteLayer(name))
-		label = remoteLayer(name)
+		base = Merge(base, projected, label, RemoteLayer(name))
+		label = RemoteLayer(name)
 	}
 	return base, label, warnings, nil
+}
+
+// bareNameWarnings reports the profiles a no-prefix record lands on top of, and
+// records it as their new owner. The fold runs in sorted record order, so the
+// later record wins; saying so is the only way a user learns that the earlier
+// record's version of that profile is now unreachable.
+func bareNameWarnings(name string, projected Config, bareOwner map[string]string) []string {
+	var out []string
+	for _, pname := range projected.ProfileNames() {
+		if owner, taken := bareOwner[pname]; taken {
+			out = append(out, fmt.Sprintf("remote %q: stored without a prefix, so its profile %q collides with the same bare name from remote %q; the fold runs in sorted record order, so %q wins", name, pname, owner, name))
+		}
+		bareOwner[pname] = name
+	}
+	return out
 }
 
 // orphanWarnings reports stored content no merged record declares: the file
@@ -278,23 +320,29 @@ func orphanWarnings(records map[string]RemoteRecord) []string {
 // Project rewrites a remote's content into the namespace its record prefixes:
 // every profile lands under name+"/", and an extends target the same file
 // defines moves with it, while a target the file does not define keeps
-// resolving against the user's namespace. The two top-level sections a remote
-// author must not own are dropped: default, because which profile is default is
-// the user's decision, and remotes, because a remote can never register a
-// fetch. Control characters are stripped from every string the content supplies
-// — profile names, extends targets, env keys, unset entries, values, comments —
-// since they reach terminals, error messages and completion candidates, where an
-// escape sequence or an embedded line break can rewrite what the user reads.
-// Only value and comment text keeps its newlines: a multi-line value and a
-// multi-line comment are structure the config and dotenv formats support, while
-// a name carrying one is a rendering hazard and never a legitimate name. Secret
-// marks ride through unchanged: a mark is not a secret, and a patch written over
-// a marked remote value must stay masked and remain an encrypt candidate. Every
-// projected profile is stamped with the remote:<name> layer. Only what the file
-// declares is projected — merge artifacts (Origins, UnsetOrigins, Carried) are
-// not carried — and the input is left untouched.
-func Project(c Config, name string) Config {
-	prefix := name + "/"
+// resolving against the user's namespace. A no-prefix record names the empty
+// prefix instead: its profiles keep their bare upstream names and its own
+// extends targets need no rewriting, which is the deliberate blending the mode
+// opts into. The two top-level sections a remote author must not own are
+// dropped: default, because which profile is default is the user's decision, and
+// remotes, because a remote can never register a fetch. Control characters are
+// stripped from every string the content supplies — profile names, extends
+// targets, env keys, unset entries, values, comments — since they reach
+// terminals, error messages and completion candidates, where an escape sequence
+// or an embedded line break can rewrite what the user reads. Only value and
+// comment text keeps its newlines: a multi-line value and a multi-line comment
+// are structure the config and dotenv formats support, while a name carrying one
+// is a rendering hazard and never a legitimate name. Secret marks ride through
+// unchanged: a mark is not a secret, and a patch written over a marked remote
+// value must stay masked and remain an encrypt candidate. Every projected
+// profile is stamped with the remote:<name> layer. Only what the file declares is
+// projected — merge artifacts (Origins, UnsetOrigins, Carried) are not carried —
+// and the input is left untouched.
+func Project(c Config, name string, noPrefix bool) Config {
+	prefix := ""
+	if !noPrefix {
+		prefix = name + "/"
+	}
 	defined := make(map[string]bool, len(c.Profiles))
 	for pname := range c.Profiles {
 		defined[stripControls(pname)] = true
@@ -315,7 +363,7 @@ func Project(c Config, name string) Config {
 			Comments: projectComments(p.Comments),
 			Marked:   projectMarks(p.Marked),
 		}
-		out.ProfileLayer[projected] = remoteLayer(name)
+		out.ProfileLayer[projected] = RemoteLayer(name)
 	}
 	return out
 }
