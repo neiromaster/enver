@@ -194,19 +194,33 @@ func writeTarget() string {
 	return config.LocalPath()
 }
 
-// otherLayer reads the layer a write leaves untouched: the global file when the
-// write targets the local one, the local file when it targets the global one,
-// and nothing under --no-local, where reads ignore the local file entirely. A
-// secret mark inherited from that layer cannot be guessed, so its read errors
-// surface here rather than as a quietly unmarked key.
-func otherLayer() (config.Config, error) {
+// underLayers reads the stack a write sits on, nearest first: the global file
+// under a local write, and every pulled remote below that. A remote never folds
+// over a user layer, whichever layer declares its record, so the records come
+// from the merged view the write's marks are answered against. The advisories
+// about that content are the merged load's to report, which is why they are
+// dropped here. A secret mark inherited from any of those layers cannot be
+// guessed, so their read errors surface here rather than as a quietly unmarked
+// key.
+func underLayers(merged config.Config) ([]config.Layer, error) {
+	remotes, _, err := config.RemoteLayers(merged.Remotes)
+	if err != nil {
+		return nil, err
+	}
+	under := make([]config.Layer, 0, len(remotes)+1)
 	if !globalFlags.global {
-		return config.LoadFile(config.GlobalPath(globalFlags.configPath))
+		global, err := config.LoadFile(config.GlobalPath(globalFlags.configPath))
+		if err != nil {
+			return nil, err
+		}
+		under = append(under, config.Layer{Label: config.LayerGlobal, Config: global})
 	}
-	if globalFlags.noLocal {
-		return config.Config{}, nil
+	// RemoteLayers folds in sorted record order, so the last one is the nearest
+	// layer under the target.
+	for i := len(remotes) - 1; i >= 0; i-- {
+		under = append(under, remotes[i])
 	}
-	return config.LoadFile(config.LocalPath())
+	return under, nil
 }
 
 // loadTarget reads the file mutators rewrite: local by default, global under
@@ -227,16 +241,34 @@ func requireTargetProfile(cfg config.Config, path, name string) error {
 	return nil
 }
 
+// requireWriteTargetProfile resolves the file encrypt and decrypt rewrite and
+// gates a named profile on the target declaring it: sealing or opening values
+// happens in the user's own copy, so a name only remote content provides is a
+// miss the scope hint answers. An unnamed run (encrypt --all) covers whatever
+// the target holds.
+func requireWriteTargetProfile(profile string) (string, error) {
+	path, cfg, err := loadTarget()
+	if err != nil {
+		return "", err
+	}
+	if profile == "" {
+		return path, nil
+	}
+	return path, requireTargetProfile(cfg, path, profile)
+}
+
 // pickerConfig is the extends-picker set: merged by default (a local profile may
 // extend a global one), global-only under --global.
-func pickerConfig() (config.Config, error) {
+func pickerConfig(merged config.Config) (config.Config, error) {
 	if globalFlags.global {
 		return config.LoadFile(config.GlobalPath(globalFlags.configPath))
 	}
-	return app.Load(appOpts())
+	return merged, nil
 }
 
-// notFoundInTarget hints at --global when the profile lives in the other layer.
+// notFoundInTarget hints at --global when the profile lives in the other layer,
+// and at `add` when it lives only in remote content: remote profiles are a
+// read-only base, so the writer's remedy is a patch copy in the user layer.
 func notFoundInTarget(name, target string) error {
 	other := config.LocalPath()
 	if target == other {
@@ -250,7 +282,23 @@ func notFoundInTarget(name, target string) error {
 			return fmt.Errorf("profile %q not found in local .enver.yaml; it is global — pass --global (-g)", name)
 		}
 	}
+	// A merged load that fails here would only replace a message the caller
+	// already knows is a miss, so the plain not-found answer stands.
+	if merged, err := app.Load(appOpts()); err == nil {
+		if remote, ok := config.RemoteName(merged.ProfileLayer[name]); ok {
+			return fmt.Errorf("profile %q comes from remote %q and has no copy here; add a patch copy first (`%s`)", name, remote, addCommandLine(name))
+		}
+	}
 	return fmt.Errorf("profile %q not found", name)
+}
+
+// addCommandLine is the command a scope hint points at: the patch copy lands in
+// the write target, so it needs the same scope flag the refused write carried.
+func addCommandLine(name string) string {
+	if globalFlags.global {
+		return "enver add -g " + name
+	}
+	return "enver add " + name
 }
 
 func targetProfiles(cmd *cobra.Command, toComplete string) []string {

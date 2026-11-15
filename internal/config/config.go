@@ -150,12 +150,28 @@ const (
 // record name.
 const remoteLayerPrefix = "remote:"
 
+// Layer is one config stacked with the provenance label readers know it by: the
+// label Merge stamps onto its content and LayerEra ranks. A write folds the
+// stack its target sits on, so a label inherited from any of those layers keeps
+// its era and its mark.
+type Layer struct {
+	Label  string
+	Config Config
+}
+
+// RemoteName returns the record name a remote layer label carries. ok is false
+// for a label that names a user layer.
+func RemoteName(layer string) (string, bool) {
+	return strings.CutPrefix(layer, remoteLayerPrefix)
+}
+
 // IsRemoteLayer reports whether layer names content a remote supplied. Callers
 // that must tell a remote's values from the user's own — a decrypt failure a
 // consumer may not be able to fix, say — read it here rather than spell the
 // prefix themselves.
 func IsRemoteLayer(layer string) bool {
-	return strings.HasPrefix(layer, remoteLayerPrefix)
+	_, ok := RemoteName(layer)
+	return ok
 }
 
 // LayerEra ranks a layer label by its height in the fold: remote content is

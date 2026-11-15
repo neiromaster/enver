@@ -232,25 +232,23 @@ func loadRemoteContent(name string) (content Config, ok bool, warning string, er
 	return cfg, true, "", nil
 }
 
-// remoteBase folds the stored content of every record that has some into the
-// bottom layer of the merged view. Each content file is projected through
-// Project and the projections stack in sorted record-name order, so the fold is
-// the same on every run and every entry carries the remote that supplied it. A
-// record with no content contributes nothing. The returned label names the
-// topmost remote folded, the base label the next fold needs; it is empty when no
-// remote contributed, leaving that label for the caller to pick. The warnings
-// cover content that is on disk but unreadable, which resolution had to skip, and
-// a bare-name collision between two no-prefix records, where the sorted fold
-// makes one record's version of a profile unreachable.
-func remoteBase(records map[string]RemoteRecord) (Config, string, []string, error) {
-	var base Config
+// RemoteLayers returns the stored content of every record that has some, one
+// layer per record, in fold order: sorted by record name, so a later record
+// folds over an earlier one and wins a profile both declare. Each content file is
+// projected through Project into its record's namespace and labelled
+// remote:<name>, so every entry carries the remote that supplied it, and a record
+// with no content contributes no layer. The warnings cover content that is on
+// disk but unreadable, which resolution had to skip, and a bare-name collision
+// between two no-prefix records, where the fold makes one record's version of a
+// profile unreachable.
+func RemoteLayers(records map[string]RemoteRecord) ([]Layer, []string, error) {
+	var layers []Layer
 	var warnings []string
-	label := ""
 	bareOwner := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(records)) {
 		content, ok, warning, err := loadRemoteContent(name)
 		if err != nil {
-			return Config{}, "", nil, err
+			return nil, nil, err
 		}
 		if warning != "" {
 			warnings = append(warnings, warning)
@@ -263,15 +261,28 @@ func remoteBase(records map[string]RemoteRecord) (Config, string, []string, erro
 		if rec.NoPrefix {
 			warnings = append(warnings, bareNameWarnings(name, projected, bareOwner)...)
 		}
-		if label == "" {
-			// The accumulator opens empty, so the first remote has no layer below
-			// it to name; its own label stands in and nothing is left to stamp.
-			label = RemoteLayer(name)
-		}
-		base = Merge(base, projected, label, RemoteLayer(name))
-		label = RemoteLayer(name)
+		layers = append(layers, Layer{Label: RemoteLayer(name), Config: projected})
 	}
-	return base, label, warnings, nil
+	return layers, warnings, nil
+}
+
+// remoteBase folds the stored content of every record that has some into the
+// bottom layer of the merged view, in RemoteLayers order. The returned label
+// names the topmost remote folded, the base label the next fold needs; it is
+// empty when no remote contributed, leaving that label for the caller to pick.
+func remoteBase(records map[string]RemoteRecord) (Config, string, []string, error) {
+	layers, warnings, err := RemoteLayers(records)
+	if err != nil {
+		return Config{}, "", nil, err
+	}
+	if len(layers) == 0 {
+		return Config{}, "", warnings, nil
+	}
+	base := layers[0].Config
+	for i := 1; i < len(layers); i++ {
+		base = Merge(base, layers[i].Config, layers[i-1].Label, layers[i].Label)
+	}
+	return base, layers[len(layers)-1].Label, warnings, nil
 }
 
 // bareNameWarnings reports the profiles a no-prefix record lands on top of, and

@@ -14,17 +14,17 @@ import (
 // ImportOptions carries the import knobs the CLI layer binds flags to.
 // Confirm gates destructive --replace removals; Resolve computes the
 // post-write effective resolution for fence reporting (nil disables it,
-// tests). OtherLayer is the layer the write leaves untouched, the only place a
-// secret mark inherited from the other file can come from: nil leaves
+// tests). Under is the stack beneath the target file, nearest first — the only
+// place a secret mark inherited from another layer can come from: nil leaves
 // Profile.Marked nil, so the writer keeps its own in-file fallback.
-// TargetIsGlobal says which of the two the target file is, because the layers
-// fold in reader order rather than in argument order.
+// TargetIsGlobal says which layer the target file is, because the stack folds
+// in reader order rather than in argument order.
 type ImportOptions struct {
 	Replace        bool
 	Force          bool
 	Confirm        func(msg string, def bool) (bool, error)
 	Resolve        func(profile string) (config.Resolved, error)
-	OtherLayer     *config.Config
+	Under          []config.Layer
 	TargetIsGlobal bool
 }
 
@@ -86,7 +86,7 @@ func ImportEnv(r io.Reader, target, name, extendsFlag string, opts ImportOptions
 	// env, because WriteProfile writes the field wholesale, while UpsertProfile
 	// never clears it.
 	marked := WriteMarks(WriteQuery{
-		Other:          opts.OtherLayer,
+		Under:          opts.Under,
 		Target:         existing,
 		TargetIsGlobal: opts.TargetIsGlobal,
 		Name:           name,

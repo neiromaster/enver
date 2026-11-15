@@ -183,14 +183,14 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 // write-mark helper with add's picked extends, which the write sets outright,
 // and the working fences, which an upsert never clears. The query is keyed by
 // the runtime names the write actually writes.
-func addMarks(other *config.Config, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
+func addMarks(under []config.Layer, target config.Config, name string, extends config.Extends, entries []ui.EnvEntry) map[string]bool {
 	keys := make([]string, 0, len(entries))
 	for _, e := range entries {
 		key, _ := envname.SplitMarked(e.Key)
 		keys = append(keys, key)
 	}
 	return app.WriteMarks(app.WriteQuery{
-		Other:          other,
+		Under:          under,
 		Target:         target,
 		TargetIsGlobal: globalFlags.global,
 		Name:           name,
@@ -200,13 +200,51 @@ func addMarks(other *config.Config, target config.Config, name string, extends c
 }
 
 // commitAdd writes the collected profile into the target file, carrying the
-// marks its picked chain supplies from the other layer so an inherited secret
+// marks its picked chain supplies from the layers below so an inherited secret
 // stays a secret, and the ones the user typed, which outrank them.
-func commitAdd(cfgPath, name string, extends config.Extends, entries []ui.EnvEntry, other, target config.Config, setDefault bool) error {
+func commitAdd(cfgPath, name string, extends config.Extends, entries []ui.EnvEntry, under []config.Layer, target config.Config, setDefault bool) error {
 	profile, comments := buildProfile(extends, entries)
 	profile.Comments = comments
-	profile.Marked = mergeMarks(addMarks(&other, target, name, extends, entries), profile.Marked)
+	profile.Marked = mergeMarks(addMarks(under, target, name, extends, entries), profile.Marked)
 	return config.UpsertProfile(cfgPath, name, profile, setDefault, true)
+}
+
+// addPlacement decides what adding name into the target file means for the layers
+// around it. A name the target already declares is the profile's own copy. A name
+// it does not declare is either a new profile, or a patch: remote content
+// providing the profile is the bootstrap case — the copy overrides that content
+// per key while the remote's own copy stays where a re-pull expects it — and the
+// patchRemote answer is the record it patches. A name the other user layer
+// declares is neither: writing it here would shadow the user's own profile
+// rather than patch anything, so the scope hint sends the user to the layer that
+// owns it.
+func addPlacement(merged, target config.Config, path, name string) (patchRemote string, err error) {
+	if _, ok := target.Profiles[name]; ok {
+		return "", nil
+	}
+	layer, ok := merged.ProfileLayer[name]
+	if !ok {
+		return "", nil
+	}
+	if remote, isRemote := config.RemoteName(layer); isRemote {
+		return remote, nil
+	}
+	return "", notFoundInTarget(name, path)
+}
+
+// addSummary renders add's closing report: where the profile landed, the remote
+// whose content it patches, whether it became the default, and how to run it.
+func addSummary(name, cfgPath, patchRemote string, setDefault bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n✓ wrote profile %q to %s\n", name, cfgPath)
+	if patchRemote != "" {
+		fmt.Fprintf(&b, "→ patches remote %q: its content stays the base, these keys override it\n", patchRemote)
+	}
+	if setDefault {
+		b.WriteString("✓ set as default\n")
+	}
+	fmt.Fprintf(&b, "\nUse it: enver x %s -- <command>\n", name)
+	return b.String()
 }
 
 // ciphertextClobberError refuses an add that would write a typed value over one
@@ -266,11 +304,18 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	pickerCfg, err := pickerConfig()
+	// Resolution spans every layer, so the merged view answers the extends
+	// judgments and the marks alike; the picker narrows to the global file under
+	// --global, where a local parent is not the user's to compose with.
+	merged, err := app.Load(appOpts())
 	if err != nil {
 		return err
 	}
-	other, err := otherLayer()
+	pickerCfg, err := pickerConfig(merged)
+	if err != nil {
+		return err
+	}
+	under, err := underLayers(merged)
 	if err != nil {
 		return err
 	}
@@ -289,6 +334,10 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	} else if err := validateProfileName(name); err != nil {
 		return err
 	}
+	patchRemote, err := addPlacement(merged, targetCfg, cfgPath, name)
+	if err != nil {
+		return err
+	}
 
 	var extends config.Extends
 	if len(names) > 0 {
@@ -304,12 +353,6 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	// view: a global pick can loop through a local parent and vice versa, and
 	// the inherited backdrop must resolve through the same parents the cycle
 	// check just cleared.
-	merged := pickerCfg
-	if globalFlags.global {
-		if merged, err = app.Load(appOpts()); err != nil {
-			return err
-		}
-	}
 	if err := extendsCycleError(merged, name, extends); err != nil {
 		return err
 	}
@@ -322,7 +365,7 @@ func doAdd(cmd *cobra.Command, args []string) error {
 	var entries []ui.EnvEntry
 	for {
 		entry, err := ui.EnvCardCollecting(ui.EnvEntry{},
-			buildSummary(entries, parentEnv, parentMarked, addMarks(&other, targetCfg, name, extends, entries)))
+			buildSummary(entries, parentEnv, parentMarked, addMarks(under, targetCfg, name, extends, entries)))
 		if err != nil {
 			return nil
 		}
@@ -354,13 +397,9 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		setDefault = ans
 	}
 
-	if err := commitAdd(cfgPath, name, extends, entries, other, targetCfg, setDefault); err != nil {
+	if err := commitAdd(cfgPath, name, extends, entries, under, targetCfg, setDefault); err != nil {
 		return err
 	}
-	fmt.Printf("\n✓ wrote profile %q to %s\n", name, cfgPath)
-	if setDefault {
-		fmt.Printf("✓ set as default\n")
-	}
-	fmt.Printf("\nUse it: enver x %s -- <command>\n", name)
+	fmt.Print(addSummary(name, cfgPath, patchRemote, setDefault))
 	return nil
 }

@@ -80,6 +80,10 @@ var encryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
+		path, err := requireWriteTargetProfile(profile)
+		if err != nil {
+			return err
+		}
 		key, salt, err := requireKey(profile)
 		if err != nil {
 			return err
@@ -87,7 +91,6 @@ var encryptCmd = &cobra.Command{
 		if salt == nil {
 			return fmt.Errorf("ENVER_KEY carries no salt, so it cannot encrypt; run `enver keygen` or pass --key <key cache>")
 		}
-		path := writeTarget()
 		n, err := config.EncryptFile(path, key, salt, profile, all)
 		if err != nil {
 			return err
@@ -109,11 +112,14 @@ var decryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
+		path, err := requireWriteTargetProfile(profile)
+		if err != nil {
+			return err
+		}
 		key, _, err := requireKey(profile)
 		if err != nil {
 			return err
 		}
-		path := writeTarget()
 		n, err := config.DecryptFile(path, key, profile)
 		if err != nil {
 			return err
