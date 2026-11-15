@@ -166,7 +166,8 @@ func LayerEra(layer string) int {
 type Config struct {
 	Default  string                       `yaml:"default"`
 	Profiles map[string]Profile           `yaml:"profiles"`
-	Origins  map[string]map[string]string `yaml:"-"` // profile → env key → layer
+	Remotes  map[string]RemoteRecord      `yaml:"remotes"` // record name → source; Merge folds by name
+	Origins  map[string]map[string]string `yaml:"-"`       // profile → env key → layer
 	// UnsetOrigins records, per profile and unset entry, which layer
 	// contributed the entry; like Origins it is filled by Merge and never
 	// serialized. Attribution is by exact spelling: Merge records the override
@@ -212,11 +213,18 @@ func LoadFile(path string) (Config, error) {
 	return load(path)
 }
 
-// checkEnvNames rejects invalid env key names — hand-authored in YAML — for
-// env keys and unset entries alike. Names reach eval'd export lines and child
-// environments unquoted, so a name with shell metacharacters is code
-// execution, not a typo to carry silently.
+// checkEnvNames rejects invalid names — hand-authored in YAML — for env keys
+// and unset entries, and for remote record names. Env names reach eval'd
+// export lines and child environments unquoted, so a name with shell
+// metacharacters is code execution. Record names become profile prefixes and
+// content file names, so one outside the single-level rule is an escape from
+// the namespace pull writes into. Neither is a typo to carry silently.
 func checkEnvNames(c Config) error {
+	for _, name := range slices.Sorted(maps.Keys(c.Remotes)) {
+		if !ValidRecordName(name) {
+			return fmt.Errorf("remotes defines invalid record name %q (want [A-Za-z0-9][A-Za-z0-9_-]*)", name)
+		}
+	}
 	for _, name := range c.ProfileNames() {
 		if err := checkProfileEnvNames(name, c.Profiles[name]); err != nil {
 			return err
@@ -268,9 +276,11 @@ func findLocal() []string {
 // carry overrideLabel; base entries no earlier fold attributed — fences, env
 // keys, profile names — carry baseLabel, so a lower base layer keeps its own
 // era rather than reading as the next fold's base. Otherwise override wins
-// for default and per-key env, except that an empty override Default never
-// clears the base default — clearing is per-layer (`enver default --clear`
-// writes the owning file); extends concatenates as [base…, override…] deduped,
+// for default, per-key env, and remotes by name — an overriding record
+// replaces the inherited one whole, ref included, while a record the override
+// does not redeclare survives — except that an empty override Default never
+// clears the base default: clearing is per-layer, as `enver default --clear`
+// writes the owning file. Extends concatenates as [base…, override…] deduped,
 // so local mixins compose with rather than replace global ones. Unsets are
 // layer-scoped, not unioned: folding a shared profile applies the inherited
 // copy's fence to its own env right here — the overriding copy may refill
@@ -287,6 +297,7 @@ func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 	out.Origins = cloneProvenance(base.Origins)
 	out.UnsetOrigins = cloneProvenance(base.UnsetOrigins)
 	out.ProfileLayer = maps.Clone(base.ProfileLayer)
+	out.Remotes = mergeRemotes(base.Remotes, override.Remotes)
 	if override.Default != "" {
 		out.Default = override.Default
 	}
