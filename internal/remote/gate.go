@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
@@ -63,7 +64,7 @@ func Gate(content []byte, opts GateOpts) (warnings []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRemoteProfiles(cfg, opts.Record); err != nil {
+	if err := checkRemoteProfiles(cfg, opts); err != nil {
 		return nil, err
 	}
 	cryptoWarnings, err := checkRemoteCiphertext(cfg, opts.Record)
@@ -129,9 +130,10 @@ func checkAnchors(n *yaml.Node) error {
 // slash here would forge a different record's namespace. Extends targets may
 // pass through to the merged namespace and so may carry one slash, but a target
 // no profile can be named by is refused before it reaches an error message or a
-// completion candidate. Cycles are searched only among the file's own profiles.
-func checkRemoteProfiles(cfg config.Config, record string) error {
-	label := gateLabel(record)
+// completion candidate. Cycles are searched only among the file's own profiles,
+// which includes a target spelled under the pulled record's own prefix.
+func checkRemoteProfiles(cfg config.Config, opts GateOpts) error {
+	label := gateLabel(opts.Record)
 	defined := make(map[string]struct{}, len(cfg.Profiles))
 	for name := range cfg.Profiles {
 		defined[name] = struct{}{}
@@ -146,7 +148,7 @@ func checkRemoteProfiles(cfg config.Config, record string) error {
 			}
 		}
 	}
-	if cycle := extendsCycle(cfg, defined); cycle != nil {
+	if cycle := extendsCycle(cfg, opts, defined); cycle != nil {
 		return fmt.Errorf("%s: %w within the file: %s", label, config.ErrExtendsCycle, strings.Join(cycle, " -> "))
 	}
 	return nil
@@ -168,7 +170,7 @@ func shapedTarget(target string) bool {
 // extendsCycle returns the first cycle among the file's own extends edges as a
 // closed path, or nil. Edges leaving the file are passthroughs to the merged
 // namespace and are not followed: resolving them is the load path's job.
-func extendsCycle(cfg config.Config, defined map[string]struct{}) []string {
+func extendsCycle(cfg config.Config, opts GateOpts, defined map[string]struct{}) []string {
 	visiting := map[string]bool{}
 	done := map[string]bool{}
 	var path []string
@@ -181,16 +183,17 @@ func extendsCycle(cfg config.Config, defined map[string]struct{}) []string {
 			delete(visiting, name)
 		}()
 		for _, target := range cfg.Profiles[name].Extends {
-			if _, ok := defined[target]; !ok {
+			edge, ok := inFileEdge(target, opts.Record, defined, opts.NoPrefix)
+			if !ok {
 				continue
 			}
-			if visiting[target] {
-				return append(slices.Clone(path[slices.Index(path, target):]), target)
+			if visiting[edge] {
+				return append(slices.Clone(path[slices.Index(path, edge):]), edge)
 			}
-			if done[target] {
+			if done[edge] {
 				continue
 			}
-			if cycle := visit(target); cycle != nil {
+			if cycle := visit(edge); cycle != nil {
 				return cycle
 			}
 		}
@@ -206,6 +209,40 @@ func extendsCycle(cfg config.Config, defined map[string]struct{}) []string {
 		}
 	}
 	return nil
+}
+
+// inFileEdge resolves an extends target to the profile of the fetched file it
+// names once projection has run, and reports whether it names one at all. A bare
+// target names the file's own profile, and so does a target spelled under the
+// pulled record's own prefix: projection renames the profile to that prefixed
+// form and leaves the target as written, so the two mentions denote one profile.
+// Under --no-prefix projection leaves names bare, and a prefixed spelling then
+// names whatever the merged namespace holds instead of a file profile.
+func inFileEdge(target, record string, defined map[string]struct{}, noPrefix bool) (string, bool) {
+	if _, ok := defined[target]; ok {
+		return target, true
+	}
+	if noPrefix || record == "" {
+		return "", false
+	}
+	prefix, name, ok := strings.Cut(target, "/")
+	if !ok || prefix != record {
+		return "", false
+	}
+	if _, ok := defined[name]; ok {
+		return name, true
+	}
+	return "", false
+}
+
+// ownRecordTarget reports whether target is spelled under the pulled record's
+// own prefix, the namespace projection materializes that record in.
+func ownRecordTarget(target, record string, noPrefix bool) bool {
+	if noPrefix || record == "" {
+		return false
+	}
+	prefix, _, ok := strings.Cut(target, "/")
+	return ok && prefix == record
 }
 
 // encRef is one env value the gate inspects at rest, labelled the way the
@@ -262,7 +299,7 @@ func checkRemoteCiphertext(cfg config.Config, record string) (warnings []string,
 		}
 	}
 	if len(over) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%s: %s encrypts with KDF parameters above this build's defaults (e.g. argon2id t=%d m=%d p=%d); they parse and decrypt, but every resolve costs more than a current-era value", label, joinRefs(over, false), overParams.Time, overParams.Memory, overParams.Threads))
+		warnings = append(warnings, fmt.Sprintf("%s: %s encrypts with KDF parameters above this build's defaults (e.g. argon2id t=%d m=%d p=%d); they parse and decrypt within the caps, but a higher t or m makes every resolve cost more than a current-era value", label, joinRefs(over, false), overParams.Time, overParams.Memory, overParams.Threads))
 	}
 	if len(current) > 0 {
 		warnings = append(warnings, encryptedWarning(label, current))
@@ -272,13 +309,31 @@ func checkRemoteCiphertext(cfg config.Config, record string) (warnings []string,
 
 // foreignEraError describes ciphertext this build cannot read. A file that holds
 // both foreign-era and current-era values is reported as mixed, since that is
-// the more specific breakage: no single era rule can serve it.
+// the more specific breakage: no single era rule can serve it. Every distinct
+// foreign prefix is named, so a file spanning more than one past era says so.
 func foreignEraError(label string, foreign []encRef, mixed bool) error {
-	prefix := crypto.ForeignEncPrefix(foreign[0].value)
+	prefixes := foreignPrefixes(foreign)
 	if mixed {
-		return fmt.Errorf("%s: mixes ciphertext eras: %s carries %s beside current-era enc:v3 values; re-encrypt every value with this enver build", label, joinRefs(foreign, false), prefix)
+		return fmt.Errorf("%s: mixes ciphertext eras: %s carries %s beside current-era enc:v3 values; re-encrypt every value with this enver build", label, joinRefs(foreign, false), prefixes)
 	}
-	return fmt.Errorf("%s: %s carries %s, which this enver build cannot read; remote content must carry current-era enc:v3 values", label, joinRefs(foreign, false), prefix)
+	return fmt.Errorf("%s: %s carries %s, which this enver build cannot read; remote content must carry current-era enc:v3 values", label, joinRefs(foreign, false), prefixes)
+}
+
+// foreignPrefixes renders the distinct enc-family prefixes found in sorted
+// order.
+func foreignPrefixes(foreign []encRef) string {
+	seen := map[string]struct{}{}
+	var prefixes []string
+	for _, ref := range foreign {
+		prefix := crypto.ForeignEncPrefix(ref.value)
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+	}
+	slices.Sort(prefixes)
+	return strings.Join(prefixes, ", ")
 }
 
 // encryptedWarning reports the current-era values the gate cannot decrypt and
@@ -361,14 +416,18 @@ func passthroughWarnings(cfg config.Config, opts GateOpts) []string {
 	var warnings []string
 	for _, name := range cfg.ProfileNames() {
 		for _, target := range cfg.Profiles[name].Extends {
-			if _, ok := defined[target]; ok {
+			if _, ok := inFileEdge(target, opts.Record, defined, opts.NoPrefix); ok {
 				continue
 			}
 			if _, ok := seen[target]; ok {
 				continue
 			}
 			seen[target] = struct{}{}
-			warnings = append(warnings, fmt.Sprintf("%s: profile %s extends %s, which the remote does not define; %s", label, quoteName(name), quoteName(target), bindDescription(target, opts.Merged)))
+			binding := bindDescription(target, opts.Merged)
+			if ownRecordTarget(target, opts.Record, opts.NoPrefix) {
+				binding = "it is currently unresolvable: the remote's own prefix names no profile the file defines"
+			}
+			warnings = append(warnings, fmt.Sprintf("%s: profile %s extends %s, which the remote does not define; %s", label, quoteName(name), quoteName(target), binding))
 		}
 	}
 	return warnings
@@ -423,11 +482,16 @@ func gateLabel(record string) string {
 
 // quoteName renders an attacker-authored name for a message: quoted, so control
 // characters cannot reach the terminal raw, and bounded, so a long name cannot
-// flood the line it lands on.
+// flood the line it lands on. The bound falls back to a rune boundary, so a
+// truncated name never renders its split rune as escaped invalid bytes.
 func quoteName(name string) string {
 	const maxLen = 48
 	if len(name) > maxLen {
-		name = name[:maxLen] + "..."
+		cut := maxLen
+		for cut > 0 && !utf8.RuneStart(name[cut]) {
+			cut--
+		}
+		name = name[:cut] + "..."
 	}
 	return fmt.Sprintf("%q", name)
 }
