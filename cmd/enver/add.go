@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)?$`)
 
 func validateProfileName(name string) error {
 	if !profileNameRe.MatchString(name) {
@@ -36,7 +36,7 @@ func promptProfileName(title string, input func(string) (string, error)) (string
 		}
 		n = strings.TrimSpace(n)
 		if err := validateProfileName(n); err != nil {
-			fmt.Println("  invalid: use letters, digits, '-' or '_'; must start with a letter or digit")
+			fmt.Println(`  invalid: use letters, digits, '-' or '_', with at most one '/' splitting name/remote-profile; each segment must start with a letter or digit`)
 			continue
 		}
 		return n, true
