@@ -512,7 +512,7 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 			cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 		}
 	}
-	cfg.Warnings = append(cfg.Warnings, remoteWarnings(cfg.Remotes)...)
+	cfg.Warnings = remoteWarnings(cfg.Remotes)
 	return cfg, nil
 }
 

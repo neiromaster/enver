@@ -46,6 +46,20 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+// Warnings describe the view a config was loaded as, so a fold does not carry
+// them into a different view: LoadMerged computes the merged view's own after
+// every fold.
+func TestMergeDropsWarnings(t *testing.T) {
+	base := Config{Warnings: []string{`remote "llm": content was fetched from elsewhere`}}
+	over := Config{Warnings: []string{`remote "other": content was fetched from elsewhere`}}
+	if got := Merge(base, over, LayerGlobal, LayerLocal).Warnings; got != nil {
+		t.Fatalf("merged warnings = %q, want none", got)
+	}
+	if len(base.Warnings) != 1 {
+		t.Fatalf("base warnings mutated: %q", base.Warnings)
+	}
+}
+
 func TestMergeExtends(t *testing.T) {
 	cases := []struct {
 		name       string

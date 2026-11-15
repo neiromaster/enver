@@ -79,9 +79,10 @@ func remoteStatePath(name string) string {
 
 // ReadRemoteState reads the fetch provenance recorded for name. ok is false when
 // no state can be trusted: the remote was never pulled, the sidecar is
-// unreadable, or name falls outside the record-name rule. All three leave the
-// content's provenance unknown, which the load-time check reports as content
-// due for a re-pull rather than as content whose source is verified.
+// unreadable or records no source URL, or name falls outside the record-name
+// rule. All of those leave the content's provenance unknown, which the load-time
+// check reports as content due for a re-pull rather than as content whose source
+// is verified.
 func ReadRemoteState(name string) (RemoteState, bool) {
 	if !ValidRecordName(name) {
 		return RemoteState{}, false
@@ -94,6 +95,9 @@ func ReadRemoteState(name string) (RemoteState, bool) {
 	if err := yaml.Unmarshal(data, &st); err != nil {
 		return RemoteState{}, false
 	}
+	if st.URL == "" {
+		return RemoteState{}, false
+	}
 	return st, true
 }
 
@@ -103,7 +107,7 @@ func ReadRemoteState(name string) (RemoteState, bool) {
 // one.
 func WriteRemoteState(name string, st RemoteState) error {
 	if !ValidRecordName(name) {
-		return fmt.Errorf("remote state: %q is not a record name", name)
+		return fmt.Errorf("remote %q: not a valid record name", name)
 	}
 	data, err := yaml.Marshal(st)
 	if err != nil {
@@ -111,6 +115,46 @@ func WriteRemoteState(name string, st RemoteState) error {
 	}
 	if err := writeFileAtomic(remoteStatePath(name), data); err != nil {
 		return fmt.Errorf("remote %q: write state: %w", name, err)
+	}
+	return nil
+}
+
+// WriteRemoteContent replaces name's pristine content with data, creating the
+// remotes directory. The file is replaced whole through a temp file and a
+// rename, so a pull that dies mid-write leaves the previous content, never a
+// truncated one.
+func WriteRemoteContent(name string, data []byte) error {
+	if !ValidRecordName(name) {
+		return fmt.Errorf("remote %q: not a valid record name", name)
+	}
+	if err := writeFileAtomic(RemoteContentPath(name), data); err != nil {
+		return fmt.Errorf("remote %q: write content: %w", name, err)
+	}
+	return nil
+}
+
+// RemoveRemoteContent deletes name's stored content. Content already absent is
+// not an error: the call reports that no content is left, which is what a pull
+// dropping a record's last declaration wants.
+func RemoveRemoteContent(name string) error {
+	return removeRemoteFile(name, RemoteContentPath(name), "content")
+}
+
+// RemoveRemoteState deletes name's state sidecar, with the same absent-is-done
+// contract as RemoveRemoteContent.
+func RemoveRemoteState(name string) error {
+	return removeRemoteFile(name, remoteStatePath(name), "state")
+}
+
+// removeRemoteFile deletes one of name's remote files, treating an already
+// absent file as done. kind names the file in the error, since the two callers
+// differ only in which one it is.
+func removeRemoteFile(name, path, kind string) error {
+	if !ValidRecordName(name) {
+		return fmt.Errorf("remote %q: not a valid record name", name)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remote %q: remove %s: %w", name, kind, err)
 	}
 	return nil
 }
@@ -147,6 +191,10 @@ func remoteWarnings(records map[string]RemoteRecord) []string {
 	var out []string
 	for _, name := range slices.Sorted(maps.Keys(records)) {
 		if _, err := os.Stat(RemoteContentPath(name)); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			out = append(out, fmt.Sprintf("remote %q: stored content cannot be inspected (%v); run \"enver pull %s\" to re-fetch it", name, err, name))
 			continue
 		}
 		url, ref, err := source.ResolveRecord(records[name].URL, records[name].Ref)

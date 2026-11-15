@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,85 @@ func TestRemoteStateRoundtrip(t *testing.T) {
 	}
 }
 
+// A sidecar that parses but names no source is not state: trusting it would
+// report content as fetched from nowhere.
+func TestRemoteStateWithoutSourceIsNotState(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"empty file", ""},
+		{"empty mapping", "{}\n"},
+		{"ref only", "ref: v2\n"},
+		{"empty url", "url: \"\"\nref: v2\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			defer remotesDirIn(dir)()
+			if err := os.WriteFile(filepath.Join(dir, "llm.meta"), []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := ReadRemoteState("llm"); ok {
+				t.Fatalf("ReadRemoteState trusted a sidecar holding %q", tc.body)
+			}
+		})
+	}
+}
+
+// The exported content and state writers are all a pull needs, so internal/app
+// never re-derives the file names or the atomic-write idiom.
+func TestRemoteContentWriteAndRemoval(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "remotes")
+	defer remotesDirIn(dir)()
+
+	content := "profiles:\n  base:\n    env:\n      K: pulled\n"
+	if err := WriteRemoteContent("llm", []byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "llm.yaml"))
+	if err != nil {
+		t.Fatalf("content not written where the remotes dir promises it: %v", err)
+	}
+	if string(got) != content {
+		t.Fatalf("content = %q, want %q", got, content)
+	}
+
+	st := RemoteState{URL: "https://example.com/llm.yaml", Ref: "v2"}
+	if err := WriteRemoteState("llm", st); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveRemoteContent("llm"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "llm.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("content survived removal: %v", err)
+	}
+	if err := RemoveRemoteContent("llm"); err != nil {
+		t.Fatalf("removing absent content must be done, not an error: %v", err)
+	}
+
+	if err := RemoveRemoteState("llm"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadRemoteState("llm"); ok {
+		t.Fatal("state survived removal")
+	}
+	if err := RemoveRemoteState("llm"); err != nil {
+		t.Fatalf("removing absent state must be done, not an error: %v", err)
+	}
+
+	for _, name := range []string{"", "../escape", "a/b"} {
+		if err := WriteRemoteContent(name, nil); err == nil {
+			t.Errorf("WriteRemoteContent(%q) accepted an unusable record name", name)
+		}
+		if err := RemoveRemoteContent(name); err == nil {
+			t.Errorf("RemoveRemoteContent(%q) accepted an unusable record name", name)
+		}
+		if err := RemoveRemoteState(name); err == nil {
+			t.Errorf("RemoveRemoteState(%q) accepted an unusable record name", name)
+		}
+	}
+}
+
 // A record name that escapes the remotes directory never reaches the filesystem:
 // the writers validate it, and a reader facing such a name reports no state.
 func TestRemoteStateRefusesUnsafeName(t *testing.T) {
@@ -193,6 +273,13 @@ func TestDivergenceWarning(t *testing.T) {
 			record:  "remotes:\n  llm:\n    url: https://example.com/c.yaml\n",
 			content: true,
 			want:    []string{"llm", "https://example.com/c.yaml", "enver pull llm"},
+		},
+		{
+			name:    "sidecar without a source URL counts as no pull state",
+			record:  "remotes:\n  llm:\n    url: https://example.com/c.yaml\n",
+			content: true,
+			state:   &RemoteState{},
+			want:    []string{"no pull state to compare", "https://example.com/c.yaml", "enver pull llm"},
 		},
 		{
 			name:   "state without content has nothing to disagree with",
@@ -267,5 +354,43 @@ func TestDivergenceWarning(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A stat failure other than not-exist must not silently disable the check: the
+// content may be there and unverifiable, so the load warns. A remotes dir that
+// is a regular file makes the content path stat fail with ENOTDIR — a
+// permission failure takes the same branch.
+func TestDivergenceUninspectableContentWarns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a path component that is a file maps to not-exist on Windows")
+	}
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	remotes := filepath.Join(t.TempDir(), "remotes")
+	if err := os.WriteFile(remotes, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer remotesDirIn(remotes)()
+
+	if err := os.MkdirAll(filepath.Join(xdg, "enver"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := "remotes:\n  llm:\n    url: https://example.com/c.yaml\n"
+	if err := os.WriteFile(filepath.Join(xdg, "enver", "config.yaml"), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadMerged("", false)
+	if err != nil {
+		t.Fatalf("LoadMerged err = %v, want a warning, not an error", err)
+	}
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one", cfg.Warnings)
+	}
+	for _, want := range []string{"cannot be inspected", "enver pull llm"} {
+		if !strings.Contains(cfg.Warnings[0], want) {
+			t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+		}
 	}
 }
