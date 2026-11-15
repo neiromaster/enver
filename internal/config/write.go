@@ -2,11 +2,14 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/neiromaster/enver/internal/envname"
+	"github.com/neiromaster/enver/internal/remote/source"
 	"gopkg.in/yaml.v3"
 )
 
@@ -126,6 +129,113 @@ func writePath(path string, out []byte) error {
 		}
 	}
 	return os.WriteFile(path, out, 0o644)
+}
+
+// WriteRemotes replaces the config file's remotes: section wholesale: records
+// absent from remotes are removed, the rest are written in sorted name order,
+// and every other section, comment, and key of the file is left as it stands. An
+// empty map removes the section. The write goes through a temp file and a
+// rename, so a pull that dies mid-write leaves the previous section.
+//
+// Every record is validated first, since the section is what a later pull acts
+// on: a name a pull could never use, two names differing only in case (they name
+// one file on a case-insensitive filesystem), a name reserved on Windows, or a
+// source the resolver cannot read would otherwise land in the config and only
+// fail on the next pull.
+func WriteRemotes(path string, remotes map[string]RemoteRecord) error {
+	if err := ValidateRemotes(remotes); err != nil {
+		return err
+	}
+	root, err := loadOrInitRoot(path)
+	if err != nil {
+		return err
+	}
+	body := root.Content[0]
+	if len(remotes) == 0 {
+		removeKey(body, "remotes")
+	} else {
+		section := ensureMappingEntry(body, "remotes")
+		section.Content = nil
+		for _, name := range slices.Sorted(maps.Keys(remotes)) {
+			section.Content = append(section.Content, remoteEntry(name, remotes[name])...)
+		}
+	}
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, out, 0o644)
+}
+
+// ValidateRemotes rejects a record set the pull and load paths could not use,
+// with every message naming the record it refuses. It is the write-side twin of
+// the load checks, run before anything is written so a bad set leaves the config
+// untouched.
+func ValidateRemotes(remotes map[string]RemoteRecord) error {
+	seen := make(map[string]string, len(remotes))
+	for _, name := range slices.Sorted(maps.Keys(remotes)) {
+		if !ValidRecordName(name) {
+			return fmt.Errorf("remote name %q is not a valid record name (want [A-Za-z0-9][A-Za-z0-9_-]*)", name)
+		}
+		if reservedDeviceName(name) {
+			return fmt.Errorf("remote name %q is a reserved Windows device name; a remote name becomes a file name", name)
+		}
+		folded := strings.ToLower(name)
+		if other, ok := seen[folded]; ok {
+			return fmt.Errorf("remote names %q and %q differ only in case; a remote name becomes a file name, and the filesystem may not tell them apart", other, name)
+		}
+		seen[folded] = name
+		rec := remotes[name]
+		if rec.URL == "" {
+			return fmt.Errorf("remote %q: url is required", name)
+		}
+		if _, _, err := source.ResolveRecord(rec.URL, rec.Ref); err != nil {
+			return fmt.Errorf("remote %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// reservedDeviceName reports a name Windows reserves for a device whatever
+// directory it sits in, so a content file of that name cannot be created. The
+// record-name rule forbids a dot, so the extension forms cannot occur.
+func reservedDeviceName(name string) bool {
+	switch strings.ToLower(name) {
+	case "con", "prn", "aux", "nul":
+		return true
+	}
+	for _, prefix := range []string{"com", "lpt"} {
+		rest, ok := strings.CutPrefix(strings.ToLower(name), prefix)
+		if ok && len(rest) == 1 && rest[0] >= '1' && rest[0] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+// remoteEntry builds the key and mapping nodes for one record.
+func remoteEntry(name string, rec RemoteRecord) []*yaml.Node {
+	entry := &yaml.Node{Kind: yaml.MappingNode}
+	entry.Content = append(entry.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "url", Tag: "!!str"},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: rec.URL, Tag: "!!str"},
+	)
+	if rec.Ref != "" {
+		entry.Content = append(entry.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "ref", Tag: "!!str"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: rec.Ref, Tag: "!!str"},
+		)
+	}
+	if rec.NoPrefix {
+		entry.Content = append(entry.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "no_prefix", Tag: "!!str"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "true", Tag: "!!bool"},
+		)
+	}
+	return []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: name, Tag: "!!str"},
+		entry,
+	}
 }
 
 // DeleteProfile removes the named profile from the file. Missing file or profile

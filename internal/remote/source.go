@@ -18,3 +18,10 @@ func ParseSource(raw string) (string, string, error) {
 func ResolveRecord(rec config.RemoteRecord) (string, string, error) {
 	return source.ResolveRecord(rec.URL, rec.Ref)
 }
+
+// SplitRef splits a source spelling into the part a record stores and the ref
+// spelled inline in it; source.SplitRef documents why the stored part keeps the
+// spelling rather than the resolved URL.
+func SplitRef(raw string) (body, ref string, err error) {
+	return source.SplitRef(raw)
+}

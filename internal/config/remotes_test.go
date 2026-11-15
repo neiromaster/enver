@@ -13,7 +13,7 @@ import (
 
 func TestRemotesRecordMerge(t *testing.T) {
 	base := Config{Remotes: map[string]RemoteRecord{
-		"llm":    {URL: "github:someone/llm-profiles", Ref: "v1"},
+		"llm":    {URL: "github:someone/llm-profiles", Ref: "v1", NoPrefix: true},
 		"legacy": {URL: "https://example.com/old.yaml"},
 	}}
 	over := Config{Remotes: map[string]RemoteRecord{
@@ -26,7 +26,7 @@ func TestRemotesRecordMerge(t *testing.T) {
 	if r := got.Remotes["legacy"]; r != (RemoteRecord{URL: "https://example.com/old.yaml"}) {
 		t.Fatalf("merged legacy = %+v, want the global-only record kept", r)
 	}
-	if base.Remotes["llm"].Ref != "v1" {
+	if base.Remotes["llm"].Ref != "v1" || !base.Remotes["llm"].NoPrefix {
 		t.Fatalf("base remotes mutated: %+v", base.Remotes)
 	}
 	got.Remotes["legacy"] = RemoteRecord{URL: "https://example.com/new.yaml"}
@@ -35,12 +35,12 @@ func TestRemotesRecordMerge(t *testing.T) {
 	}
 
 	// The record is the unit: an overriding record with no ref clears the
-	// inherited ref rather than inheriting it.
+	// inherited ref rather than inheriting it, and the pull mode with it.
 	partial := Merge(base, Config{Remotes: map[string]RemoteRecord{
 		"llm": {URL: "https://example.com/llm.yaml"},
 	}}, LayerGlobal, LayerLocal)
 	if r := partial.Remotes["llm"]; r != (RemoteRecord{URL: "https://example.com/llm.yaml"}) {
-		t.Fatalf("merged llm = %+v, want no inherited ref", r)
+		t.Fatalf("merged llm = %+v, want no inherited ref or prefix mode", r)
 	}
 
 	if r := Merge(Config{}, Config{}, LayerGlobal, LayerLocal).Remotes; r != nil {
@@ -54,6 +54,9 @@ func TestRemotesYAMLParse(t *testing.T) {
 		"  llm:\n" +
 		"    url: github:someone/llm-profiles\n" +
 		"    ref: v2\n" +
+		"  bare:\n" +
+		"    url: https://example.com/team.yaml\n" +
+		"    no_prefix: true\n" +
 		"  plain:\n" +
 		"    url: https://example.com/profiles.yaml\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -65,6 +68,9 @@ func TestRemotesYAMLParse(t *testing.T) {
 	}
 	if r := cfg.Remotes["llm"]; r != (RemoteRecord{URL: "github:someone/llm-profiles", Ref: "v2"}) {
 		t.Fatalf("llm = %+v, want url and ref", r)
+	}
+	if r := cfg.Remotes["bare"]; r != (RemoteRecord{URL: "https://example.com/team.yaml", NoPrefix: true}) {
+		t.Fatalf("bare = %+v, want the pull mode persisted", r)
 	}
 	if r := cfg.Remotes["plain"]; r != (RemoteRecord{URL: "https://example.com/profiles.yaml"}) {
 		t.Fatalf("plain = %+v, want url with an empty ref", r)
@@ -122,7 +128,7 @@ func TestRemoteStateRoundtrip(t *testing.T) {
 	if err := WriteRemoteState("llm", st); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "llm.meta")); err != nil {
+	if _, err := os.Stat(RemoteStatePath("llm")); err != nil {
 		t.Fatalf("sidecar not written next to the content: %v", err)
 	}
 	got, ok := ReadRemoteState("llm")
@@ -147,7 +153,7 @@ func TestRemoteStateWithoutSourceIsNotState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			defer remotesDirIn(dir)()
-			if err := os.WriteFile(filepath.Join(dir, "llm.meta"), []byte(tc.body), 0o644); err != nil {
+			if err := os.WriteFile(RemoteStatePath("llm"), []byte(tc.body), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if _, ok := ReadRemoteState("llm"); ok {
@@ -438,7 +444,7 @@ profiles:
     env:
       OWN: x
 `)
-		proj := Project(cfg, "llm")
+		proj := Project(cfg, "llm", false)
 
 		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"llm/mine", "llm/ollama", "llm/qwen"}; !slices.Equal(got, want) {
 			t.Fatalf("projected profiles = %v, want %v", got, want)
@@ -497,7 +503,7 @@ profiles:
 			},
 			"ol\x1blama2": {Env: map[string]string{"K": "v"}},
 		}}
-		proj := Project(content, "llm")
+		proj := Project(content, "llm", false)
 
 		p, ok := proj.Profiles["llm/ollama"]
 		if !ok {
@@ -527,6 +533,42 @@ profiles:
 		}
 	})
 
+	t.Run("no prefix keeps upstream names bare", func(t *testing.T) {
+		cfg := loadProjectFixture(t, `default: ollama
+profiles:
+  ollama:
+    env:
+      OLLAMA_HOST: http://localhost:11434
+  qwen:
+    extends: ollama
+    env:
+      MODEL: qwen2.5-coder:32b
+  mine:
+    extends: [provider/base, team/other]
+    env:
+      OWN: x
+`)
+		proj := Project(cfg, "llm", true)
+
+		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"mine", "ollama", "qwen"}; !slices.Equal(got, want) {
+			t.Fatalf("projected profiles = %v, want bare upstream names %v", got, want)
+		}
+		if got, want := proj.Profiles["qwen"].Extends, (Extends{"ollama"}); !slices.Equal(got, want) {
+			t.Fatalf("qwen extends = %v, want %v", got, want)
+		}
+		if got, want := proj.Profiles["mine"].Extends, (Extends{"provider/base", "team/other"}); !slices.Equal(got, want) {
+			t.Fatalf("mine extends = %v, want %v", got, want)
+		}
+		// Provenance is the record either way: a bare-name pull still came from
+		// remote llm, and masking/fence rules key off the layer.
+		if got := proj.ProfileLayer["ollama"]; got != "remote:llm" {
+			t.Fatalf("ollama layer = %q, want remote:llm", got)
+		}
+		if proj.Default != "" || len(proj.Remotes) != 0 {
+			t.Fatalf("projected default/remotes = %q/%v, want both dropped", proj.Default, proj.Remotes)
+		}
+	})
+
 	t.Run("names that clean to one profile resolve deterministically", func(t *testing.T) {
 		// Two upstream names differing only by a control character clean to one
 		// projected name. The fold must not depend on map iteration order, so the
@@ -536,10 +578,64 @@ profiles:
 			"shared":     {Env: map[string]string{"K": "honest"}},
 		}}
 		for range 16 {
-			proj := Project(content, "llm")
+			proj := Project(content, "llm", false)
 			if got, want := proj.Profiles["llm/shared"].Env["K"], "honest"; got != want {
 				t.Fatalf("llm/shared K = %q, want %q (the later sorted name must win every run)", got, want)
 			}
 		}
 	})
+}
+
+// Two bare-name remotes defining one profile name fold in sorted record order,
+// so the merged view is the same on every run and every machine. The winner is
+// never silent: the load reports the collision, since the losing record's
+// version of that profile is unreachable.
+func TestNoPrefixFoldDeterminism(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	remotes := t.TempDir()
+	defer remotesDirIn(remotes)()
+
+	if err := os.MkdirAll(filepath.Join(xdg, "enver"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := "remotes:\n" +
+		"  zeta:\n    url: https://example.com/zeta.yaml\n    no_prefix: true\n" +
+		"  alpha:\n    url: https://example.com/alpha.yaml\n    no_prefix: true\n"
+	if err := os.WriteFile(filepath.Join(xdg, "enver", "config.yaml"), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"alpha": "from-alpha", "zeta": "from-zeta"} {
+		body := "profiles:\n  base:\n    env:\n      K: " + value + "\n"
+		if err := os.WriteFile(filepath.Join(remotes, name+".yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// A matching sidecar keeps the fixture to one warning: the collision.
+		if err := WriteRemoteState(name, RemoteState{URL: "https://example.com/" + name + ".yaml"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for range 16 {
+		cfg, err := LoadMerged("", false)
+		if err != nil {
+			t.Fatalf("LoadMerged err = %v", err)
+		}
+		if got, want := cfg.Profiles["base"].Env["K"], "from-zeta"; got != want {
+			t.Fatalf("base.K = %q, want %q (the later record in sorted order wins)", got, want)
+		}
+		// The layer is the winning record, so provenance names what actually
+		// supplied the value rather than merely "a remote".
+		if got, want := cfg.ProfileLayer["base"], "remote:zeta"; got != want {
+			t.Fatalf("base layer = %q, want %q", got, want)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the collision", cfg.Warnings)
+		}
+		for _, want := range []string{`"zeta"`, `"alpha"`, `"base"`, "sorted", "wins"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	}
 }

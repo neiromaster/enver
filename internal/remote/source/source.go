@@ -61,6 +61,20 @@ func ResolveRecord(raw, ref string) (string, string, error) {
 	return src.resolve(ref)
 }
 
+// SplitRef separates a source spelling into the part a record stores and the ref
+// spelled inline in it. The stored part keeps the form the user wrote — a
+// github record reads github:owner/repo, not the resolved raw URL — so editing
+// the record's ref re-targets the fetch instead of leaving one ref frozen inside
+// a URL. Splitting and re-resolving yields the same fetch as parsing the
+// original spelling.
+func SplitRef(raw string) (body, ref string, err error) {
+	src, err := parseSource(raw)
+	if err != nil {
+		return "", "", err
+	}
+	return src.stored, src.ref, nil
+}
+
 // sourceKind is the form a source was written in. The zero value is no form, so
 // a source that was never parsed cannot resolve into a github URL.
 type sourceKind int
@@ -80,6 +94,9 @@ type source struct {
 	repo  string   // githubSource
 	path  []string // githubSource: the file path inside the repo
 	ref   string   // spelled inline in raw, "" when absent
+	// stored is the spelling a record keeps: the source as written with only the
+	// inline ref peeled off, never the resolved URL.
+	stored string
 }
 
 func parseSource(raw string) (source, error) {
@@ -120,7 +137,7 @@ func parseGitHubSource(raw, rest string) (source, error) {
 	if len(path) == 0 {
 		path = []string{githubDefaultPath}
 	}
-	return source{raw: raw, kind: githubSource, owner: segments[0], repo: segments[1], path: path, ref: ref}, nil
+	return source{raw: raw, kind: githubSource, owner: segments[0], repo: segments[1], path: path, ref: ref, stored: "github:" + body}, nil
 }
 
 func parseURLSource(raw string) (source, error) {
@@ -135,7 +152,7 @@ func parseURLSource(raw string) (source, error) {
 	if u.Host == "" {
 		return source{}, fmt.Errorf("source %q has no host", raw)
 	}
-	return source{raw: raw, kind: urlSource, base: base, ref: ref}, nil
+	return source{raw: raw, kind: urlSource, base: base, ref: ref, stored: base}, nil
 }
 
 // resolve fills the defaults and returns the URL to fetch with the ref it
