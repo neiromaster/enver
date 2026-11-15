@@ -7,6 +7,17 @@
 #   enver encrypt       # encrypts secret-looking values (enc:v3:argon2id:...) in this file
 # Decryption at runtime is transparent: `enver x <profile> -- <cmd>` just works.
 
+# Remote configs: a config someone else publishes, fetched on demand and read
+# offline afterwards. Register one with `enver pull <source> --as <name>` (this
+# section is what that writes), or write it by hand. Its profiles load as
+# <name>/<profile>; --no-prefix keeps their bare upstream names instead. Patch a
+# projected profile with a profile of the same name below (or in ./.enver.yaml):
+#
+# remotes:
+#   llm:
+#     url: github:someone/llm-profiles   # or https://example.com/enver.yaml
+#     ref: v2                            # optional; defaults to HEAD
+
 default: anth
 
 profiles:
@@ -48,18 +59,8 @@ profiles:
       DATABASE_URL: postgres://user:pass@db.internal:5432/app
       LOG_LEVEL: info
 
-# Remote configs: a config someone else publishes, fetched on demand and read
-# offline afterwards. Register one with `enver pull <source> --as <name>` (this
-# section is what that writes), or write it by hand. Its profiles load as
-# <name>/<profile>; --no-prefix keeps their bare upstream names instead. Patch a
-# projected profile with your own profile of the same name in a layer above:
-#
-# remotes:
-#   llm:
-#     url: github:someone/llm-profiles   # or https://example.com/enver.yaml
-#     ref: v2                            # optional; defaults to HEAD
-#
-# profiles:
-#   llm/ollama:
-#     env:
-#       OLLAMA_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxx
+  # A patch of a profile the `llm` remote above provides: this copy overrides
+  # those keys while the remote's content stays the base.
+  # llm/ollama:
+  #   env:
+  #     OLLAMA_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxx
