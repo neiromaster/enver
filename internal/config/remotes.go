@@ -189,39 +189,49 @@ func remoteLayer(name string) string {
 }
 
 // loadRemoteContent parses a record's stored content the way a pull landed it.
-// A content file that is absent — or whose path cannot be read at all — is no
-// content: the load contributes nothing rather than failing, and the divergence
-// check reports a stored file it cannot inspect. Content that is present but
-// unparseable or invalid is an error, exactly as it would be for a user layer:
-// silently resolving without the user's declared remote would hide the breakage.
-func loadRemoteContent(name string) (Config, bool, error) {
+// ok is false when there is nothing to project. A content path that cannot be
+// reached at all — no file, or a component that is not a directory — is no
+// content, silently: the divergence check already reports a stored file it
+// cannot inspect. A file that is present but unreadable is no content either,
+// but it must not vanish silently, so it comes back as an advisory. Content that
+// is present but unparseable or invalid is an error, exactly as it would be for
+// a user layer: resolving without the user's declared remote would hide the
+// breakage.
+func loadRemoteContent(name string) (content Config, ok bool, warning string, err error) {
 	path := RemoteContentPath(name)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, false, nil
+		if _, statErr := os.Stat(path); statErr != nil {
+			return Config{}, false, "", nil
+		}
+		return Config{}, false, fmt.Sprintf("remote %q: stored content cannot be read (%v), so none of its profiles are loaded; fix its permissions or run \"enver pull %s\" to re-fetch it", name, err, name), nil
 	}
 	cfg, err := parseConfig(path, data)
 	if err != nil {
-		return Config{}, false, err
+		return Config{}, false, "", err
 	}
-	return cfg, true, nil
+	return cfg, true, "", nil
 }
 
 // remoteBase folds the stored content of every record that has some into the
 // bottom layer of the merged view. Each content file is projected through
-// Project and the projections stack in sorted record-name order, so two records
-// defining one profile name resolve the same way on every run — the later name
-// wins, as any later layer does — and every entry carries the remote that
-// supplied it. A record with no content contributes nothing. The returned label
-// names the topmost remote folded, the base label the next fold needs; it is
-// empty when no remote contributed, leaving that label for the caller to pick.
-func remoteBase(records map[string]RemoteRecord) (Config, string, error) {
+// Project and the projections stack in sorted record-name order, so the fold is
+// the same on every run and every entry carries the remote that supplied it. A
+// record with no content contributes nothing. The returned label names the
+// topmost remote folded, the base label the next fold needs; it is empty when no
+// remote contributed, leaving that label for the caller to pick. The warnings
+// cover content that is on disk but unreadable, which resolution had to skip.
+func remoteBase(records map[string]RemoteRecord) (Config, string, []string, error) {
 	var base Config
+	var warnings []string
 	label := ""
 	for _, name := range slices.Sorted(maps.Keys(records)) {
-		content, ok, err := loadRemoteContent(name)
+		content, ok, warning, err := loadRemoteContent(name)
 		if err != nil {
-			return Config{}, "", err
+			return Config{}, "", nil, err
+		}
+		if warning != "" {
+			warnings = append(warnings, warning)
 		}
 		if !ok {
 			continue
@@ -234,7 +244,7 @@ func remoteBase(records map[string]RemoteRecord) (Config, string, error) {
 		base = Merge(base, Project(content, name), label, remoteLayer(name))
 		label = remoteLayer(name)
 	}
-	return base, label, nil
+	return base, label, warnings, nil
 }
 
 // orphanWarnings reports stored content no merged record declares: the file
@@ -272,14 +282,17 @@ func orphanWarnings(records map[string]RemoteRecord) []string {
 // author must not own are dropped: default, because which profile is default is
 // the user's decision, and remotes, because a remote can never register a
 // fetch. Control characters are stripped from every string the content supplies
-// — profile names, extends targets, env keys, values, comments — since they
-// reach terminals, error messages and completion candidates; newlines stay,
-// because a multi-line value and a multi-line comment are structure the format
-// supports. Secret marks ride through unchanged: a mark is not a secret, and a
-// patch written over a marked remote value must stay masked and remain an
-// encrypt candidate. Every projected profile is stamped with the remote:<name>
-// layer. Only what the file declares is projected — merge artifacts (Origins,
-// UnsetOrigins, Carried) are not carried — and the input is left untouched.
+// — profile names, extends targets, env keys, unset entries, values, comments —
+// since they reach terminals, error messages and completion candidates, where an
+// escape sequence or an embedded line break can rewrite what the user reads.
+// Only value and comment text keeps its newlines: a multi-line value and a
+// multi-line comment are structure the config and dotenv formats support, while
+// a name carrying one is a rendering hazard and never a legitimate name. Secret
+// marks ride through unchanged: a mark is not a secret, and a patch written over
+// a marked remote value must stay masked and remain an encrypt candidate. Every
+// projected profile is stamped with the remote:<name> layer. Only what the file
+// declares is projected — merge artifacts (Origins, UnsetOrigins, Carried) are
+// not carried — and the input is left untouched.
 func Project(c Config, name string) Config {
 	prefix := name + "/"
 	defined := make(map[string]bool, len(c.Profiles))
@@ -298,8 +311,8 @@ func Project(c Config, name string) Config {
 		out.Profiles[projected] = Profile{
 			Extends:  projectExtends(p.Extends, defined, prefix),
 			Unset:    Unsets(stripControlsAll(p.Unset)),
-			Env:      projectStrings(p.Env),
-			Comments: projectStrings(p.Comments),
+			Env:      projectEnv(p.Env),
+			Comments: projectComments(p.Comments),
 			Marked:   projectMarks(p.Marked),
 		}
 		out.ProfileLayer[projected] = remoteLayer(name)
@@ -339,25 +352,40 @@ func stripControlsAll(list []string) []string {
 	return out
 }
 
-// projectStrings rebuilds a keyed string map with control characters stripped
-// from its keys and values, keeping nil for an empty input.
-func projectStrings(m map[string]string) map[string]string {
+// projectEnv rebuilds an env map under its cleaned names: a key loses every
+// control character, since a name is an identifier, while a value keeps its
+// newlines, since a value is data. Sorted so two keys that clean to one name
+// resolve deterministically instead of by write order.
+func projectEnv(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[stripControls(k)] = stripControls(v)
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out[stripControls(k)] = stripControlsKeepLines(m[k])
 	}
 	return out
 }
 
-// projectMarks rebuilds a mark set under its stripped keys, keeping the nil
+// projectComments rebuilds a comment map: the key names the env key it
+// annotates and loses every control character, while the text keeps its lines.
+func projectComments(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out[stripControls(k)] = stripControlsKeepLines(m[k])
+	}
+	return out
+}
+
+// projectMarks rebuilds a mark set under its cleaned keys, keeping the nil
 // contract: no marks is nil, never an empty map.
 func projectMarks(m map[string]bool) map[string]bool {
 	var out map[string]bool
-	for k, v := range m {
-		if !v {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if !m[k] {
 			continue
 		}
 		if out == nil {
@@ -368,12 +396,23 @@ func projectMarks(m map[string]bool) map[string]bool {
 	return out
 }
 
-// stripControls removes every control character from s except the newline. A
-// remote is an untrusted author, and its strings reach terminals, error
-// messages and completion candidates, where an escape sequence or a carriage
-// return can rewrite what the user reads. Newlines survive because multi-line
-// values and comments are structure the config and dotenv formats support.
+// stripControls removes every control character from s, newlines included. A
+// remote is an untrusted author, and its names and targets reach terminals,
+// error messages and completion candidates, where an escape sequence or an
+// embedded line break can rewrite what the user reads.
 func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// stripControlsKeepLines is stripControls for text that is data rather than a
+// name: newlines survive, because a multi-line value and a multi-line comment
+// are structure the config and dotenv formats support.
+func stripControlsKeepLines(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r != '\n' && unicode.IsControl(r) {
 			return -1

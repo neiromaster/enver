@@ -511,9 +511,9 @@ func mergeExtends(base, add Extends) Extends {
 // remote's default, which is the user's decision to make.
 // Config.Warnings is filled last, with the advisories the merged view raises:
 // content pulled from a source the record no longer points at, content no
-// sidecar records, content whose record no longer resolves, and stored content
-// no record declares. Merge drops warnings by design, so nothing may assign
-// them before the fold is done.
+// sidecar records, content whose record no longer resolves, stored content that
+// cannot be read, and stored content no record declares. Merge drops warnings by
+// design, so nothing may assign them before the fold is done.
 func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	global, err := load(GlobalPath(globalOverride))
 	if err != nil {
@@ -533,7 +533,7 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	for _, overlay := range locals {
 		records = mergeRemotes(records, overlay.Remotes)
 	}
-	base, remoteBaseLabel, err := remoteBase(records)
+	base, remoteBaseLabel, skippedContent, err := remoteBase(records)
 	if err != nil {
 		return global, err
 	}
@@ -544,7 +544,7 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	for _, overlay := range locals {
 		cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 	}
-	cfg.Warnings = append(orphanWarnings(records), remoteWarnings(cfg.Remotes)...)
+	cfg.Warnings = slices.Concat(skippedContent, orphanWarnings(records), remoteWarnings(cfg.Remotes))
 	return cfg, nil
 }
 
