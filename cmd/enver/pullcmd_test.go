@@ -285,6 +285,71 @@ func TestPullCmdRemoveBothLayers(t *testing.T) {
 	})
 }
 
+func TestPullCmdRejectsRmConflicts(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\n")
+	writePullFile(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+	withPullFlags(t, nil)
+	pullRm = true
+
+	pullLocal, globalFlags.global = true, true
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want --rm --local -g to be rejected like any other pull", err)
+	}
+
+	pullLocal, globalFlags.global = false, false
+	pullAs = "other"
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "--as") {
+		t.Fatalf("err = %v, want --rm to reject --as", err)
+	}
+
+	for _, path := range []string{f.globalPath, f.localPath} {
+		if _, ok := pullRemotes(t, path)["llm"]; !ok {
+			t.Fatalf("a rejected --rm must not remove the declaration in %s", path)
+		}
+	}
+}
+
+// A removal must see every declaration, --no-local included: deleting the
+// content a project file still declares would blank its profiles.
+func TestPullCmdRemoveNoLocalSeesTheProjectFile(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\n")
+	writePullFile(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+	if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/local.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	withPullFlags(t, nil)
+	pullRm = true
+	globalFlags.noLocal = true
+	globalFlags.global = true
+
+	out, err := runPull(t, "llm")
+	if err != nil {
+		t.Fatalf("pull --rm --no-local -g: %v", err)
+	}
+	if _, ok := pullRemotes(t, f.globalPath)["llm"]; ok {
+		t.Fatal("the pinned global declaration must be removed")
+	}
+	if _, ok := pullRemotes(t, f.localPath)["llm"]; !ok {
+		t.Fatal("the local declaration must survive --no-local")
+	}
+	if _, err := os.Stat(config.RemoteContentPath("llm")); err != nil {
+		t.Fatalf("content must survive the surviving local declaration: %v", err)
+	}
+	if _, err := os.Stat(config.RemoteStatePath("llm")); err != nil {
+		t.Fatalf("sidecar must survive the surviving local declaration: %v", err)
+	}
+	if !strings.Contains(out, "local") {
+		t.Errorf("summary should name the surviving layer:\n%s", out)
+	}
+}
+
 func TestPullCmdRemoveNeedsName(t *testing.T) {
 	setNonInteractive(t)
 	newPullCmdFixture(t)

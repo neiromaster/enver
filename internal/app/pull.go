@@ -50,9 +50,9 @@ type PullOptions struct {
 // Pull registers a source under name in the target layer and fetches it. A name
 // the target already declares is re-registered: the summary prints the source it
 // pointed at and the one it points at now, and when user-layer patch profiles
-// under the prefix exist, the takeover warning is shown and confirmed first — a
-// re-point changes which source the user's credentials compose with, which is
-// exactly the moment that must not happen silently.
+// under the prefix exist, a changed source or pull mode is a takeover, shown and
+// confirmed first — either one changes which content the user's credentials
+// compose with, which is exactly the moment that must not happen silently.
 //
 // Nothing is written until the fetch and the gate both accept the content: a
 // refused upstream leaves the record, the stored content, and the sidecar as
@@ -215,9 +215,19 @@ func declaresRemote(cfg config.Config, name string) bool {
 // (the two would name one file on a case-insensitive filesystem), and a
 // registration in the global layer that the local layer already shadows, which
 // would fetch content the effective record never asks for.
+//
+// The validation covers the whole prospective section, not just the new record:
+// WriteRemotes rewrites the section and validates all of it, so a sibling record
+// that is already unusable would otherwise fail the write after the content and
+// the sidecar had landed, leaving artifacts for a record that never existed.
 func checkNewRecord(name string, rec config.RemoteRecord, opts PullOptions) error {
-	if err := config.ValidateRemotes(map[string]config.RemoteRecord{name: rec}); err != nil {
-		return err
+	next := maps.Clone(opts.Target.Remotes)
+	if next == nil {
+		next = map[string]config.RemoteRecord{}
+	}
+	next[name] = rec
+	if err := config.ValidateRemotes(next); err != nil {
+		return fmt.Errorf("the remotes section of the %s would not survive a rewrite: %w", layerName(opts.TargetIsGlobal), err)
 	}
 	for _, existing := range slices.Sorted(maps.Keys(opts.Merged.Remotes)) {
 		if existing != name && strings.EqualFold(existing, name) {
@@ -233,15 +243,18 @@ func checkNewRecord(name string, rec config.RemoteRecord, opts PullOptions) erro
 // confirmTakeover decides whether registering rec may proceed, and returns the
 // summary lines describing what changed. A re-registration that changes nothing
 // is silent; one that changes the source or the pull mode says so, and when
-// user-layer patch profiles sit under the prefix, the source change is a
-// takeover: it is confirmed (or accepted under Force) before anything is
-// fetched, so a declined takeover costs no network and no write.
+// user-layer patch profiles sit under the prefix, either change is a takeover:
+// it is confirmed (or accepted under Force) before anything is fetched, so a
+// declined takeover costs no network and no write. A mode change is as invasive
+// as a re-point, since the patches stop meeting the profiles they were written
+// against.
 func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (changes []string, proceed bool, err error) {
 	before, declared := opts.Merged.Remotes[name]
 	if !declared {
 		return nil, true, nil
 	}
-	if !sameSource(before, rec) {
+	sourceChanged := !sameSource(before, rec)
+	if sourceChanged {
 		changes = append(changes, fmt.Sprintf("source changed from %s to %s", recordSource(before), recordSource(rec)))
 	}
 	if before.NoPrefix != rec.NoPrefix {
@@ -251,10 +264,10 @@ func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (ch
 		return nil, true, nil
 	}
 	patches := patchProfiles(name, opts.Target, opts.Other)
-	if len(patches) == 0 || sameSource(before, rec) {
+	if len(patches) == 0 {
 		return changes, true, nil
 	}
-	warning := takeoverWarning(name, before, rec, patches)
+	warning := takeoverWarning(name, before, rec, patches, sourceChanged)
 	if opts.Force {
 		return append(changes, warning), true, nil
 	}
@@ -271,11 +284,20 @@ func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (ch
 	return append(changes, warning), true, nil
 }
 
-// takeoverWarning names the source the record now points at, the profiles that
-// will compose with it, and what the user is being asked to decide.
-func takeoverWarning(name string, before, after config.RemoteRecord, patches []string) string {
-	return fmt.Sprintf("remote %q now points at %s instead of %s; %s will now compose with content from that source, so review before trusting it with your credentials",
-		name, recordSource(after), recordSource(before), strings.Join(patches, ", "))
+// takeoverWarning names what the record now does differently, the profiles whose
+// meaning the change touches, and what the user is being asked to decide. A
+// mode change leaves the source alone, so its consequence is spelled out for
+// what actually happens: the patches stop meeting the profiles they were written
+// against.
+func takeoverWarning(name string, before, after config.RemoteRecord, patches []string, sourceChanged bool) string {
+	list := strings.Join(patches, ", ")
+	what := fmt.Sprintf("now points at %s instead of %s", recordSource(after), recordSource(before))
+	effect := list + " will now compose with content from that source"
+	if !sourceChanged {
+		what = fmt.Sprintf("now stores %s instead of %s", pullMode(after.NoPrefix), pullMode(before.NoPrefix))
+		effect = list + " will no longer patch the remote's profiles under the names they use"
+	}
+	return fmt.Sprintf("remote %q %s; %s, so review before trusting it with your credentials", name, what, effect)
 }
 
 func pullMode(noPrefix bool) string {
@@ -366,6 +388,12 @@ func (r pullResult) render() string {
 // provenance. The content and sidecar are written before any caller writes the
 // record, so a failed pull leaves the previous content, sidecar, and record set
 // untouched.
+//
+// Content goes first and the sidecar second: if the sidecar write fails, the new
+// content stays under the old provenance, which the load path reports as a
+// divergence, while the reverse order would leave a sidecar naming content that
+// is not there and nothing to compare. A failed write of either leaves the
+// record untouched, so the next pull repairs it.
 func pullRecord(name string, rec config.RemoteRecord, opts PullOptions) (pullResult, error) {
 	fetch := opts.Fetch
 	if fetch == nil {

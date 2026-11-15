@@ -331,6 +331,127 @@ func TestPullRepointTakeoverConfirm(t *testing.T) {
 			t.Fatalf("record = %+v, want re-pointed", rec)
 		}
 	})
+
+	// Flipping the pull mode is as invasive as a re-point: the patches stop
+	// meeting the profiles they were written against, so it is confirmed the same
+	// way.
+	t.Run("mode change prompts like a re-point", func(t *testing.T) {
+		f := setup(t)
+		before, _ := readOrMissing(t, config.RemoteContentPath("llm"))
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte("profiles:\n  ollama:\n    env:\n      OLLAMA_HOST: http://localhost:11434\n"), "", nil
+		})
+		opts.NoPrefix = true
+		var msg string
+		opts.Confirm = func(m string, def bool) (bool, error) {
+			msg = m
+			if def {
+				t.Error("the takeover prompt must default to no")
+			}
+			return true, nil
+		}
+
+		summary, err := Pull("https://example.com/old.yaml", "llm", opts)
+		if err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		for _, want := range []string{"llm/ollama", "now stores bare names instead of prefixed names", "will no longer patch", "review before trusting it with your credentials"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("confirm message misses %q: %q", want, msg)
+			}
+		}
+		if !strings.Contains(summary, "pull mode changed from prefixed names to bare names") {
+			t.Errorf("summary misses the mode change:\n%s", summary)
+		}
+		if after, _ := readOrMissing(t, config.RemoteContentPath("llm")); after == before {
+			t.Fatal("the accepted mode change must store the fetched content")
+		}
+		if rec := f.remotes(t, f.globalPath)["llm"]; !rec.NoPrefix {
+			t.Fatalf("record = %+v, want the new mode stored", rec)
+		}
+	})
+
+	t.Run("declined mode change writes nothing", func(t *testing.T) {
+		f := setup(t)
+		before, _ := readOrMissing(t, f.globalPath)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("a declined registration must not fetch")
+			return nil, "", nil
+		})
+		opts.NoPrefix = true
+		opts.Confirm = func(string, bool) (bool, error) { return false, nil }
+
+		summary, err := Pull("https://example.com/old.yaml", "llm", opts)
+		if err != nil {
+			t.Fatalf("declined confirm must not error: %v", err)
+		}
+		if summary != "" {
+			t.Errorf("declined confirm should print nothing, got %q", summary)
+		}
+		if after, _ := readOrMissing(t, f.globalPath); after != before {
+			t.Fatal("declined confirm must not rewrite the config")
+		}
+	})
+
+	t.Run("mode change without a confirm function errors naming force", func(t *testing.T) {
+		f := setup(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.NoPrefix = true
+		_, err := Pull("https://example.com/old.yaml", "llm", opts)
+		if err == nil || !strings.Contains(err.Error(), "--force") {
+			t.Fatalf("err = %v, want it to name --force", err)
+		}
+		if rec := f.remotes(t, f.globalPath)["llm"]; rec.NoPrefix {
+			t.Fatalf("record = %+v, want no write on the non-interactive path", rec)
+		}
+	})
+
+	t.Run("force accepts a mode change and keeps the warning", func(t *testing.T) {
+		f := setup(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.NoPrefix = true
+		opts.Force = true
+		opts.Confirm = func(string, bool) (bool, error) {
+			t.Error("--force must not prompt")
+			return false, nil
+		}
+		summary, err := Pull("https://example.com/old.yaml", "llm", opts)
+		if err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if !strings.Contains(summary, "will no longer patch") {
+			t.Errorf("forced mode change must still report the takeover:\n%s", summary)
+		}
+		if rec := f.remotes(t, f.globalPath)["llm"]; !rec.NoPrefix {
+			t.Fatalf("record = %+v, want the new mode stored", rec)
+		}
+	})
+
+	// No patches, no takeover: the mode change is reported in the summary and the
+	// pull proceeds without asking.
+	t.Run("mode change without patches does not prompt", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n")
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.NoPrefix = true
+		opts.Confirm = func(string, bool) (bool, error) {
+			t.Error("no patch profiles means nothing to take over")
+			return false, nil
+		}
+		summary, err := Pull("https://example.com/llm.yaml", "llm", opts)
+		if err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if !strings.Contains(summary, "pull mode changed from prefixed names to bare names") {
+			t.Errorf("summary misses the mode change:\n%s", summary)
+		}
+	})
 }
 
 func TestPullGateFailureAtomic(t *testing.T) {
@@ -635,6 +756,34 @@ func TestPullRejectsUnusableRecordNames(t *testing.T) {
 		}
 		if _, ok := f.remotes(t, f.globalPath)["llm"]; ok {
 			t.Fatal("a colliding record must not be written")
+		}
+	})
+
+	// WriteRemotes rewrites the whole section and validates all of it, so a
+	// sibling record that is already unusable has to fail the pull before the
+	// fetch: the content and the sidecar would otherwise land for a record that
+	// was never registered.
+	t.Run("unusable sibling record fails before the fetch", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.globalPath, "remotes:\n  broken:\n    url: http://example.com/broken.yaml\n")
+		beforeConfig, _ := readOrMissing(t, f.globalPath)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("an unwritable section must fail before the fetch")
+			return nil, "", nil
+		})
+
+		_, err := Pull("https://example.com/new.yaml", "llm", opts)
+		if err == nil || !strings.Contains(err.Error(), "broken") {
+			t.Fatalf("err = %v, want it to name the unusable sibling", err)
+		}
+		if after, _ := readOrMissing(t, f.globalPath); after != beforeConfig {
+			t.Fatal("the target config must be unchanged")
+		}
+		if _, ok := readOrMissing(t, config.RemoteContentPath("llm")); ok {
+			t.Fatal("no content may be stored for a record that was never registered")
+		}
+		if _, ok := readOrMissing(t, config.RemoteStatePath("llm")); ok {
+			t.Fatal("no sidecar may be stored for a record that was never registered")
 		}
 	})
 }
