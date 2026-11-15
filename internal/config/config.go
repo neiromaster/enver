@@ -217,7 +217,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return c, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if err := checkEnvNames(c); err != nil {
+	if err := CheckEnvNames(c); err != nil {
 		return c, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return c, nil
@@ -228,13 +228,15 @@ func LoadFile(path string) (Config, error) {
 	return load(path)
 }
 
-// checkEnvNames rejects invalid names — hand-authored in YAML — for env keys
+// CheckEnvNames rejects invalid names — hand-authored in YAML — for env keys
 // and unset entries, and for remote record names. Env names reach eval'd
 // export lines and child environments unquoted, so a name with shell
 // metacharacters is code execution. Record names become profile prefixes and
 // content file names, so one outside the single-level rule is an escape from
-// the namespace pull writes into. Neither is a typo to carry silently.
-func checkEnvNames(c Config) error {
+// the namespace pull writes into. Neither is a typo to carry silently. Every
+// file the load path parses gets this check; the pull gate applies it to
+// fetched content too, so a file load would refuse never reaches disk.
+func CheckEnvNames(c Config) error {
 	for _, name := range slices.Sorted(maps.Keys(c.Remotes)) {
 		if !ValidRecordName(name) {
 			return fmt.Errorf("remotes defines invalid record name %q (want [A-Za-z0-9][A-Za-z0-9_-]*)", name)
