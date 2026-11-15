@@ -51,9 +51,15 @@ closest declaration.`,
 	SilenceErrors:     true,
 	ValidArgsFunction: completePull,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if pullLocal && globalFlags.global {
+			return fmt.Errorf("--local and --global conflict; pick the layer the record belongs to")
+		}
 		if pullRm {
 			if len(args) == 0 {
 				return fmt.Errorf("--rm requires a remote name")
+			}
+			if pullAs != "" {
+				return fmt.Errorf("--as names a record being registered; --rm removes a record that already exists")
 			}
 			opts, err := pullOptions()
 			if err != nil {
@@ -66,9 +72,6 @@ closest declaration.`,
 			}
 			_, err = fmt.Fprint(cmd.OutOrStdout(), summary)
 			return err
-		}
-		if pullLocal && globalFlags.global {
-			return fmt.Errorf("--local and --global conflict; pick the layer the record belongs to")
 		}
 		opts, err := pullOptions()
 		if err != nil {
@@ -135,14 +138,14 @@ func pullOptions() (app.PullOptions, error) {
 	if opts.Target, err = config.LoadFile(opts.TargetPath); err != nil {
 		return app.PullOptions{}, err
 	}
-	// Under --no-local the local layer is not part of the view, so it declares
-	// nothing a pull may act on either.
-	if globalFlags.noLocal {
-		opts.Other = config.Config{}
-		return opts, nil
-	}
-	if opts.Other, err = config.LoadFile(opts.OtherPath); err != nil {
-		return app.PullOptions{}, err
+	// Under --no-local the local layer is not part of the view a registration or
+	// a re-fetch judges, so it is not read and cannot block one. A removal is
+	// different: deleting content a local record still declares would blank every
+	// profile under its prefix, so --rm always sees both layers.
+	if !globalFlags.noLocal || pullRm {
+		if opts.Other, err = config.LoadFile(opts.OtherPath); err != nil {
+			return app.PullOptions{}, err
+		}
 	}
 	return opts, nil
 }
