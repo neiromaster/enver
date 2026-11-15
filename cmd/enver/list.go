@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -120,6 +121,11 @@ type listJSONEntry struct {
 	Resolved int      `json:"resolved"`
 }
 
+// listNotesOut is where the JSON listing reports the profiles it leaves out:
+// stderr, so stdout stays the machine-readable document it promises. A var so
+// tests can capture the stream.
+var listNotesOut io.Writer = os.Stderr
+
 func doListJSON(w io.Writer) error {
 	cfg, err := app.Load(appOpts())
 	if err != nil {
@@ -131,7 +137,18 @@ func doListJSON(w io.Writer) error {
 		p := cfg.Profiles[n]
 		r, err := cfg.ResolveProfile(n)
 		if err != nil {
-			return err
+			// A remote that expects a parent nobody provides has not broken the
+			// user's config, so its profiles are left out with a note instead of
+			// failing the listing. Every other break — the user's own dangling
+			// extends, a cycle — still fails it.
+			dangling := cfg.RemoteDanglingIssues(n)
+			if len(dangling) == 0 {
+				return err
+			}
+			for _, is := range dangling {
+				_, _ = fmt.Fprintln(listNotesOut, skipNote(n, is))
+			}
+			continue
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
 			Name:     n,
@@ -144,4 +161,15 @@ func doListJSON(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// skipNote renders one omitted profile: the skipped profile names its own
+// reason when it is the one that dangles, and the broken link when the gap sits
+// deeper in its chain.
+func skipNote(skipped string, is config.Issue) string {
+	reason := is.Reason()
+	if is.Profile != skipped {
+		reason = is.String()
+	}
+	return fmt.Sprintf("note: skipping profile %q: %s", skipped, reason)
 }
