@@ -212,6 +212,12 @@ type Config struct {
 	// it; like Origins it is filled by Merge and never serialized. An
 	// overriding copy restamps the name, a carried entry keeps its layer.
 	ProfileLayer map[string]string `yaml:"-"`
+	// ExtendsOrigins records, per profile and extends target, the layer whose
+	// copy declared the reference; like Origins it is filled by Merge and never
+	// serialized. An overriding copy restamps only the targets it names itself,
+	// so a reference a remote authored stays the remote's even after a user
+	// patch takes over the profile name.
+	ExtendsOrigins map[string]map[string]string `yaml:"-"`
 }
 
 // GlobalPath resolves the user-level config location:
@@ -345,6 +351,7 @@ func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 	out.Origins = cloneProvenance(base.Origins)
 	out.UnsetOrigins = cloneProvenance(base.UnsetOrigins)
 	out.ProfileLayer = maps.Clone(base.ProfileLayer)
+	out.ExtendsOrigins = cloneProvenance(base.ExtendsOrigins)
 	out.Remotes = mergeRemotes(base.Remotes, override.Remotes)
 	if override.Default != "" {
 		out.Default = override.Default
@@ -355,6 +362,9 @@ func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 	for name, p := range override.Profiles {
 		bp := out.Profiles[name]
 		bp.Extends = mergeExtends(bp.Extends, p.Extends)
+		for _, target := range p.Extends {
+			out.extendsOrigin(name, target, overrideLabel)
+		}
 		splitUnsets(&bp, p.Unset, base.UnsetOrigins[name], baseLabel)
 		for _, u := range p.Unset {
 			if out.UnsetOrigins == nil {
@@ -416,9 +426,10 @@ func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 		bp.Marked = markedOrNil(bp.Marked)
 		out.Profiles[name] = bp
 	}
-	// What no earlier fold attributed is the base layer's own: stamp env keys
-	// and profile names that carry no recorded layer with baseLabel, so a
-	// lower base layer keeps its era instead of falling back to global.
+	// What no earlier fold attributed is the base layer's own: stamp env keys,
+	// profile names, and extends targets that carry no recorded layer with
+	// baseLabel, so a lower base layer keeps its era instead of falling back to
+	// global.
 	for name, bp := range out.Profiles {
 		m := out.Origins[name]
 		for _, k := range slices.Sorted(maps.Keys(bp.Env)) {
@@ -440,8 +451,29 @@ func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 			}
 			out.ProfileLayer[name] = baseLabel
 		}
+		for _, target := range bp.Extends {
+			if _, ok := out.ExtendsOrigins[name][target]; ok {
+				continue
+			}
+			out.extendsOrigin(name, target, baseLabel)
+		}
 	}
 	return out
+}
+
+// extendsOrigin records layer as the authoring layer of one extends target,
+// creating the per-profile map on first use. Attribution is by exact target
+// spelling, matching the merge that dedupes the lists.
+func (o *Config) extendsOrigin(profile, target, layer string) {
+	if o.ExtendsOrigins == nil {
+		o.ExtendsOrigins = map[string]map[string]string{}
+	}
+	m := o.ExtendsOrigins[profile]
+	if m == nil {
+		m = map[string]string{}
+		o.ExtendsOrigins[profile] = m
+	}
+	m[target] = layer
 }
 
 // markedOrNil keeps the Marked nil contract: a set that holds no mark is nil,
@@ -655,6 +687,17 @@ type envFold struct {
 	unsets   map[string]Source
 }
 
+// profileNotFound is the error a reference to a name no layer defines gets: the
+// plain miss, plus the pull that would supply it when the name is a prefixed
+// profile of a declared but unpulled record. Pull cannot help an undeclared
+// prefix, so that case keeps the plain message.
+func (c Config) profileNotFound(name string) error {
+	if hint := c.pullHint(name); hint != "" {
+		return fmt.Errorf("profile %q not found (%s)", name, hint)
+	}
+	return fmt.Errorf("profile %q not found", name)
+}
+
 // resolveEnv returns the fully merged env, comments, sources, secret marks, and
 // unset tombstones for name: each parent is resolved transitively and merged
 // left-to-right, then name's own entries are applied last (child wins;
@@ -675,7 +718,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 	}
 	p, ok := c.Profiles[name]
 	if !ok {
-		return envFold{}, fmt.Errorf("profile %q not found", name)
+		return envFold{}, c.profileNotFound(name)
 	}
 	visiting[name] = true
 	var out envFold

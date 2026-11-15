@@ -375,6 +375,12 @@ func Project(c Config, name string, noPrefix bool) Config {
 			Marked:   projectMarks(p.Marked),
 		}
 		out.ProfileLayer[projected] = RemoteLayer(name)
+		// The remote authored every reference its file declares, and a user
+		// patch that later takes over the profile name does not inherit that
+		// authorship for references it did not write itself.
+		for _, target := range out.Profiles[projected].Extends {
+			out.extendsOrigin(projected, target, RemoteLayer(name))
+		}
 	}
 	return out
 }

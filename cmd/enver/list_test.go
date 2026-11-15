@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -287,6 +288,16 @@ func TestListJSONSkipsRemoteDangling(t *testing.T) {
 		if want := []string{"good"}; !reflect.DeepEqual(names, want) {
 			t.Fatalf("profiles = %v, want %v", names, want)
 		}
+		var skipped []string
+		for _, s := range got.Skipped {
+			skipped = append(skipped, s.Name)
+			if !strings.Contains(s.Reason, `"base"`) {
+				t.Errorf("skipped %q carries no dangling target in its reason: %s", s.Name, s.Reason)
+			}
+		}
+		if want := []string{"llm/qwen", "wrapper"}; !reflect.DeepEqual(skipped, want) {
+			t.Fatalf("skipped = %v, want %v", skipped, want)
+		}
 		for _, want := range []string{
 			`skipping profile "llm/qwen"`,
 			`skipping profile "wrapper"`,
@@ -318,6 +329,77 @@ func TestListJSONSkipsRemoteDangling(t *testing.T) {
 		var out bytes.Buffer
 		if err := runListJSON(t, &out); err == nil {
 			t.Fatalf("a user-authored dangling extends must fail the JSON listing:\n%s", out.String())
+		}
+	})
+
+	t.Run("patching a remote profile does not adopt its dangling extends", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath,
+			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
+				"profiles:\n  good:\n    env:\n      K: v\n  llm/qwen:\n    env:\n      MODEL: patch\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		notes := captureListNotes(t)
+
+		var out bytes.Buffer
+		if err := runListJSON(t, &out); err != nil {
+			t.Fatalf("the patch did not write the extends, so the gap stays the remote's: %v\n%s", err, out.String())
+		}
+		var got listJSON
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+		}
+		if len(got.Skipped) != 1 || got.Skipped[0].Name != "llm/qwen" {
+			t.Fatalf("skipped = %+v, want llm/qwen", got.Skipped)
+		}
+		if !strings.Contains(got.Skipped[0].Reason, `remote "llm"`) {
+			t.Errorf("skip reason must name the remote that expects the parent: %s", got.Skipped[0].Reason)
+		}
+		if !strings.Contains(notes.String(), `remote "llm"`) {
+			t.Errorf("stderr note must name the remote:\n%s", notes.String())
+		}
+	})
+
+	t.Run("a bad extends the patch itself declares still fails", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath,
+			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
+				"profiles:\n  good:\n    env:\n      K: v\n  llm/qwen:\n    extends: ghost\n    env:\n      MODEL: patch\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		captureListNotes(t)
+
+		var out bytes.Buffer
+		if err := runListJSON(t, &out); err == nil {
+			t.Fatalf("the patch authored its own dangling extends, so the listing must fail:\n%s", out.String())
+		}
+	})
+
+	t.Run("a cycle among remote profiles still fails", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath,
+			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
+				"profiles:\n  good:\n    env:\n      K: v\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  a:\n    extends: b\n  b:\n    extends: a\n")); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		captureListNotes(t)
+
+		var out bytes.Buffer
+		err := runListJSON(t, &out)
+		if !errors.Is(err, config.ErrExtendsCycle) {
+			t.Fatalf("a cycle is not a remote gap and must fail the listing, got: %v\n%s", err, out.String())
 		}
 	})
 }

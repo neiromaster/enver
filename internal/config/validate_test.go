@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -282,6 +283,135 @@ func TestValidateRemoteDanglingWarns(t *testing.T) {
 			t.Errorf("issue text %q lacks the pull that would supply the unpulled parent", got.String())
 		}
 	})
+}
+
+// TestValidatePatchedRemoteDanglingStaysWarning pins the authorship rule: a
+// user patch takes over a remote profile's name but not the references the
+// remote wrote, so a missing parent the remote named stays warning-grade and
+// keeps the remote's hint, while a reference the patch writes itself is the
+// user's own error.
+func TestValidatePatchedRemoteDanglingStaysWarning(t *testing.T) {
+	remote := Project(Config{Profiles: map[string]Profile{
+		"qwen": {Extends: Extends{"base"}, Env: map[string]string{"MODEL": "qwen"}},
+	}}, "llm", false)
+	patch := Config{Profiles: map[string]Profile{
+		"llm/qwen": {Env: map[string]string{"MODEL": "mine"}},
+	}}
+	merged := Merge(remote, patch, RemoteLayer("llm"), LayerGlobal)
+	if got := merged.ProfileLayer["llm/qwen"]; got != LayerGlobal {
+		t.Fatalf("fixture premise: ProfileLayer = %q, want the patch to own the name", got)
+	}
+
+	severity := map[string]Severity{}
+	text := map[string]string{}
+	for _, is := range Validate(merged) {
+		if is.Kind != KindDanglingExtends {
+			continue
+		}
+		severity[is.Target] = is.Severity
+		text[is.Target] = is.String()
+	}
+	if len(severity) != 1 || severity["base"] != SeverityWarning {
+		t.Fatalf("severity = %v, want only the remote's base reference as a warning", severity)
+	}
+	if !strings.Contains(text["base"], `remote "llm"`) {
+		t.Errorf("issue text %q lost the remote's hint when the user patched the profile", text["base"])
+	}
+
+	ownPatch := Config{Profiles: map[string]Profile{
+		"llm/qwen": {Extends: Extends{"ghost"}, Env: map[string]string{"MODEL": "mine"}},
+	}}
+	own := map[string]Severity{}
+	for _, is := range Validate(Merge(remote, ownPatch, RemoteLayer("llm"), LayerGlobal)) {
+		if is.Kind == KindDanglingExtends {
+			own[is.Target] = is.Severity
+		}
+	}
+	if want := (map[string]Severity{"base": SeverityWarning, "ghost": SeverityError}); !maps.Equal(own, want) {
+		t.Fatalf("severity = %v, want %v: the patch's own reference is the user's error", own, want)
+	}
+}
+
+// TestValidateGlobalOverRemotes pins what the isolated-global pass audits: the
+// global file over the remote layers it sits on, never the local file. A global
+// profile extending a remote-provided profile is the passthrough feature and
+// must resolve; a global profile naming a local-only or nonexistent parent
+// stays this pass's error; remote content's own findings stay with the merged
+// pass.
+func TestValidateGlobalOverRemotes(t *testing.T) {
+	defer remotesDirIn(t.TempDir())()
+	if err := WriteRemoteContent("llm", []byte("profiles:\n  base:\n    env:\n      K: v\n")); err != nil {
+		t.Fatal(err)
+	}
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, LocalFilename), []byte("profiles:\n  localprov:\n    env:\n      L: v\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(chdir(t, proj))
+
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	body := "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n" +
+		"profiles:\n" +
+		"  wrapper:\n    extends: llm/base\n" +
+		"  needslocal:\n    extends: localprov\n" +
+		"  mine:\n    extends: ghost\n"
+	if err := os.WriteFile(globalPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := ValidateGlobal(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byProfile := map[string]Issue{}
+	for _, is := range issues {
+		if is.File != "global" {
+			t.Fatalf("issue %+v attributed to the merged view, want this pass", is)
+		}
+		byProfile[is.Profile] = is
+	}
+	if _, flagged := byProfile["wrapper"]; flagged {
+		t.Fatalf("a global profile extending a pulled remote's profile was flagged: %+v", byProfile["wrapper"])
+	}
+	if _, flagged := byProfile["llm/base"]; flagged {
+		t.Fatalf("remote content was attributed to the global pass: %+v", byProfile["llm/base"])
+	}
+	for _, name := range []string{"needslocal", "mine"} {
+		got, flagged := byProfile[name]
+		if !flagged || got.Kind != KindDanglingExtends || got.Severity != SeverityError {
+			t.Fatalf("%s: issue = %+v, want a dangling error: a local-only or unknown parent breaks this file", name, got)
+		}
+	}
+}
+
+// TestProfileNotFoundPullHint pins the hint a miss carries when the name is a
+// prefixed profile of a declared but unpulled remote: show, x, and every other
+// read path report the pull that supplies it, and no pull is promised when the
+// prefix is undeclared or the record's content is already on disk.
+func TestProfileNotFoundPullHint(t *testing.T) {
+	defer remotesDirIn(t.TempDir())()
+	cfg := Config{
+		Profiles: map[string]Profile{"dev": {Env: map[string]string{"K": "v"}}},
+		Remotes:  map[string]RemoteRecord{"other": {URL: "https://example.com/other.yaml"}},
+	}
+	_, err := cfg.ResolveProfile("other/base")
+	if err == nil {
+		t.Fatal("resolving a profile no layer defines must fail")
+	}
+	if got := err.Error(); !strings.Contains(got, `profile "other/base" not found`) || !strings.Contains(got, `enver pull other`) {
+		t.Fatalf("err = %q, want the plain miss plus the pull that supplies it", got)
+	}
+
+	if err := WriteRemoteContent("other", []byte("profiles:\n  base:\n    env:\n      K: v\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.ResolveProfile("other/base"); err == nil || strings.Contains(err.Error(), "enver pull") {
+		t.Fatalf("err = %v, want no pull hint once the record has content", err)
+	}
+
+	if _, err := cfg.ResolveProfile("nosuch/base"); err == nil || strings.Contains(err.Error(), "enver pull") {
+		t.Fatalf("err = %v, want no pull hint for an undeclared prefix", err)
+	}
 }
 
 // TestRemoteDanglingIssues pins what counts as a remote's gap for a caller that
