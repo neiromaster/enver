@@ -189,6 +189,44 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 	}
 }
 
+// TestMenuOptionsMasksInheritedRemoteCiphertext pins the inherited-row half of
+// the menu's display policy: resolution never decrypts, so a remote profile's
+// sealed value reaches the listing as ciphertext under a name and a mark that
+// say nothing about secrecy. The row must mask it the way an own encrypted row
+// masks instead of printing enc:v3: text, and a readable inherited sibling must
+// stay visible.
+func TestMenuOptionsMasksInheritedRemoteCiphertext(t *testing.T) {
+	sealed := sealedValue(t, "author-secret")
+	remote := config.Project(config.Config{Profiles: map[string]config.Profile{
+		"base": {Env: map[string]string{"REMOTE_DATA": sealed, "REMOTE_PLAIN": "visible"}},
+	}}, "llm", false)
+	cfg := config.Merge(remote, config.Config{}, "remote:llm", "global")
+	pr, err := cfg.ResolveProfile("llm/base")
+	if err != nil {
+		t.Fatalf("resolve the remote profile: %v", err)
+	}
+	if s := pr.Sources["REMOTE_DATA"]; !config.IsRemoteLayer(s.Layer) {
+		t.Fatalf("fixture premise broken: REMOTE_DATA layer = %q, want a remote layer", s.Layer)
+	}
+
+	s := plainState(t, "llm/local", config.Profile{
+		Extends: config.Extends{"llm/base"},
+		Env:     map[string]string{"OWN": "x"},
+	}, nil, false)
+	opts := s.menuOptions(listedInheritedForState(cfg, s), nil)
+
+	row := findOption(t, opts, "inherited:REMOTE_DATA")
+	if strings.Contains(row.Label, sealed) {
+		t.Fatalf("menu printed inherited ciphertext: %q", row.Label)
+	}
+	if !strings.Contains(row.Label, "(len=") {
+		t.Fatalf("sealed inherited row should mask like an encrypted own row, got %q", row.Label)
+	}
+	if got := findOption(t, opts, "inherited:REMOTE_PLAIN"); !strings.HasSuffix(got.Label, "= visible") {
+		t.Fatalf("readable inherited value must stay visible, got %q", got.Label)
+	}
+}
+
 // TestMarkedRowsShowTheMark pins the label half of the mark: every picker that
 // lists a variable — menu, Secrets, delete, manage unsets — spells a marked one
 // ~KEY, while the row value stays the runtime name the commit writes and a

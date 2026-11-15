@@ -310,18 +310,16 @@ func wrongKeyFile(t *testing.T) string {
 	return path
 }
 
-// remoteCiphertextFixture lands a pulled remote whose content holds a value only
-// its author's key can read, and writes the global config declaring the record.
-// It returns the global config path and the projected profile name.
-func remoteCiphertextFixture(t *testing.T) (cfgPath, profile string) {
+// remoteFixture lands a pulled remote's content with its state sidecar and writes
+// the global config declaring the record, followed by userBody's profiles. It
+// returns the global config path.
+func remoteFixture(t *testing.T, content, userBody string) string {
 	t.Helper()
 	dir := t.TempDir()
-	remotes := filepath.Join(dir, "remotes")
 	prev := config.RemotesDir
-	config.RemotesDir = func() string { return remotes }
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
 	t.Cleanup(func() { config.RemotesDir = prev })
 
-	content := fmt.Sprintf("profiles:\n  app:\n    env:\n      REMOTE_TOKEN: %s\n      PLAIN: remote-value\n      AUTH: 'Bearer $REMOTE_TOKEN'\n", encV3(t, "author-secret"))
 	if err := config.WriteRemoteContent("llm", []byte(content)); err != nil {
 		t.Fatalf("write remote content: %v", err)
 	}
@@ -329,10 +327,11 @@ func remoteCiphertextFixture(t *testing.T) (cfgPath, profile string) {
 		t.Fatalf("write remote state: %v", err)
 	}
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("remotes:\n  llm:\n    url: https://example.com/enver.yaml\n"), 0o600); err != nil {
+	body := "remotes:\n  llm:\n    url: https://example.com/enver.yaml\n" + userBody
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return path, "llm/app"
+	return path
 }
 
 // TestRemoteWrongKeyDegrades pins the remote-provenance degradation: ciphertext a
@@ -340,7 +339,9 @@ func remoteCiphertextFixture(t *testing.T) (cfgPath, profile string) {
 // display paths work and report it per key while the exec path refuses loudly.
 func TestRemoteWrongKeyDegrades(t *testing.T) {
 	t.Setenv("ENVER_KEY", "")
-	cfgPath, profile := remoteCiphertextFixture(t)
+	content := fmt.Sprintf("profiles:\n  app:\n    env:\n      REMOTE_TOKEN: %s\n      PLAIN: remote-value\n      AUTH: 'Bearer $REMOTE_TOKEN'\n", encV3(t, "author-secret"))
+	cfgPath := remoteFixture(t, content, "")
+	const profile = "llm/app"
 	keyPath := wrongKeyFile(t)
 
 	displayOpts := Options{
@@ -386,6 +387,58 @@ func TestRemoteWrongKeyDegrades(t *testing.T) {
 	// The guard above proves resolve fails here, so Run cannot reach exec.
 	if rerr := Run([]string{profile, "--", "env"}, 1, execOpts); rerr == nil {
 		t.Fatal("enver x must refuse before starting the child")
+	}
+}
+
+// TestOwnWrongKeyOverRemoteBaseHardFails pins the scoping rule where it is
+// easiest to get wrong: a user profile layered over a remote that defines the
+// same key. Attribution follows the winning entry, so the user's own ciphertext
+// is what decides — it fails the resolve even though the remote supplies a copy
+// this key can read and the display tolerances are on — and the remote value is
+// never substituted for it.
+func TestOwnWrongKeyOverRemoteBaseHardFails(t *testing.T) {
+	t.Setenv("ENVER_KEY", "")
+	keyPath := wrongKeyFile(t)
+	key, salt, err := crypto.LoadKey(keyPath)
+	if err != nil {
+		t.Fatalf("load key: %v", err)
+	}
+	readable, err := crypto.EncryptValueWithParams("remote-copy", key, salt, crypto.CurrentParams)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	content := fmt.Sprintf("profiles:\n  base:\n    env:\n      API_KEY: %s\n", readable)
+	global := fmt.Sprintf("profiles:\n  dev:\n    extends: [llm/base]\n    env:\n      API_KEY: %s\n", encV3(t, "my-secret"))
+	cfgPath := remoteFixture(t, content, global)
+
+	cfg, err := config.LoadMerged(cfgPath, false)
+	if err != nil {
+		t.Fatalf("load merged: %v", err)
+	}
+	pr, err := cfg.ResolveProfile("dev")
+	if err != nil {
+		t.Fatalf("resolve for the provenance premise: %v", err)
+	}
+	if s := pr.Sources["API_KEY"]; s.Profile != "dev" || config.IsRemoteLayer(s.Layer) {
+		t.Fatalf("fixture premise broken: API_KEY winner = %+v, want the user's own entry", s)
+	}
+
+	opts := Options{
+		ConfigPath:             cfgPath,
+		NoLocal:                true,
+		KeyPath:                keyPath,
+		TolerateMissingKey:     true,
+		TolerateRemoteWrongKey: true,
+	}
+	_, _, err = ResolveDefault(opts, "dev")
+	if err == nil {
+		t.Fatal("the user's own unreadable ciphertext must fail the resolve despite the readable remote copy beneath it")
+	}
+	if !strings.Contains(err.Error(), "decrypt API_KEY") {
+		t.Fatalf("err = %v, want the user-layer decrypt failure naming API_KEY", err)
+	}
+	if errors.Is(err, ErrNoKey) {
+		t.Fatalf("a wrong key is not a missing key: %v", err)
 	}
 }
 
