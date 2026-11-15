@@ -1,0 +1,181 @@
+package main
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/remote"
+	"github.com/neiromaster/enver/internal/ui"
+	"github.com/spf13/cobra"
+)
+
+// pullFetch is the network seam: production fetches with remote.Fetch, tests
+// replace it so a pull runs hermetic.
+var pullFetch = remote.Fetch
+
+var (
+	pullAs       string
+	pullLocal    bool
+	pullNoPrefix bool
+	pullRm       bool
+	pullForce    bool
+)
+
+var pullCmd = &cobra.Command{
+	Use:   "pull [<source>|<name>]",
+	Short: "Fetch a remote config and register it",
+	Long: `Fetch a remote config, validate it, and store it where every read command
+loads it as the lowest layer.
+
+  enver pull <source> --as <name>       register a source and fetch it now
+  enver pull <name>                     re-fetch one registered remote
+  enver pull                            re-fetch every registered remote
+  enver pull --rm <name>                remove the record (and its content)
+
+A source is github:owner/repo[@ref], optionally with a path inside the repo, or
+an https URL. Registration writes the global config; --local writes the
+project's .enver.yaml instead, so the record travels with the repository. A
+remote's profiles appear under its record name as a prefix, unless --no-prefix
+stores them under their bare upstream names.
+
+Nothing is resolved from the network when a profile is read: run enver pull
+again to refresh. Removing a record deletes its content only when no visible
+layer still declares it, and -g/--local target an explicit layer instead of the
+closest declaration.`,
+	Args:              cobra.MaximumNArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: completePull,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if pullRm {
+			if len(args) == 0 {
+				return fmt.Errorf("--rm requires a remote name")
+			}
+			opts, err := pullOptions()
+			if err != nil {
+				return err
+			}
+			opts.LayerPinned = pullLocal || globalFlags.global
+			summary, err := app.PullRemove(args[0], opts)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), summary)
+			return err
+		}
+		if pullLocal && globalFlags.global {
+			return fmt.Errorf("--local and --global conflict; pick the layer the record belongs to")
+		}
+		opts, err := pullOptions()
+		if err != nil {
+			return err
+		}
+		summary, err := dispatchPull(opts, args)
+		if err != nil {
+			return err
+		}
+		if summary == "" {
+			return aborted(cmd.OutOrStdout())
+		}
+		_, err = fmt.Fprint(cmd.OutOrStdout(), summary)
+		return err
+	},
+}
+
+// runPull dispatches on the argument: nothing pulls every registered remote, a
+// record name re-fetches that one, and anything else is a source to register
+// under --as.
+func dispatchPull(opts app.PullOptions, args []string) (string, error) {
+	if len(args) == 0 {
+		if pullAs != "" {
+			return "", fmt.Errorf("--as names the record for a source; run enver pull <source> --as <name>")
+		}
+		return app.PullAll(opts)
+	}
+	raw := args[0]
+	if !config.ValidRecordName(raw) {
+		if _, _, err := remote.SplitRef(raw); err != nil {
+			return "", fmt.Errorf("%q is neither a source enver can fetch nor a registered remote name: %w", raw, err)
+		}
+		if pullAs == "" {
+			return "", fmt.Errorf("registering a source needs --as <name>, the record name its profiles are prefixed with")
+		}
+		return app.Pull(raw, pullAs, opts)
+	}
+	if pullAs != "" {
+		return "", fmt.Errorf("--as applies only when registering a source; %q is a recorded remote name", raw)
+	}
+	return app.PullUpdate(raw, opts)
+}
+
+// pullOptions assembles the run: the merged view the gate judges against, the
+// two user layers with the write target first, and the injected seams.
+func pullOptions() (app.PullOptions, error) {
+	merged, err := app.Load(appOpts())
+	if err != nil {
+		return app.PullOptions{}, err
+	}
+	opts := app.PullOptions{
+		TargetIsGlobal: !pullLocal,
+		NoPrefix:       pullNoPrefix,
+		Force:          pullForce,
+		Merged:         merged,
+		Fetch:          pullFetch,
+		Confirm:        ui.Confirm,
+		TargetPath:     config.GlobalPath(globalFlags.configPath),
+		OtherPath:      config.LocalPath(),
+	}
+	if pullLocal {
+		opts.TargetPath, opts.OtherPath = opts.OtherPath, opts.TargetPath
+	}
+	if opts.Target, err = config.LoadFile(opts.TargetPath); err != nil {
+		return app.PullOptions{}, err
+	}
+	// Under --no-local the local layer is not part of the view, so it declares
+	// nothing a pull may act on either.
+	if globalFlags.noLocal {
+		opts.Other = config.Config{}
+		return opts, nil
+	}
+	if opts.Other, err = config.LoadFile(opts.OtherPath); err != nil {
+		return app.PullOptions{}, err
+	}
+	return opts, nil
+}
+
+// completePull offers the record names the merged view registers. It loads the
+// config directly rather than through app.Load so no load-time warning can leak
+// into a shell's completion output.
+func completePull(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	if err := applyChdir(); err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	cfgPath, _ := cmd.Flags().GetString("config")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	cfg, err := config.LoadMerged(cfgPath, !noLocal)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
+		if strings.HasPrefix(name, toComplete) {
+			out = append(out, name)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func init() {
+	pullCmd.Flags().StringVar(&pullAs, "as", "", "record name for a source being registered")
+	pullCmd.Flags().BoolVar(&pullLocal, "local", false, "write the record to ./.enver.yaml instead of the global config")
+	pullCmd.Flags().BoolVar(&pullNoPrefix, "no-prefix", false, "store the remote's profiles under their bare upstream names")
+	pullCmd.Flags().BoolVar(&pullRm, "rm", false, "remove the record (and its content when no layer still declares it)")
+	pullCmd.Flags().BoolVar(&pullForce, "force", false, "accept a takeover of existing profiles without confirming")
+}

@@ -1,0 +1,457 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/neiromaster/enver/internal/config"
+	"github.com/neiromaster/enver/internal/remote"
+	"github.com/spf13/cobra"
+)
+
+// pullContent is a minimal valid remote: two profiles, one extending the other
+// inside the same file.
+const pullContent = `profiles:
+  ollama:
+    env:
+      OLLAMA_HOST: http://localhost:11434
+  qwen:
+    extends: ollama
+    env:
+      MODEL: qwen2.5-coder
+`
+
+// pullCmdFixture isolates the global config, the local .enver.yaml, and the
+// remotes directory, and points globalFlags at the isolated global file.
+type pullCmdFixture struct {
+	globalPath string
+	localPath  string
+	remotesDir string
+}
+
+func newPullCmdFixture(t *testing.T) *pullCmdFixture {
+	t.Helper()
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	remotes := t.TempDir()
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return remotes }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+
+	globalFlags.configPath = filepath.Join(dir, "config.yaml")
+	globalFlags.noLocal = false
+	globalFlags.global = false
+
+	// Fixtures below create divergent views on purpose; keep their advisories out
+	// of the test log unless a test captures the sink.
+	prevOut := loadWarningsOut
+	loadWarningsOut = io.Discard
+	t.Cleanup(func() { loadWarningsOut = prevOut })
+
+	return &pullCmdFixture{
+		globalPath: globalFlags.configPath,
+		localPath:  config.LocalPath(),
+		remotesDir: remotes,
+	}
+}
+
+// withPullFlags snapshots the pull globals, restores them on cleanup, and
+// installs an injected fetch that serves pullContent.
+func withPullFlags(t *testing.T, fetch func(url, ref string) ([]byte, string, error)) {
+	t.Helper()
+	prevAs, prevLocal, prevNoPrefix, prevRm, prevForce := pullAs, pullLocal, pullNoPrefix, pullRm, pullForce
+	prevFetch := pullFetch
+	t.Cleanup(func() {
+		pullAs, pullLocal, pullNoPrefix, pullRm, pullForce = prevAs, prevLocal, prevNoPrefix, prevRm, prevForce
+		pullFetch = prevFetch
+	})
+	pullAs, pullLocal, pullNoPrefix, pullRm, pullForce = "", false, false, false, false
+	if fetch == nil {
+		fetch = func(string, string) ([]byte, string, error) {
+			t.Error("no fetch expected on this path")
+			return nil, "", errors.New("unexpected fetch")
+		}
+	}
+	pullFetch = fetch
+}
+
+func writePullFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// runPull invokes the command the way a test can: RunE directly, so inherited
+// persistent flags are read from globalFlags instead of being parsed.
+func runPull(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	err := pullCmd.RunE(cmd, args)
+	return out.String(), err
+}
+
+func pullRemotes(t *testing.T, path string) map[string]config.RemoteRecord {
+	t.Helper()
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return cfg.Remotes
+}
+
+func TestPullCmdRegistersRemote(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	var fetchedURL, fetchedRef string
+	withPullFlags(t, func(url, ref string) ([]byte, string, error) {
+		fetchedURL, fetchedRef = url, ref
+		return []byte(pullContent), "9f2c1ab", nil
+	})
+	pullAs = "llm"
+
+	out, err := runPull(t, "github:someone/llm-profiles@v2")
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if want := "https://raw.githubusercontent.com/someone/llm-profiles/v2/enver.yaml"; fetchedURL != want {
+		t.Fatalf("fetched %q, want %q", fetchedURL, want)
+	}
+	if fetchedRef != "v2" {
+		t.Fatalf("fetched ref %q, want v2", fetchedRef)
+	}
+	for _, want := range []string{`remote "llm"`, "github:someone/llm-profiles", "llm/ollama", "llm/qwen"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary misses %q:\n%s", want, out)
+		}
+	}
+	rec, ok := pullRemotes(t, f.globalPath)["llm"]
+	if !ok {
+		t.Fatalf("record not registered in the global config %s", f.globalPath)
+	}
+	if rec.URL != "github:someone/llm-profiles" || rec.Ref != "v2" {
+		t.Fatalf("record = %+v, want the source spelling with its ref split out", rec)
+	}
+	if _, ok := pullRemotes(t, f.localPath)["llm"]; ok {
+		t.Fatal("registration must default to the global layer")
+	}
+	if _, err := os.Stat(config.RemoteContentPath("llm")); err != nil {
+		t.Fatalf("content not stored: %v", err)
+	}
+	if st, ok := config.ReadRemoteState("llm"); !ok || st.Commit != "9f2c1ab" {
+		t.Fatalf("sidecar = %+v ok=%v, want the fetched commit recorded", st, ok)
+	}
+}
+
+func TestPullCmdLocalWritesProjectFile(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	withPullFlags(t, func(string, string) ([]byte, string, error) {
+		return []byte(pullContent), "", nil
+	})
+	pullAs = "llm"
+	pullLocal = true
+
+	if _, err := runPull(t, "https://example.com/llm.yaml"); err != nil {
+		t.Fatalf("pull --local: %v", err)
+	}
+	if _, ok := pullRemotes(t, f.localPath)["llm"]; !ok {
+		t.Fatalf("record not written to %s", f.localPath)
+	}
+	if _, ok := pullRemotes(t, f.globalPath)["llm"]; ok {
+		t.Fatal("--local must not write the global config")
+	}
+}
+
+func TestPullCmdRemoveBothLayers(t *testing.T) {
+	setNonInteractive(t)
+	both := func(t *testing.T) *pullCmdFixture {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\n")
+		writePullFile(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+		if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	t.Run("closest declaration without a layer flag", func(t *testing.T) {
+		f := both(t)
+		withPullFlags(t, nil)
+		pullRm = true
+
+		out, err := runPull(t, "llm")
+		if err != nil {
+			t.Fatalf("pull --rm: %v", err)
+		}
+		if _, ok := pullRemotes(t, f.localPath)["llm"]; ok {
+			t.Fatal("the effective (local) declaration must be removed")
+		}
+		if _, ok := pullRemotes(t, f.globalPath)["llm"]; !ok {
+			t.Fatal("the global declaration must survive")
+		}
+		if _, err := os.Stat(config.RemoteContentPath("llm")); err != nil {
+			t.Fatalf("content must survive a surviving declaration: %v", err)
+		}
+		for _, want := range []string{`remote "llm"`, "global", "https://example.com/global.yaml", "enver pull llm"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("summary misses %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("explicit global layer", func(t *testing.T) {
+		f := both(t)
+		withPullFlags(t, nil)
+		pullRm = true
+		globalFlags.global = true
+
+		out, err := runPull(t, "llm")
+		if err != nil {
+			t.Fatalf("pull --rm -g: %v", err)
+		}
+		if _, ok := pullRemotes(t, f.globalPath)["llm"]; ok {
+			t.Fatal("the pinned global declaration must be removed")
+		}
+		if _, ok := pullRemotes(t, f.localPath)["llm"]; !ok {
+			t.Fatal("an explicit layer must leave the other layer alone")
+		}
+		if _, err := os.Stat(config.RemoteContentPath("llm")); err != nil {
+			t.Fatalf("content must survive the remaining local declaration: %v", err)
+		}
+		if !strings.Contains(out, "local") {
+			t.Errorf("summary should name the surviving layer:\n%s", out)
+		}
+	})
+
+	t.Run("explicit local layer", func(t *testing.T) {
+		f := both(t)
+		withPullFlags(t, nil)
+		pullRm = true
+		pullLocal = true
+
+		if _, err := runPull(t, "llm"); err != nil {
+			t.Fatalf("pull --rm --local: %v", err)
+		}
+		if _, ok := pullRemotes(t, f.localPath)["llm"]; ok {
+			t.Fatal("the pinned local declaration must be removed")
+		}
+		if _, ok := pullRemotes(t, f.globalPath)["llm"]; !ok {
+			t.Fatal("an explicit layer must leave the other layer alone")
+		}
+	})
+
+	t.Run("last declaration deletes content", func(t *testing.T) {
+		f := newPullCmdFixture(t)
+		writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\n")
+		writePullFile(t, f.localPath, "profiles:\n  llm/ollama:\n    env:\n      OLLAMA_API_KEY: sk-live\n")
+		if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/global.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		withPullFlags(t, nil)
+		pullRm = true
+
+		out, err := runPull(t, "llm")
+		if err != nil {
+			t.Fatalf("pull --rm: %v", err)
+		}
+		if _, err := os.Stat(config.RemoteContentPath("llm")); !os.IsNotExist(err) {
+			t.Fatalf("content must be deleted with the last declaration: %v", err)
+		}
+		if _, err := os.Stat(config.RemoteStatePath("llm")); !os.IsNotExist(err) {
+			t.Fatalf("sidecar must be deleted with the content: %v", err)
+		}
+		for _, want := range []string{"llm/ollama", "no longer inherits"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("summary misses the orphaned patch note %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestPullCmdRemoveNeedsName(t *testing.T) {
+	setNonInteractive(t)
+	newPullCmdFixture(t)
+	withPullFlags(t, nil)
+	pullRm = true
+	if _, err := runPull(t); err == nil || !strings.Contains(err.Error(), "name") {
+		t.Fatalf("err = %v, want --rm to require a remote name", err)
+	}
+}
+
+func TestPullCmdTakeoverNeedsForceWhenNonInteractive(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/old.yaml\n")
+	writePullFile(t, f.localPath, "profiles:\n  llm/ollama:\n    env:\n      OLLAMA_API_KEY: sk-live\n")
+	if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+		t.Fatal(err)
+	}
+	withPullFlags(t, func(string, string) ([]byte, string, error) {
+		return []byte(pullContent), "", nil
+	})
+	pullAs = "llm"
+
+	_, err := runPull(t, "https://example.com/new.yaml")
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want a non-zero error naming --force", err)
+	}
+	if rec := pullRemotes(t, f.globalPath)["llm"]; rec.URL != "https://example.com/old.yaml" {
+		t.Fatalf("record = %+v, want no write without confirmation", rec)
+	}
+
+	// --force is the non-interactive escape and still reports the takeover.
+	pullForce = true
+	out, err := runPull(t, "https://example.com/new.yaml")
+	if err != nil {
+		t.Fatalf("pull --force: %v", err)
+	}
+	if !strings.Contains(out, "will now compose with content from") {
+		t.Errorf("forced pull must still warn about the takeover:\n%s", out)
+	}
+	if rec := pullRemotes(t, f.globalPath)["llm"]; rec.URL != "https://example.com/new.yaml" {
+		t.Fatalf("record = %+v, want re-pointed under --force", rec)
+	}
+}
+
+func TestPullCmdRegistrationNeedsAs(t *testing.T) {
+	setNonInteractive(t)
+	newPullCmdFixture(t)
+	withPullFlags(t, nil)
+
+	if _, err := runPull(t, "https://example.com/llm.yaml"); err == nil || !strings.Contains(err.Error(), "--as") {
+		t.Fatalf("err = %v, want registration to require --as", err)
+	}
+	if _, err := runPull(t, "not a source"); err == nil || !strings.Contains(err.Error(), "remote name") {
+		t.Fatalf("err = %v, want a bare argument that is neither a source nor a registered name to fail", err)
+	}
+}
+
+func TestPullCmdRefetchesByName(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n    ref: v2\n")
+	withPullFlags(t, func(url, ref string) ([]byte, string, error) {
+		return []byte(pullContent), "", nil
+	})
+
+	out, err := runPull(t, "llm")
+	if err != nil {
+		t.Fatalf("pull llm: %v", err)
+	}
+	if !strings.Contains(out, `remote "llm"`) {
+		t.Errorf("summary misses the record:\n%s", out)
+	}
+	if st, ok := config.ReadRemoteState("llm"); !ok || st.URL != "https://example.com/llm.yaml" || st.Ref != "v2" {
+		t.Fatalf("sidecar = %+v ok=%v, want the record's source", st, ok)
+	}
+	if rec := pullRemotes(t, f.globalPath)["llm"]; rec.Ref != "v2" {
+		t.Fatalf("record = %+v, want the ref untouched by a re-fetch", rec)
+	}
+	// --as names a new registration; it cannot rename an existing record.
+	pullAs = "other"
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "--as") {
+		t.Fatalf("err = %v, want --as refused on a re-fetch", err)
+	}
+}
+
+func TestPullCmdWithoutArgumentsUpdatesAll(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  one:\n    url: https://example.com/one.yaml\n  two:\n    url: https://example.com/two.yaml\n")
+	withPullFlags(t, func(string, string) ([]byte, string, error) {
+		return []byte(pullContent), "", nil
+	})
+
+	out, err := runPull(t)
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	for _, want := range []string{`remote "one"`, `remote "two"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary misses %q:\n%s", want, out)
+		}
+	}
+	for _, name := range []string{"one", "two"} {
+		if _, ok := config.ReadRemoteState(name); !ok {
+			t.Fatalf("%s was not pulled", name)
+		}
+	}
+	if rec := pullRemotes(t, f.globalPath)["one"]; rec.URL != "https://example.com/one.yaml" {
+		t.Fatalf("record = %+v, want an unchanged record", rec)
+	}
+}
+
+func TestPullCmdCompletesRecordNames(t *testing.T) {
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n  team-base:\n    url: https://example.com/team.yaml\n")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().Bool("no-local", false, "")
+	_ = cmd.Flags().Set("config", f.globalPath)
+
+	got, directive := completePull(cmd, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v, want NoFileComp", directive)
+	}
+	want := []string{"llm", "team-base"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("completions = %v, want %v", got, want)
+	}
+	if got, _ := completePull(cmd, []string{"llm"}, ""); got != nil {
+		t.Fatalf("completions past arg 0 = %v, want none", got)
+	}
+}
+
+// A remote that cannot be fetched keeps the old content and the record, and the
+// command fails: a pull never half-lands.
+func TestPullCmdFetchFailureKeepsEverything(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n")
+	if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	withPullFlags(t, func(string, string) ([]byte, string, error) {
+		return nil, "", errors.New("connection reset")
+	})
+
+	if _, err := runPull(t, "llm"); err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("err = %v, want the fetch failure", err)
+	}
+	content, err := os.ReadFile(config.RemoteContentPath("llm"))
+	if err != nil || string(content) != pullContent {
+		t.Fatalf("content = %q, %v; want the previous bytes", content, err)
+	}
+	if st, ok := config.ReadRemoteState("llm"); !ok || st.URL != "https://example.com/llm.yaml" {
+		t.Fatalf("sidecar = %+v ok=%v, want the previous state", st, ok)
+	}
+	// remote.ErrDowngrade must not be how a plain-http registration fails: that
+	// is a source-grammar error, and conflating the two would hide a real
+	// redirect downgrade.
+	pullAs = "http"
+	_, err = runPull(t, "http://example.com/llm.yaml")
+	if err == nil || errors.Is(err, remote.ErrDowngrade) {
+		t.Fatalf("err = %v, want a plain source error, not ErrDowngrade", err)
+	}
+}
