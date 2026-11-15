@@ -62,6 +62,38 @@ func TestParseSource(t *testing.T) {
 			url:  "https://user@example.com/c.yaml",
 		},
 		{
+			name: "https userinfo without a path is not a ref",
+			raw:  "https://user@example.com",
+			url:  "https://user@example.com",
+		},
+		{
+			name: "https splits a ref off a path that follows userinfo",
+			raw:  "https://user@example.com/c.yaml@v2",
+			url:  "https://user@example.com/c.yaml",
+			ref:  "v2",
+		},
+		{
+			name: "https keeps an @ in the query",
+			raw:  "https://example.com/c.yaml?sig=abc@123",
+			url:  "https://example.com/c.yaml?sig=abc@123",
+		},
+		{
+			name: "https keeps an @ in the fragment",
+			raw:  "https://example.com/c.yaml#a@b",
+			url:  "https://example.com/c.yaml#a@b",
+		},
+		{
+			name: "https splits a ref off before the query",
+			raw:  "https://example.com/c.yaml@v2?x=1",
+			url:  "https://example.com/c.yaml?x=1",
+			ref:  "v2",
+		},
+		{
+			name: "https keeps an @ that opens a directory",
+			raw:  "https://example.com/@types/env.yaml",
+			url:  "https://example.com/@types/env.yaml",
+		},
+		{
 			name: "scheme case does not matter",
 			raw:  "GitHub:u/r@v2",
 			url:  "https://raw.githubusercontent.com/u/r/v2/enver.yaml",
@@ -110,12 +142,37 @@ func TestParseSource(t *testing.T) {
 		{
 			name:    "github ref with a slash",
 			raw:     "github:u/r/models.yaml@release/v1",
-			wantErr: "release",
+			wantErr: `pins ref "release/v1"`,
+		},
+		{
+			name:    "https ref with a slash",
+			raw:     "https://example.com/c.yaml@release/v1",
+			wantErr: `pins ref "release/v1"`,
 		},
 		{
 			name:    "github owner with a space",
 			raw:     "github:u r/models.yaml",
 			wantErr: "segment",
+		},
+		{
+			name:    "github path may not step up",
+			raw:     "github:u/r/../x.yaml",
+			wantErr: `".."`,
+		},
+		{
+			name:    "github path may not step down",
+			raw:     "github:u/r/./x.yaml",
+			wantErr: `"."`,
+		},
+		{
+			name:    "github path segment may not hold an @",
+			raw:     "github:u/r/@types/env.yaml",
+			wantErr: `"@types"`,
+		},
+		{
+			name:    "https refuses an @ inside a path it cannot read",
+			raw:     "https://example.com/dir@x/file.yaml",
+			wantErr: `pins ref "x/file.yaml"`,
 		},
 		{
 			name:    "https without a host",
@@ -126,6 +183,11 @@ func TestParseSource(t *testing.T) {
 			name:    "https with an empty ref",
 			raw:     "https://example.com/c.yaml@",
 			wantErr: "empty ref",
+		},
+		{
+			name:    "https with an unescaped segment",
+			raw:     "https://example.com/%zz",
+			wantErr: "not a URL",
 		},
 	}
 	for _, tc := range tests {
@@ -171,9 +233,15 @@ func TestResolveRecord(t *testing.T) {
 			ref:  "v3",
 		},
 		{
-			name: "record ref alone resolves a plain source",
+			name: "record ref on a plain source is a label, not a rewrite",
 			rec:  config.RemoteRecord{URL: "https://example.com/c.yaml", Ref: "v3"},
 			url:  "https://example.com/c.yaml",
+			ref:  "v3",
+		},
+		{
+			name: "record ref does not disturb an @ in the query",
+			rec:  config.RemoteRecord{URL: "https://example.com/c.yaml?sig=a@1", Ref: "v3"},
+			url:  "https://example.com/c.yaml?sig=a@1",
 			ref:  "v3",
 		},
 		{
@@ -191,7 +259,7 @@ func TestResolveRecord(t *testing.T) {
 		{
 			name:    "record ref with a slash cannot be carried",
 			rec:     config.RemoteRecord{URL: "github:u/r", Ref: "release/v1"},
-			wantErr: "release/v1",
+			wantErr: `pins ref "release/v1"`,
 		},
 		{
 			name:    "record URL is still parsed",
@@ -218,5 +286,13 @@ func TestResolveRecord(t *testing.T) {
 				t.Fatalf("ResolveRecord(%+v) = (%q, %q), want (%q, %q)", tc.rec, url, ref, tc.url, tc.ref)
 			}
 		})
+	}
+}
+
+func TestUnparsedSourceDoesNotResolve(t *testing.T) {
+	var zero source
+	url, ref, err := zero.resolve("")
+	if err == nil {
+		t.Fatalf("zero source resolved to (%q, %q), want an error", url, ref)
 	}
 }

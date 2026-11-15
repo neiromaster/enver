@@ -1,5 +1,5 @@
-// Package remote resolves and fetches the config files a remotes: section
-// registers.
+// Package remote resolves the sources a remotes: section registers into the
+// URL and ref to fetch.
 package remote
 
 import (
@@ -27,12 +27,19 @@ var (
 	tokenRe = regexp.MustCompile(`^[A-Za-z0-9_.+~-]+$`)
 )
 
-// ParseSource resolves a source into the URL to fetch and the ref that URL
-// pins. A github: source takes owner/repo, an optional path (default
-// enver.yaml at the repo root) and an optional @ref (default HEAD), and
-// resolves to the raw.githubusercontent.com file URL. An https source is
-// fetched as written, with a trailing @ref split off; plain http is refused,
-// since a source may not arrive over a connection anyone can rewrite.
+// ParseSource resolves a source into the URL to fetch and the ref it pins.
+//
+// A github: source takes owner/repo, an optional path (default enver.yaml at
+// the repo root) and an optional @ref (default HEAD), and resolves to the
+// raw.githubusercontent.com file URL. The ref is a segment of that URL, so the
+// returned ref restates a segment already inside the returned URL: append it
+// nowhere.
+//
+// An https source is fetched exactly as written with a trailing @ref split off.
+// There the ref is a label: accepted and stored, compared by the divergence
+// check, reported by pull, never applied to the URL — what such a source serves
+// is whatever the address serves. Plain http is refused: a source may not
+// arrive over a connection anyone can rewrite.
 func ParseSource(raw string) (string, string, error) {
 	src, err := parseSource(raw)
 	if err != nil {
@@ -41,10 +48,11 @@ func ParseSource(raw string) (string, string, error) {
 	return src.resolve("")
 }
 
-// ResolveRecord resolves a remotes record into the URL to fetch and the ref
-// it pins. The record's ref wins over one spelled inline in its URL: pull
-// splits an inline ref into the record when the remote is registered, but a
-// hand-written config can still spell both.
+// ResolveRecord resolves a remotes record into the URL to fetch and the ref it
+// pins. The record's ref wins over one spelled inline in its URL: pull splits
+// an inline ref into the record when the remote is registered, but a
+// hand-written config can still spell both. As in ParseSource, a github ref
+// lands inside the returned URL while a plain https ref stays a label.
 func ResolveRecord(rec config.RemoteRecord) (string, string, error) {
 	src, err := parseSource(rec.URL)
 	if err != nil {
@@ -53,10 +61,12 @@ func ResolveRecord(rec config.RemoteRecord) (string, string, error) {
 	return src.resolve(rec.Ref)
 }
 
+// sourceKind is the form a source was written in. The zero value is no form, so
+// a source that was never parsed cannot resolve into a github URL.
 type sourceKind int
 
 const (
-	githubSource sourceKind = iota
+	githubSource sourceKind = iota + 1
 	urlSource
 )
 
@@ -90,15 +100,18 @@ func parseSource(raw string) (source, error) {
 }
 
 func parseGitHubSource(raw, rest string) (source, error) {
-	body, ref, hasRef := splitRef(rest)
-	if hasRef && ref == "" {
-		return source{}, fmt.Errorf("source %q has an empty ref", raw)
+	body, ref, _, err := splitRef(raw, rest)
+	if err != nil {
+		return source{}, err
 	}
 	segments := strings.Split(body, "/")
 	if len(segments) < 2 {
 		return source{}, fmt.Errorf("source %q is not github:owner/repo[/path][@ref]", raw)
 	}
 	for _, segment := range segments {
+		if segment == "." || segment == ".." {
+			return source{}, fmt.Errorf("source %q has a %q segment; a source names one file in the repo, it does not move around it", raw, segment)
+		}
 		if !tokenRe.MatchString(segment) {
 			return source{}, fmt.Errorf("source %q has an unusable segment %q; an owner, repo and path take letters, digits, . _ + ~ -", raw, segment)
 		}
@@ -111,9 +124,9 @@ func parseGitHubSource(raw, rest string) (source, error) {
 }
 
 func parseURLSource(raw string) (source, error) {
-	base, ref, hasRef := splitRef(raw)
-	if hasRef && ref == "" {
-		return source{}, fmt.Errorf("source %q has an empty ref", raw)
+	base, ref, _, err := splitPathRef(raw)
+	if err != nil {
+		return source{}, err
 	}
 	u, err := url.Parse(base)
 	if err != nil {
@@ -130,18 +143,36 @@ func parseURLSource(raw string) (source, error) {
 func (s source) resolve(override string) (string, string, error) {
 	ref := s.ref
 	if override != "" {
+		if err := validateRef(s.raw, override); err != nil {
+			return "", "", err
+		}
 		ref = override
 	}
-	if ref != "" && !tokenRe.MatchString(ref) {
-		return "", "", fmt.Errorf("source %q pins ref %q, which a source cannot carry; a ref takes letters, digits, . _ + ~ -", s.raw, ref)
-	}
-	if s.kind == urlSource {
+	switch s.kind {
+	case urlSource:
 		return s.base, ref, nil
+	case githubSource:
+		if ref == "" {
+			ref = githubDefaultRef
+		}
+		return strings.Join(append([]string{githubRawURL, s.owner, s.repo, ref}, s.path...), "/"), ref, nil
+	default:
+		return "", "", fmt.Errorf("source %q has no form", s.raw)
 	}
+}
+
+// validateRef admits the refs every source form can carry. A ref becomes a path
+// segment of the raw URL a github source resolves to, and travels into sidecar
+// state and fetch metadata everywhere else, so one grammar covers both: no
+// slash, no whitespace, nothing that changes URL structure.
+func validateRef(raw, ref string) error {
 	if ref == "" {
-		ref = githubDefaultRef
+		return fmt.Errorf("source %q has an empty ref", raw)
 	}
-	return strings.Join(append([]string{githubRawURL, s.owner, s.repo, ref}, s.path...), "/"), ref, nil
+	if !tokenRe.MatchString(ref) {
+		return fmt.Errorf("source %q pins ref %q, which a source cannot carry; a ref takes letters, digits, . _ + ~ -", raw, ref)
+	}
+	return nil
 }
 
 func splitScheme(raw string) (scheme, rest string, ok bool) {
@@ -152,13 +183,45 @@ func splitScheme(raw string) (scheme, rest string, ok bool) {
 	return strings.ToLower(m[1]), raw[len(m[0]):], true
 }
 
-// splitRef peels a trailing @ref off a source. A ref is one path segment, so
-// an @ sitting before the last slash belongs to the source text instead: a
-// URL's userinfo, or a directory in a github path.
-func splitRef(s string) (head, ref string, ok bool) {
+// splitRef peels an inline @ref off the end of s. The ref is whatever follows
+// the last @, unless that @ opens a segment: a path can hold @types or a
+// directory named after an address, and the head before an @ inside a segment
+// is read as such a directory. An @ inside a segment that goes on past a slash
+// is the case a ref and a directory cannot be told apart in, so the ref reading
+// is taken and validateRef refuses it rather than let pull silently fetch the
+// ref as path.
+func splitRef(raw, s string) (head, ref string, has bool, err error) {
 	i := strings.LastIndexByte(s, '@')
-	if i < 0 || i < strings.LastIndexByte(s, '/') {
-		return s, "", false
+	if i <= 0 || s[i-1] == '/' {
+		return s, "", false, nil
 	}
-	return s[:i], s[i+1:], true
+	ref = s[i+1:]
+	if err = validateRef(raw, ref); err != nil {
+		return "", "", false, err
+	}
+	return s[:i], ref, true, nil
+}
+
+// splitPathRef splits an inline ref off a URL path. Only the path can hold a
+// ref: an @ in the userinfo, the query or the fragment belongs to the address,
+// so those sources pass through whole.
+func splitPathRef(raw string) (head, ref string, has bool, err error) {
+	_, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return raw, "", false, nil
+	}
+	i := strings.IndexAny(rest, "/?#")
+	if i < 0 || rest[i] != '/' {
+		return raw, "", false, nil
+	}
+	start := len(raw) - len(rest) + i
+	path := rest[i:]
+	if j := strings.IndexAny(path, "?#"); j >= 0 {
+		path = path[:j]
+	}
+	head, ref, has, err = splitRef(raw, path)
+	if err != nil || !has {
+		return raw, "", false, err
+	}
+	return raw[:start+len(head)] + raw[start+len(path):], ref, true, nil
 }
