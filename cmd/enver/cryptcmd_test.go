@@ -454,3 +454,30 @@ func TestKeygenForceWrongPassphraseConfirmsStranding(t *testing.T) {
 		t.Fatal("a wrong passphrase under --force really strands the values; it must go through the confirm gate")
 	}
 }
+
+// TestCryptRefusesRemoteOnly pins encrypt and decrypt on a name only remote
+// content provides: there is no user-layer copy to seal or open, so the commands
+// point at the patch copy `add` creates instead of a bare not-found.
+func TestCryptRefusesRemoteOnly(t *testing.T) {
+	remoteWriteFixture(t, "profiles:\n  ollama:\n    env:\n      MODEL: llama\n")
+	const name = "llm/ollama"
+	for _, tt := range []struct {
+		verb string
+		run  func(*cobra.Command, []string) error
+	}{
+		{"encrypt", encryptCmd.RunE},
+		{"decrypt", decryptCmd.RunE},
+	} {
+		t.Run(tt.verb, func(t *testing.T) {
+			err := tt.run(&cobra.Command{}, []string{name})
+			if err == nil {
+				t.Fatalf("%s on a remote-only name must refuse", tt.verb)
+			}
+			for _, want := range []string{`remote "llm"`, "add a patch copy first", "enver add " + name} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %q, want it to carry %q", err, want)
+				}
+			}
+		})
+	}
+}

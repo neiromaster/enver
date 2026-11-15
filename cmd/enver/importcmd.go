@@ -66,15 +66,14 @@ var importCmd = &cobra.Command{
 		} else if err := validateProfileName(name); err != nil {
 			return err
 		}
+		// Resolution spans every layer, so the merged view answers the extends
+		// judgments and supplies the stack the write's marks come from.
+		merged, err := app.Load(appOpts())
+		if err != nil {
+			return err
+		}
 		if importExtends != "" {
 			parents := app.SplitExtends(importExtends)
-			// Parents and cycles are judged on the merged view: resolution
-			// spans both layers, so a global pick can loop through a local
-			// parent and vice versa.
-			merged, err := app.Load(appOpts())
-			if err != nil {
-				return err
-			}
 			for _, p := range parents {
 				if _, ok := merged.Profiles[p]; !ok {
 					return fmt.Errorf("extends profile %q does not exist", p)
@@ -84,9 +83,9 @@ var importCmd = &cobra.Command{
 				return err
 			}
 		}
-		// The marks come from the file this write leaves untouched: the profile
-		// being rewritten cannot see an ancestor that lives in the other layer.
-		other, err := otherLayer()
+		// The marks come from the layers this write leaves untouched: the profile
+		// being rewritten cannot see an ancestor that lives below it.
+		under, err := underLayers(merged)
 		if err != nil {
 			return err
 		}
@@ -95,7 +94,7 @@ var importCmd = &cobra.Command{
 			Force:          importForce,
 			Confirm:        ui.Confirm,
 			Resolve:        effectiveResolve,
-			OtherLayer:     &other,
+			Under:          under,
 			TargetIsGlobal: globalFlags.global,
 		})
 		if err != nil {

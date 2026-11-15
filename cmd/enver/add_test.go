@@ -6,12 +6,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
 	"github.com/neiromaster/enver/internal/ui"
 	"github.com/spf13/cobra"
 )
+
+// globalUnder wraps one config as the stack a local write sits on, with no pulled
+// remote below it.
+func globalUnder(cfg config.Config) []config.Layer {
+	return []config.Layer{{Label: config.LayerGlobal, Config: cfg}}
+}
 
 func TestValidateProfileName(t *testing.T) {
 	good := []string{"a", "anth", "glm-2", "prod_db", "A1", "0base", "llm/ollama"}
@@ -309,7 +317,7 @@ func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := buildSummary(entries, map[string]string{}, nil, addMarks(&noOther, stored, "work", nil, entries))
+	sum := buildSummary(entries, map[string]string{}, nil, addMarks(globalUnder(noOther), stored, "work", nil, entries))
 	if len(sum) != 1 || sum[0].Key != "~"+key {
 		t.Fatalf("a stored mark must survive a plain retype in the preview: %+v", sum)
 	}
@@ -317,7 +325,7 @@ func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
 		t.Fatalf("the stored mark must mask the preview value: %+v", sum[0])
 	}
 
-	if err := commitAdd(path, "work", nil, entries, noOther, stored, false); err != nil {
+	if err := commitAdd(path, "work", nil, entries, globalUnder(noOther), stored, false); err != nil {
 		t.Fatalf("commitAdd: %v", err)
 	}
 	got, err := config.LoadFile(path)
@@ -338,7 +346,7 @@ func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
 		"work": {Extends: config.Extends{"base"}, Env: map[string]string{key: "old"}},
 	}}
 	sum = buildSummary(entries, map[string]string{key: "parent"}, map[string]bool{key: true},
-		addMarks(&other, own, "work", config.Extends{"base"}, entries))
+		addMarks(globalUnder(other), own, "work", config.Extends{"base"}, entries))
 	if len(sum) != 1 || sum[0].Key != key {
 		t.Fatalf("an own entry outranks the inherited mark, so the preview must stay bare: %+v", sum)
 	}
@@ -386,14 +394,14 @@ func TestAddMarksInheritAcrossLayers(t *testing.T) {
 	}}
 	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "p"}}
 
-	marks := addMarks(&other, config.Config{}, "work", config.Extends{"base"}, entries)
+	marks := addMarks(globalUnder(other), config.Config{}, "work", config.Extends{"base"}, entries)
 	if !marks["GH_TOKEN"] || marks["PLAIN"] {
 		t.Fatalf("marks = %#v, want GH_TOKEN marked and PLAIN not", marks)
 	}
 	own := config.Config{Profiles: map[string]config.Profile{
 		"work": {Env: map[string]string{"GH_TOKEN": "old"}},
 	}}
-	if marks := addMarks(&other, own, "work", config.Extends{"base"}, entries); marks["GH_TOKEN"] {
+	if marks := addMarks(globalUnder(other), own, "work", config.Extends{"base"}, entries); marks["GH_TOKEN"] {
 		t.Fatalf("the target's own unmarked entry must win: %#v", marks)
 	}
 }
@@ -407,7 +415,7 @@ func TestCommitAddWritesInheritedMark(t *testing.T) {
 		"base": {Env: map[string]string{"GH_TOKEN": "parent"}, Marked: map[string]bool{"GH_TOKEN": true}},
 	}}
 	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "typed"}, {Key: "PLAIN", Value: "p"}}
-	if err := commitAdd(path, "work", config.Extends{"base"}, entries, other, config.Config{}, false); err != nil {
+	if err := commitAdd(path, "work", config.Extends{"base"}, entries, globalUnder(other), config.Config{}, false); err != nil {
 		t.Fatalf("commitAdd: %v", err)
 	}
 	got, err := config.LoadFile(path)
@@ -443,7 +451,7 @@ func TestCommitAddMergesTypedMarks(t *testing.T) {
 		{Key: "PROJECT_PATH", Value: "/tmp", Secret: true},
 		{Key: "~SECOND", Value: "s"},
 	}
-	if err := commitAdd(path, "work", config.Extends{"base"}, entries, other, config.Config{}, false); err != nil {
+	if err := commitAdd(path, "work", config.Extends{"base"}, entries, globalUnder(other), config.Config{}, false); err != nil {
 		t.Fatalf("commitAdd: %v", err)
 	}
 	got, err := config.LoadFile(path)
@@ -587,5 +595,171 @@ func TestPromptProfileNameAbortsOnReadFailure(t *testing.T) {
 		return "", io.EOF
 	}); ok {
 		t.Fatal("a failed read must abort, not re-prompt forever")
+	}
+}
+
+// remoteWriteFixture lands a pulled remote's content together with a global file
+// declaring its record, and returns the merged view a writer answers against. The
+// cwd is the fixture's directory, so the local layer is config.LocalPath() and the
+// remote's content sits where a re-pull would look for it.
+func remoteWriteFixture(t *testing.T, content string) (cfgPath string, merged config.Config) {
+	t.Helper()
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+
+	if err := config.WriteRemoteContent("llm", []byte(content)); err != nil {
+		t.Fatalf("write remote content: %v", err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/enver.yaml", PulledAt: time.Now()}); err != nil {
+		t.Fatalf("write remote state: %v", err)
+	}
+	cfgPath = filepath.Join(dir, "global.yaml")
+	body := "remotes:\n  llm:\n    url: https://example.com/enver.yaml\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	globalFlags.configPath = cfgPath
+	globalFlags.global = false
+	globalFlags.noLocal = false
+	merged, err := app.Load(appOpts())
+	if err != nil {
+		t.Fatalf("load merged: %v", err)
+	}
+	return cfgPath, merged
+}
+
+// TestAddBootstrapOverRemote pins add's patch bootstrap: a profile that exists
+// only as remote content is exactly what add creates a user-layer copy of. The
+// copy lands in the write target with the mark the remote declares, the summary
+// says which remote it patches, and the pulled content stays byte-identical so a
+// re-pull finds what it expects.
+func TestAddBootstrapOverRemote(t *testing.T) {
+	const content = "profiles:\n  ollama:\n    env:\n      ~GH_TOKEN: remote-secret\n      MODEL: llama\n"
+	cfgPath, merged := remoteWriteFixture(t, content)
+	const name = "llm/ollama"
+
+	if _, ok := merged.Profiles[name]; !ok {
+		t.Fatalf("fixture premise: %q must resolve through the remote projection (%v)", name, merged.ProfileNames())
+	}
+	if !config.IsRemoteLayer(merged.ProfileLayer[name]) {
+		t.Fatalf("fixture premise: %q must be remote-provided, layer = %q", name, merged.ProfileLayer[name])
+	}
+	target := config.LocalPath()
+	targetCfg, err := config.LoadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := targetCfg.Profiles[name]; ok {
+		t.Fatalf("fixture premise: the write target must not declare %q yet", name)
+	}
+
+	patchRemote, err := addPlacement(merged, targetCfg, target, name)
+	if err != nil {
+		t.Fatalf("a remote-provided name is the patch bootstrap, not a scope error: %v", err)
+	}
+	if patchRemote != "llm" {
+		t.Fatalf("patchRemote = %q, want llm", patchRemote)
+	}
+
+	under, err := underLayers(merged)
+	if err != nil {
+		t.Fatalf("under layers: %v", err)
+	}
+	entries := []ui.EnvEntry{{Key: "GH_TOKEN", Value: "mine"}}
+	if err := commitAdd(target, name, nil, entries, under, targetCfg, false); err != nil {
+		t.Fatalf("commitAdd: %v", err)
+	}
+
+	prof, _, ok, err := config.ReadProfile(target, name)
+	if err != nil || !ok {
+		t.Fatalf("the patch copy must land in the write target: ok=%t err=%v", ok, err)
+	}
+	if !prof.Marked["GH_TOKEN"] {
+		t.Fatalf("the mark the remote declares must reach the patch: %#v", prof.Marked)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "~GH_TOKEN") {
+		t.Fatalf("the local file must spell the inherited mark:\n%s", data)
+	}
+
+	sum := addSummary(name, target, patchRemote, false)
+	if !strings.Contains(sum, `remote "llm"`) || !strings.Contains(sum, "patches") {
+		t.Fatalf("the summary must say the copy patches remote content:\n%s", sum)
+	}
+
+	pulled, err := os.ReadFile(config.RemoteContentPath("llm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(pulled) != content {
+		t.Fatalf("the pulled content must stay untouched:\n%s", pulled)
+	}
+
+	// The patch composes on top: the remote's other keys still resolve and the
+	// patched one wins.
+	merged, err = config.LoadMerged(cfgPath, true)
+	if err != nil {
+		t.Fatalf("load merged after the patch: %v", err)
+	}
+	r, err := merged.ResolveProfile(name)
+	if err != nil {
+		t.Fatalf("resolve the patched profile: %v", err)
+	}
+	if r.Env["MODEL"] != "llama" || r.Env["GH_TOKEN"] != "mine" {
+		t.Fatalf("resolved env = %#v, want the remote's MODEL and the patch's GH_TOKEN", r.Env)
+	}
+	if !r.Marked["GH_TOKEN"] {
+		t.Fatalf("the patched key must resolve marked: %#v", r.Marked)
+	}
+}
+
+// TestAddRefusesCrossLayerShadow pins the scope rule: a name the other user layer
+// already declares is not add's to copy, since a second, shadowing copy in this
+// layer would override the user's own profile per key. The refusal is the shared
+// scope hint, and the layer that owns the profile still writes it.
+func TestAddRefusesCrossLayerShadow(t *testing.T) {
+	globalPath, localPath := twoLayers(t)
+	globalFlags.noLocal = false
+	const name = "llm/ollama"
+	if err := config.UpsertProfile(globalPath, name, config.Profile{
+		Env:    map[string]string{"MODEL": "x"},
+		Marked: map[string]bool{"MODEL": true},
+	}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := app.Load(appOpts())
+	if err != nil {
+		t.Fatalf("load merged: %v", err)
+	}
+	if layer := merged.ProfileLayer[name]; layer != config.LayerGlobal {
+		t.Fatalf("fixture premise: %q must be the global layer's, got %q", name, layer)
+	}
+	targetCfg, err := config.LoadFile(localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := addPlacement(merged, targetCfg, localPath, name); err == nil || !strings.Contains(err.Error(), "--global") {
+		t.Fatalf("a name the global layer owns must be refused with the scope hint, got %v", err)
+	}
+
+	globalFlags.global = true
+	globalCfg, err := config.LoadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := addPlacement(merged, globalCfg, globalPath, name); err != nil {
+		t.Fatalf("the layer that owns the profile writes it: %v", err)
+	}
+
+	globalFlags.global = false
+	if _, err := addPlacement(merged, targetCfg, localPath, "fresh"); err != nil {
+		t.Fatalf("a name no layer declares must be writable: %v", err)
 	}
 }

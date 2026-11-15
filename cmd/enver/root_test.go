@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neiromaster/enver/internal/config"
@@ -135,5 +136,39 @@ func TestCompletionAppliesChdir(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "projdev" {
 		t.Fatalf("completion = %v, want [projdev] (from --chdir target)", got)
+	}
+}
+
+// TestNotFoundInTargetHintsRemotePatch pins the miss a remote-only name produces:
+// remote content is a read-only base, so the writer's remedy is a patch copy in
+// the user layer, and the hint names both the remote and the command that makes
+// one. A name no layer provides keeps the plain miss.
+func TestNotFoundInTargetHintsRemotePatch(t *testing.T) {
+	_, merged := remoteWriteFixture(t, "profiles:\n  ollama:\n    env:\n      MODEL: llama\n")
+	const name = "llm/ollama"
+	if _, ok := merged.Profiles[name]; !ok {
+		t.Fatalf("fixture premise: %q must resolve through the remote projection (%v)", name, merged.ProfileNames())
+	}
+
+	err := notFoundInTarget(name, config.LocalPath())
+	if err == nil {
+		t.Fatal("a remote-only name must not resolve in the write target")
+	}
+	for _, want := range []string{`remote "llm"`, "add a patch copy first", "enver add " + name} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to carry %q", err, want)
+		}
+	}
+
+	if err := notFoundInTarget("ghost", config.LocalPath()); err == nil || err.Error() != `profile "ghost" not found` {
+		t.Fatalf("a name no layer provides must keep the plain miss, got %v", err)
+	}
+
+	// The patch copy lands in the write target, so the hint carries the scope
+	// flag the refused write carried.
+	globalFlags.global = true
+	err = notFoundInTarget(name, config.GlobalPath(globalFlags.configPath))
+	if err == nil || !strings.Contains(err.Error(), "enver add -g "+name) {
+		t.Fatalf("a global-scope miss must hint the scoped patch copy, got %v", err)
 	}
 }

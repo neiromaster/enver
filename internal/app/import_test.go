@@ -115,9 +115,9 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), targetPath, "work", "", ImportOptions{
-				Replace:    tt.replace,
-				Force:      true,
-				OtherLayer: &globalCfg,
+				Replace: tt.replace,
+				Force:   true,
+				Under:   []config.Layer{{Label: config.LayerGlobal, Config: globalCfg}},
 			}); err != nil {
 				t.Fatalf("ImportEnv: %v", err)
 			}
@@ -145,58 +145,52 @@ func TestImportEnvKeepsInheritedMark(t *testing.T) {
 	}
 }
 
-// TestImportEnvFoldsLayersInReaderOrder pins the fold direction of a write into
-// the global layer. Readers fold the global file first and the local file over
-// it, and extends concatenate base-first, so the parent a later layer declares
-// wins a shared key's value and mark. Both cases below declare one parent in
-// each layer: the winner is the local layer's, whether that means the mark or
-// the plain entry, so an inverted fold fails the test in both directions.
-func TestImportEnvFoldsLayersInReaderOrder(t *testing.T) {
+// TestImportEnvFoldsUnderStack pins the fold direction of a write into the global
+// layer: the stack the target sits on folds first, deepest layer first, and the
+// target folds over it. Extends concatenate base-first, so a nearer layer wins a
+// shared key's value and mark — and a fence keeps the era it was declared in,
+// whichever layer that is.
+func TestImportEnvFoldsUnderStack(t *testing.T) {
 	tests := []struct {
 		name       string
 		target     string
-		other      string
+		under      string
 		wantMarked bool
 	}{
 		{
-			name:       "the local parent folds last and marks the key",
-			target:     "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n",
-			other:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
+			name:       "a remote parent supplies the mark",
+			target:     "profiles:\n  work:\n    extends: [marked]\n",
+			under:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n",
 			wantMarked: true,
 		},
 		{
-			name:       "the local parent folds last and clears the mark",
-			target:     "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
-			other:      "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n",
+			name:       "the target's own entry outranks the remote parent",
+			target:     "profiles:\n  marked:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [marked]\n",
+			under:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n",
 			wantMarked: false,
 		},
 		{
-			// The target layer fences the key its own profile also extends a
-			// plain parent for. Folding it as the base layer turns that fence
-			// into a carried one tagged with a layer the marking parent does not
-			// live in, so the gate silences it and the mark stands; folding it as
-			// the override layer would make the fence declared and strip the key.
-			name:       "the local parent outranks a carried fence in the target layer",
-			target:     "profiles:\n  plain:\n    env:\n      GH_TOKEN: plain\n  work:\n    extends: [plain]\n    unset: [GH_TOKEN]\n",
-			other:      "profiles:\n  marked:\n    env:\n      ~GH_TOKEN: m\n  work:\n    extends: [marked]\n",
-			wantMarked: true,
+			name:       "a remote fence strips the key it fences",
+			target:     "profiles:\n  work:\n    extends: [fenced]\n",
+			under:      "profiles:\n  fenced:\n    unset: [GH_TOKEN]\n    env:\n      ~GH_TOKEN: m\n",
+			wantMarked: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			targetPath := filepath.Join(dir, "global.yaml")
-			otherPath := filepath.Join(dir, ".enver.yaml")
+			underPath := filepath.Join(dir, "remote.yaml")
 			writeFile(t, targetPath, tt.target)
-			writeFile(t, otherPath, tt.other)
+			writeFile(t, underPath, tt.under)
 
-			otherCfg, err := config.LoadFile(otherPath)
+			underCfg, err := config.LoadFile(underPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := ImportEnv(strings.NewReader("GH_TOKEN=new\n"), targetPath, "work", "", ImportOptions{
 				Force:          true,
-				OtherLayer:     &otherCfg,
+				Under:          []config.Layer{{Label: config.RemoteLayer("llm"), Config: underCfg}},
 				TargetIsGlobal: true,
 			}); err != nil {
 				t.Fatalf("ImportEnv: %v", err)
