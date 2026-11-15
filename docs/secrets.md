@@ -87,7 +87,7 @@ anchor, which is a different decision than encrypting this profile.
 ### The mark follows the winning entry
 
 A mark belongs to an entry, so the closest definition wins it along with the
-value — across the two layers and along an `extends` chain alike. The idiom for
+value — across the layers and along an `extends` chain alike. The idiom for
 a machine-local value that should stay readable is therefore a closer unmarked
 definition: the shared global entry keeps the key sealed and masked, while the
 local file writes it without `~`.
@@ -133,8 +133,49 @@ enver keygen)` and the command still exits 0, naming what it could not read
 instead of printing ciphertext. `show --format json`, `export`, `dotenv`, `x`,
 `encrypt` and `decrypt` are execution paths — handing a child or a machine a
 missing secret is worse than refusing — so they fail, naming the keys that
-blocked them. An absent key degrades or refuses as above; a key that is present
-but wrong is a misconfiguration and fails everywhere.
+blocked them.
+
+A key that is present but **wrong** is judged by who wrote the value it cannot
+read. A value from your **own** layers is a key mismatch about your own file —
+a misconfiguration that fails everywhere, early and loud. A value a **remote**
+supplied is most likely its author's ciphertext, which your key was never meant
+to open; it degrades per key instead.
+
+### Ciphertext someone else wrote
+
+Publishing `enc:v3` values in a remote config is a distribution feature, not an
+error: the author's own machines read them with the author's key, and everyone
+else patches the keys they cannot read. Pull says so, listing the encrypted keys
+it landed.
+
+On a key whose winning value a remote supplied:
+
+- `show` reports it per key — `(cannot decrypt: wrong key (remote))` in text,
+  plus an `undecryptable` map in `--format json`, whose entries are left out of
+  `env`. (`list` reports counts only and never decrypts at all.)
+- `x`, `export` and `dotenv` **refuse**, naming the keys and the patch path. A
+  child process or an exported file missing a secret silently is worse than a
+  loud refusal.
+
+Patch those keys with **plaintext** values in your own layer while any foreign
+ciphertext remains:
+
+```yaml
+# ./.enver.yaml — a plaintext patch of a key the author sealed
+profiles:
+  llm/ollama:
+    env:
+      OLLAMA_API_KEY: sk-live
+```
+
+A patch written through `enver add` inherits the mark the remote's entry carries
+for that key, so the replacement stays masked and remains an `encrypt`
+candidate; spell `~KEY` yourself in a hand-written patch, since the closer
+unmarked definition is what the mark follows. Encrypt only after every foreign
+value is replaced: your ciphertext beside the author's puts two salts in one
+profile, which breaks passphrase recovery (see
+[Value format and era rules](#value-format-and-era-rules)). Pull's warning says
+the same thing in the same words, so the path is never folklore.
 
 ## Value format and era rules
 

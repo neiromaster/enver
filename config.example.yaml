@@ -47,3 +47,19 @@ profiles:
     env:
       DATABASE_URL: postgres://user:pass@db.internal:5432/app
       LOG_LEVEL: info
+
+# Remote configs: a config someone else publishes, fetched on demand and read
+# offline afterwards. Register one with `enver pull <source> --as <name>` (this
+# section is what that writes), or write it by hand. Its profiles load as
+# <name>/<profile>; --no-prefix keeps their bare upstream names instead. Patch a
+# projected profile with your own profile of the same name in a layer above:
+#
+# remotes:
+#   llm:
+#     url: github:someone/llm-profiles   # or https://example.com/enver.yaml
+#     ref: v2                            # optional; defaults to HEAD
+#
+# profiles:
+#   llm/ollama:
+#     env:
+#       OLLAMA_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxx

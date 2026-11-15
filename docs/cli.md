@@ -20,6 +20,7 @@ enver rename [old] [new]                  Rename a profile (rewrites extends/def
 enver duplicate <src> [new]               Copy a profile (extends, env, comments)
 enver default [profile] [--clear]         Set, show, or clear the default profile
 enver validate                            Check config health
+enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --force)
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
@@ -55,12 +56,22 @@ Every `show` line is annotated with the defining profile and layer
 (`ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)`), so with multi-parent
 `extends` you can see at a glance which profile actually won a key — a
 variable picked up from `./.enver.yaml` is marked `(local)`, one from the
-global config `(global)`. Keys the chain deliberately excludes render as
-comment rows (`# DEBUG — unset by "prod"`, detailed in
+global config `(global)`, and one a pulled remote supplied `(remote:<name>)`,
+which is how a swapped endpoint becomes visible. Keys the chain deliberately
+excludes render as comment rows (`# DEBUG — unset by "prod"`, detailed in
 [`dotenv.md`](./dotenv.md)). `--format json` carries the same provenance as a
 structured `sources` map plus an `unsets` map with the same profile/layer
 shape, so a machine reader can tell a deliberately unset key from an
-accidental absence.
+accidental absence. A key whose ciphertext this key cannot read is reported
+per key instead of rendered: `show` shows `(cannot decrypt: …)` on its row,
+`--format json` carries an `undecryptable` map (`key → reason`) and leaves
+those keys out of `env` entirely. A text `show` tolerates a missing key; JSON
+still fails on one. A key that is present but cannot read a value a remote
+supplied is the exception — it degrades per key in both formats (see
+[`secrets.md`](./secrets.md#ciphertext-someone-else-wrote)).
+`enver list --format json` carries the same idea for profiles it cannot
+resolve: an unresolvable chain a remote caused is listed in a `skipped` array
+(`{name, reason}`) with a note on stderr, rather than failing the listing.
 
 In a terminal, text output is styled: keys are bold, and every comment — the
 `# profile:` header, provenance suffixes, unset rows — is dim. Styling is
@@ -88,8 +99,35 @@ still honors `--no-mask`).
 
 Profile names may collide with subcommand verbs (`x`, `show`, `export`,
 `dotenv`, `import`, `list`, `add`, `edit`, `remove`, `rename`, `duplicate`,
-`default`, `validate`, `keygen`, `encrypt`, `decrypt`, `completion`);
-`enver x <name> -- <command>` addresses such a profile directly.
+`default`, `validate`, `pull`, `keygen`, `encrypt`, `decrypt`, `update`,
+`completion`); `enver x <name> -- <command>` addresses such a profile directly.
+
+## Remotes
+
+`enver pull` is the only command that touches the network: it fetches a source,
+validates it, and stores it as the lowest layer, so `show`, `x`, `list` and the
+TUI keep working offline against the stored copy.
+
+```
+enver pull github:someone/llm-profiles --as llm  register a source and fetch it
+enver pull llm                                   re-fetch one remote
+enver pull                                       re-fetch every registered remote
+enver pull --rm llm                              remove the record and its content
+```
+
+Argument completion offers the registered record names, so `enver pull <Tab>`
+lists what can be re-fetched or removed. Registration writes the global config;
+`--local` writes the project's `.enver.yaml` instead, so the record travels with
+the repo. A remote's profiles
+load as `<name>/<profile>`; `--no-prefix` stores them under their bare upstream
+names, and a re-pull never changes the mode a record was stored with. `--rm`
+removes the closest declaration in the merged view (`-g`/`--local` target an
+explicit layer) and deletes the content only when no layer still declares the
+name. A re-registration that changes the source or the mode of a record your
+patches sit under is a takeover: pull warns and asks first, and `--force`
+accepts it without asking. Records, projection, the pull gate, the divergence
+warning and the patch flow are documented in
+[`config.md`](./config.md#remotes).
 
 ## Removed forms
 
