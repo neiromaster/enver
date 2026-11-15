@@ -488,8 +488,8 @@ profiles:
 
 	t.Run("control characters", func(t *testing.T) {
 		content := Config{Profiles: map[string]Profile{
-			"ol\x1blama": {
-				Extends:  Extends{"ol\x1blama2", "provider\x07/base"},
+			"ol\x1blama\n": {
+				Extends:  Extends{"ol\x1blama2\r\n", "provider\x07/base\n"},
 				Unset:    Unsets{"LEG\x07ACY"},
 				Env:      map[string]string{"HOST\x1b": "http://x\x07y", "TLS\x1b": "line1\nline2"},
 				Comments: map[string]string{"HOST\x1b": "hi\x1b[31mred\x07\n# second line"},
@@ -503,6 +503,8 @@ profiles:
 		if !ok {
 			t.Fatalf("projected profiles = %v, want a cleaned llm/ollama", slices.Sorted(maps.Keys(proj.Profiles)))
 		}
+		// A name never carries a line break: it reaches list rendering,
+		// completions and the TUI, where an embedded newline is line injection.
 		wantExtends := Extends{"llm/ollama2", "provider/base"}
 		if !slices.Equal(p.Extends, wantExtends) {
 			t.Fatalf("extends = %v, want %v", p.Extends, wantExtends)
@@ -511,8 +513,9 @@ profiles:
 		if !slices.Equal(p.Unset, wantUnset) {
 			t.Fatalf("unset = %v, want %v", p.Unset, wantUnset)
 		}
-		// Newlines survive: a multi-line value (a PEM bundle) and a multi-line
-		// comment are structure, not terminal escapes.
+		// Value and comment text is data, so its newlines survive: a multi-line
+		// value (a PEM bundle) and a multi-line comment are structure, not
+		// terminal escapes.
 		if want := map[string]string{"HOST": "http://xy", "TLS": "line1\nline2"}; !maps.Equal(p.Env, want) {
 			t.Fatalf("env = %v, want %v", p.Env, want)
 		}
@@ -521,6 +524,22 @@ profiles:
 		}
 		if !p.Marked["HOST"] || len(p.Marked) != 1 {
 			t.Fatalf("marked = %v, want only HOST", p.Marked)
+		}
+	})
+
+	t.Run("names that clean to one profile resolve deterministically", func(t *testing.T) {
+		// Two upstream names differing only by a control character clean to one
+		// projected name. The fold must not depend on map iteration order, so the
+		// later name in sorted order wins, as a later entry does everywhere else.
+		content := Config{Profiles: map[string]Profile{
+			"shar\x1bed": {Env: map[string]string{"K": "injected"}},
+			"shared":     {Env: map[string]string{"K": "honest"}},
+		}}
+		for range 16 {
+			proj := Project(content, "llm")
+			if got, want := proj.Profiles["llm/shared"].Env["K"], "honest"; got != want {
+				t.Fatalf("llm/shared K = %q, want %q (the later sorted name must win every run)", got, want)
+			}
 		}
 	})
 }

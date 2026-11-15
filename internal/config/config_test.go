@@ -1843,3 +1843,99 @@ func TestLoadMergedEmptyContentFile(t *testing.T) {
 		t.Fatalf("warnings = %q, want none", cfg.Warnings)
 	}
 }
+
+// Two remotes at once: content composes across records through the passthrough
+// extends rule, every entry keeps the remote that supplied it, and a record may
+// be declared by the local layer alone. A same-projected-name collision between
+// two records is unreachable while every record is prefixed — record names are
+// single-level and distinct, so the prefixes are disjoint; the spec scopes that
+// rule to no-prefix records, and the collision case belongs here when that flag
+// lands.
+func TestLoadMergedMultipleRemotes(t *testing.T) {
+	content := map[string]string{
+		"a": "profiles:\n  app:\n    extends: b/foo\n    env:\n      A_KEY: from-a\n",
+		"b": "profiles:\n  foo:\n    env:\n      B_KEY: from-b\n",
+	}
+	global := remoteRecordsYAML("a") + "profiles:\n  user:\n    env:\n      K: global\n"
+	local := remoteRecordsYAML("b")
+	load := useRemoteFixture(t, global, local, content)
+
+	cfg := load(true)
+	if _, ok := cfg.Remotes["b"]; !ok {
+		t.Fatalf("merged remotes = %v, want the record the local layer declares", cfg.Remotes)
+	}
+	if got, want := prefixed(cfg, "a"), []string{"a/app"}; !slices.Equal(got, want) {
+		t.Fatalf("a's profiles = %v, want %v", got, want)
+	}
+	if got, want := prefixed(cfg, "b"), []string{"b/foo"}; !slices.Equal(got, want) {
+		t.Fatalf("b's profiles = %v, want %v", got, want)
+	}
+	// The target already names the projected form, so it is not rewritten — it
+	// binds remote b's profile and nothing else.
+	wantExtends := Extends{"b/foo"}
+	if !slices.Equal(cfg.Profiles["a/app"].Extends, wantExtends) {
+		t.Fatalf("a/app extends = %v, want %v", cfg.Profiles["a/app"].Extends, wantExtends)
+	}
+
+	r, err := cfg.ResolveProfile("a/app")
+	if err != nil {
+		t.Fatalf("ResolveProfile(a/app) err = %v", err)
+	}
+	if want := map[string]string{"A_KEY": "from-a", "B_KEY": "from-b"}; !maps.Equal(r.Env, want) {
+		t.Fatalf("a/app env = %v, want %v", r.Env, want)
+	}
+	if want := []string{"a/app", "b/foo"}; !slices.Equal(r.Chain, want) {
+		t.Fatalf("chain = %v, want %v", r.Chain, want)
+	}
+	// Each remote keeps its own label through the multi-remote fold.
+	if got := r.Sources["A_KEY"]; got != (Source{Profile: "a/app", Layer: "remote:a"}) {
+		t.Fatalf("A_KEY source = %+v, want remote:a", got)
+	}
+	if got := r.Sources["B_KEY"]; got != (Source{Profile: "b/foo", Layer: "remote:b"}) {
+		t.Fatalf("B_KEY source = %+v, want remote:b", got)
+	}
+	// The fold does not depend on map iteration order.
+	if again := load(true); !reflect.DeepEqual(cfg, again) {
+		t.Fatalf("two loads of one fixture differ:\n%+v\n%+v", cfg, again)
+	}
+
+	// Without the local layer the record is not in view, so its content is
+	// unclaimed and the orphan advisory reports it.
+	globalOnly := load(false)
+	if got := prefixed(globalOnly, "b"); len(got) != 0 {
+		t.Fatalf("profiles = %v, want none for a record only the local layer declares", got)
+	}
+	if len(globalOnly.Warnings) != 1 || !strings.Contains(globalOnly.Warnings[0], `"b"`) {
+		t.Fatalf("warnings = %q, want exactly one advisory about b's unclaimed content", globalOnly.Warnings)
+	}
+}
+
+// Content that is on disk but unreadable must not vanish from resolution in
+// silence: its stat succeeds, so the divergence check has nothing to say about
+// it, and the load raises its own advisory instead.
+func TestLoadMergedUnreadableContentFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not deny reads on Windows")
+	}
+	load := useRemoteFixture(t, remoteRecordsYAML("llm"), "",
+		map[string]string{"llm": "profiles:\n  base:\n    env:\n      K: v\n"})
+	if err := os.Chmod(RemoteContentPath("llm"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(RemoteContentPath("llm")); err == nil {
+		t.Skip("the filesystem granted the read despite mode 000 (running as root?)")
+	}
+
+	cfg := load(false)
+	if len(cfg.Profiles) != 0 {
+		t.Fatalf("profiles = %v, want none from content that cannot be read", cfg.ProfileNames())
+	}
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one advisory about unreadable content", cfg.Warnings)
+	}
+	for _, want := range []string{"cannot be read", "enver pull llm"} {
+		if !strings.Contains(cfg.Warnings[0], want) {
+			t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+		}
+	}
+}
