@@ -84,7 +84,7 @@ func TestUnsetYAMLScalarAndSequence(t *testing.T) {
 func TestMergeCrossLayerDefineBeatsLayerUnset(t *testing.T) {
 	global := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"TOKEN"}}}}
 	local := Config{Profiles: map[string]Profile{"dev": {Env: map[string]string{"TOKEN": "v"}}}}
-	r, err := Merge(global, local).ResolveProfile("dev")
+	r, err := Merge(global, local, LayerGlobal, LayerLocal).ResolveProfile("dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestMergeConsumesInheritedUnsetsBeforeOverride(t *testing.T) {
 		"dev":  {Env: map[string]string{"TOKEN": "t"}},
 		"leaf": {Extends: Extends{"dev"}},
 	}}
-	cfg := Merge(global, local)
+	cfg := Merge(global, local, LayerGlobal, LayerLocal)
 	r, err := cfg.ResolveProfile("dev")
 	if err != nil {
 		t.Fatal(err)
@@ -132,12 +132,12 @@ func TestMergeUnsetListIsTheOverridingLayers(t *testing.T) {
 		"p": {Unset: Unsets{"A"}, Env: map[string]string{"K": "base"}},
 	}}
 	overNoUnset := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"K": "over"}}}}
-	if u := Merge(base, overNoUnset).Profiles["p"].Unset; len(u) != 0 {
+	if u := Merge(base, overNoUnset, LayerGlobal, LayerLocal).Profiles["p"].Unset; len(u) != 0 {
 		t.Fatalf("merged unset = %v, want none: the inherited list was consumed, not carried", u)
 	}
 	baseNoUnset := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{"K": "base"}}}}
 	over := Config{Profiles: map[string]Profile{"p": {Unset: Unsets{"B", "C"}}}}
-	if u := Merge(baseNoUnset, over).Profiles["p"].Unset; !slices.Equal(u, []string{"B", "C"}) {
+	if u := Merge(baseNoUnset, over, LayerGlobal, LayerLocal).Profiles["p"].Unset; !slices.Equal(u, []string{"B", "C"}) {
 		t.Fatalf("merged unset = %v, want [B C]", u)
 	}
 }
@@ -152,7 +152,7 @@ func TestMergeCarriedChainFenceBeatsAncestorDefine(t *testing.T) {
 		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"ANTHROPIC_API_KEY"}},
 	}}
 	local := Config{Profiles: map[string]Profile{"bare": {Env: map[string]string{"MODEL": "lm"}}}}
-	r, err := Merge(global, local).ResolveProfile("bare")
+	r, err := Merge(global, local, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestMergeLocalRefillThroughAncestorBeatsGlobalChainFence(t *testing.T) {
 		"bare": {Extends: Extends{"anth"}, Unset: Unsets{"API_KEY"}},
 	}}
 	local := Config{Profiles: map[string]Profile{"anth": {Env: map[string]string{"API_KEY": "l"}}}}
-	r, err := Merge(global, local).ResolveProfile("bare")
+	r, err := Merge(global, local, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestMergeSelfFenceStaysStrippedAcrossLayers(t *testing.T) {
 		t.Fatalf("unmerged global leaked K: %v", base.Env)
 	}
 	unrelated := Config{Profiles: map[string]Profile{"foo": {Env: map[string]string{"X": "1"}}}}
-	merged, err := Merge(selfFenceGlobal(), unrelated).ResolveProfile("bare")
+	merged, err := Merge(selfFenceGlobal(), unrelated, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestMergeSelfFenceStaysStrippedAcrossLayers(t *testing.T) {
 		t.Fatalf("K = %q (%v): an unrelated local file must not undo the global fence", merged.Env["K"], merged.Env)
 	}
 	refill := Config{Profiles: map[string]Profile{"bare": {Env: map[string]string{"K": "l"}}}}
-	won, err := Merge(selfFenceGlobal(), refill).ResolveProfile("bare")
+	won, err := Merge(selfFenceGlobal(), refill, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestResolveSourcesMergedLayers(t *testing.T) {
 		"anth": {Env: map[string]string{"BASE": "l-url"}},
 		"dev":  {Extends: Extends{"anth"}, Env: map[string]string{"API_KEY": "sk-dev"}},
 	}}
-	cfg := Merge(global, local)
+	cfg := Merge(global, local, LayerGlobal, LayerLocal)
 	r, err := cfg.ResolveProfile("dev")
 	if err != nil {
 		t.Fatal(err)
@@ -546,7 +546,7 @@ func TestResolveUnsetsCarriedFenceReportsAndSilences(t *testing.T) {
 	}}
 	stripped, err := Merge(global, Config{Profiles: map[string]Profile{
 		"bare": {Env: map[string]string{"MODEL": "lm"}},
-	}}).ResolveProfile("bare")
+	}}, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ func TestResolveUnsetsCarriedFenceReportsAndSilences(t *testing.T) {
 	}
 	silenced, err := Merge(global, Config{Profiles: map[string]Profile{
 		"anth": {Env: map[string]string{"ANTHROPIC_API_KEY": "l"}},
-	}}).ResolveProfile("bare")
+	}}, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ func TestResolveUnsetsCarriedFenceReportsAndSilences(t *testing.T) {
 func TestResolveUnsetsLayerAttribution(t *testing.T) {
 	global := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"A"}}}}
 	local := Config{Profiles: map[string]Profile{"dev": {Unset: Unsets{"B"}}}}
-	r, err := Merge(global, local).ResolveProfile("dev")
+	r, err := Merge(global, local, LayerGlobal, LayerLocal).ResolveProfile("dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestMergeChainedCarriedFenceAttribution(t *testing.T) {
 	tail := Config{Profiles: map[string]Profile{
 		"bare": {Env: map[string]string{"OTHER": "l2"}},
 	}}
-	r, err := Merge(Merge(global, mid), tail).ResolveProfile("bare")
+	r, err := Merge(Merge(global, mid, LayerGlobal, LayerLocal), tail, LayerGlobal, LayerLocal).ResolveProfile("bare")
 	if err != nil {
 		t.Fatal(err)
 	}

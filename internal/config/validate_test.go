@@ -164,7 +164,7 @@ func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
 		Env: map[string]string{"A": "from-global", "B": "keep"},
 	}}}
 	local := Config{Profiles: map[string]Profile{"p": {Unset: []string{"A"}}}}
-	for _, is := range Validate(Merge(global, local)) {
+	for _, is := range Validate(Merge(global, local, LayerGlobal, LayerLocal)) {
 		if is.Profile == "p" {
 			t.Errorf("cross-layer fence reported as %s, want silence:\n%v", is.Kind, is)
 		}
@@ -181,7 +181,7 @@ func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
 	localBoth := Config{Profiles: map[string]Profile{"p": {
 		Env: map[string]string{"A": "local"}, Unset: []string{"A"},
 	}}}
-	if !hasIssue(Validate(Merge(global, localBoth)), "contradictory-unset") {
+	if !hasIssue(Validate(Merge(global, localBoth, LayerGlobal, LayerLocal)), "contradictory-unset") {
 		t.Error("a local define+unset pair must stay a contradictory-unset warning")
 	}
 }
@@ -252,7 +252,7 @@ func TestValidateUnsetLayerMatrix(t *testing.T) {
 					t.Fatalf("issues = %v, want %v", got, want)
 				}
 			}
-			check(collect(Merge(global, local)), tc.wantMerged)
+			check(collect(Merge(global, local, LayerGlobal, LayerLocal)), tc.wantMerged)
 			check(isolated, tc.wantIsolated)
 		})
 	}
