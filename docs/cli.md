@@ -20,7 +20,7 @@ enver rename [old] [new]                  Rename a profile (rewrites extends/def
 enver duplicate <src> [new]               Copy a profile (extends, env, comments)
 enver default [profile] [--clear]         Set, show, or clear the default profile
 enver validate                            Check config health
-enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --force)
+enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --list, --force)
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt secret values in the config
 enver decrypt [profile]                   Decrypt values back to plaintext
@@ -113,6 +113,7 @@ the network otherwise, and never for config.)
 enver pull github:someone/llm-profiles --as llm  register a source and fetch it
 enver pull llm                                   re-fetch one remote
 enver pull                                       re-fetch every registered remote
+enver pull --list                                list records with their source and last pull
 enver pull --rm llm                              remove the record and its content
 ```
 
@@ -123,9 +124,12 @@ the repo. A remote's profiles load as `<name>/<profile>`; `--no-prefix` stores
 them under their bare upstream names, and a re-pull never changes the mode a
 record was stored with. `--rm` removes the closest declaration in the merged
 view (`-g`/`--local` target an explicit layer) and deletes the content only when
-no layer still declares the name. A re-registration that changes the source or
-the mode of a record your patches sit under is a takeover: pull warns and asks
-first, and `--force` accepts it without asking. Records, projection, the pull
+no layer still declares the name. `--list` is the read-only freshness view:
+each record with its source, whether it is pinned, and the commit and time of
+its last pull. A re-registration that changes the source or the mode of a record
+your patches sit under is a takeover: pull warns and asks first, and `--force`
+accepts it without asking; a re-fetch that would replace content the sidecar
+says came from another source passes the same gate. Records, projection, the pull
 gate, the divergence warning and the patch flow are documented in
 [`config.md`](./config.md#remotes).
 

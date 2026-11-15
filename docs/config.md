@@ -179,6 +179,7 @@ says so. A record's pull mode is stored in it, so re-pulling never re-asks.
 enver pull <source> --as <name>   register a source and fetch it now
 enver pull <name>                 re-fetch one registered remote
 enver pull                        re-fetch every registered remote
+enver pull --list                 list records with their source and last pull
 enver pull --rm <name>            remove the record (and its content)
 ```
 
@@ -190,7 +191,17 @@ would override the global one anyway. Re-registering a name prints the old and
 new source; when user-layer patch profiles sit under that prefix, a changed
 source or pull mode is a **takeover** — it changes what your credentials
 compose with, so pull asks first (`--force` accepts without asking, and is the
-only non-interactive way through).
+only non-interactive way through). The same gate covers a re-fetch that replaces
+stored content the sidecar says came from another source, which is how a cloned
+project that re-declares one of your records is caught. Registering under
+`--no-local` does not read the project file, so that takeover check never sees
+the patch profiles a hidden local layer holds.
+
+`--list` is read-only: it renders every declared record with its source, whether
+it is pinned, and the commit and time of its last pull, saying so when a record
+was never pulled. An unpinned record — `@HEAD`, or an https source with no ref —
+shows the commit its content was actually fetched at, since nothing else about
+it is fixed.
 
 `--rm` removes the **closest declaration** in the merged view — the one that
 controls the source right now — so a removal never fails on the wrong layer;
