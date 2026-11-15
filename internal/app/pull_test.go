@@ -911,3 +911,229 @@ func TestPullSummaryListsPassthroughTargets(t *testing.T) {
 		}
 	}
 }
+
+// cloneFixture is the cloned-project scenario: the global layer declares llm
+// with a secret patch profile under its prefix, the project file re-declares
+// llm with its own source, and the stored content came from the global source.
+func cloneFixture(t *testing.T) *pullFixture {
+	t.Helper()
+	f := newPullFixture(t)
+	f.write(t, f.globalPath, `remotes:
+  llm:
+    url: https://example.com/global.yaml
+profiles:
+  llm/secret:
+    extends: llm/base
+    env:
+      API_KEY: sk-live
+`)
+	f.write(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/project.yaml\n")
+	if err := config.WriteRemoteContent("llm", []byte("profiles:\n  base:\n    env:\n      HOST: global\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{
+		URL:      "https://example.com/global.yaml",
+		Commit:   "aaaa111",
+		PulledAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// A re-fetch replaces stored content whose sidecar names a source the effective
+// record no longer points at. When patch profiles sit under the prefix that is
+// the same takeover a re-registration is, and it must be confirmed before the
+// fetch: the stored content is what the patches currently compose with.
+func TestPullRefetchTakeoverFromStoredSource(t *testing.T) {
+	t.Run("named re-fetch warns and a decline fetches nothing", func(t *testing.T) {
+		f := cloneFixture(t)
+		var msg string
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("a declined takeover must not fetch")
+			return nil, "", nil
+		})
+		opts.Confirm = func(m string, def bool) (bool, error) {
+			msg = m
+			if def {
+				t.Error("the takeover prompt must default to no")
+			}
+			return false, nil
+		}
+
+		summary, err := PullUpdate("llm", opts)
+		if err != nil {
+			t.Fatalf("declined confirm must not error: %v", err)
+		}
+		if summary != "" {
+			t.Errorf("declined confirm should print nothing, got %q", summary)
+		}
+		for _, want := range []string{`remote "llm"`, "llm/secret", "https://example.com/global.yaml", "https://example.com/project.yaml", "review before trusting it with your credentials"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("confirm message misses %q: %q", want, msg)
+			}
+		}
+		if st, _ := f.state(t, "llm"); st.URL != "https://example.com/global.yaml" {
+			t.Fatalf("state = %+v, want the stored source untouched", st)
+		}
+	})
+
+	t.Run("non-interactive error names force", func(t *testing.T) {
+		f := cloneFixture(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("a gated re-fetch must not fetch")
+			return nil, "", nil
+		})
+		_, err := PullUpdate("llm", opts)
+		if err == nil || !strings.Contains(err.Error(), "--force") {
+			t.Fatalf("err = %v, want it to name --force", err)
+		}
+		if !strings.Contains(err.Error(), "llm/secret") {
+			t.Fatalf("err = %v, want it to name the patch profile", err)
+		}
+	})
+
+	t.Run("force fetches and keeps the warning", func(t *testing.T) {
+		f := cloneFixture(t)
+		var fetches int
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			fetches++
+			return []byte("profiles:\n  base:\n    env:\n      HOST: project\n"), "bbbb222", nil
+		})
+		opts.Force = true
+		opts.Confirm = func(string, bool) (bool, error) {
+			t.Error("--force must not prompt")
+			return false, nil
+		}
+
+		summary, err := PullUpdate("llm", opts)
+		if err != nil {
+			t.Fatalf("PullUpdate: %v", err)
+		}
+		if fetches != 1 {
+			t.Fatalf("fetches = %d, want 1", fetches)
+		}
+		for _, want := range []string{"stored content came from https://example.com/global.yaml", "instead of https://example.com/global.yaml", "will now compose with content from that source", "llm/secret"} {
+			if !strings.Contains(summary, want) {
+				t.Errorf("summary misses %q:\n%s", want, summary)
+			}
+		}
+		st, _ := f.state(t, "llm")
+		if st.URL != "https://example.com/project.yaml" || st.Commit != "bbbb222" {
+			t.Fatalf("state = %+v, want the fetched source and commit", st)
+		}
+	})
+
+	t.Run("pull-all gates every record", func(t *testing.T) {
+		f := cloneFixture(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("pull-all must not fetch a gated record")
+			return nil, "", nil
+		})
+		_, err := PullAll(opts)
+		if err == nil || !strings.Contains(err.Error(), "--force") {
+			t.Fatalf("err = %v, want a non-zero error naming --force", err)
+		}
+		if !strings.Contains(err.Error(), "llm/secret") {
+			t.Fatalf("err = %v, want it to name the patch profile", err)
+		}
+		if st, _ := f.state(t, "llm"); st.URL != "https://example.com/global.yaml" {
+			t.Fatalf("state = %+v, want the stored source untouched", st)
+		}
+	})
+
+	t.Run("pull-all accepts under force", func(t *testing.T) {
+		f := cloneFixture(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte("profiles:\n  base:\n    env:\n      HOST: project\n"), "bbbb222", nil
+		})
+		opts.Force = true
+		summary, err := PullAll(opts)
+		if err != nil {
+			t.Fatalf("PullAll: %v", err)
+		}
+		if !strings.Contains(summary, "will now compose with content from") {
+			t.Errorf("forced pull-all must still report the takeover:\n%s", summary)
+		}
+		if st, _ := f.state(t, "llm"); st.URL != "https://example.com/project.yaml" {
+			t.Fatalf("state = %+v, want the fetched source", st)
+		}
+	})
+
+	// A decline in a run over several records leaves that record as it was and
+	// keeps the rest of the run going, rather than aborting the whole pull.
+	t.Run("pull-all decline leaves the record and reports it", func(t *testing.T) {
+		f := cloneFixture(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			t.Error("a declined takeover must not fetch")
+			return nil, "", nil
+		})
+		opts.Confirm = func(string, bool) (bool, error) { return false, nil }
+		summary, err := PullAll(opts)
+		if err != nil {
+			t.Fatalf("a declined takeover must not fail the run: %v", err)
+		}
+		for _, want := range []string{`remote "llm" left unchanged`, "takeover declined"} {
+			if !strings.Contains(summary, want) {
+				t.Errorf("summary misses %q:\n%s", want, summary)
+			}
+		}
+		if st, _ := f.state(t, "llm"); st.URL != "https://example.com/global.yaml" {
+			t.Fatalf("state = %+v, want the stored source untouched", st)
+		}
+	})
+
+	t.Run("sidecar matching the record proceeds silently", func(t *testing.T) {
+		f := cloneFixture(t)
+		if err := config.WriteRemoteState("llm", config.RemoteState{
+			URL:      "https://example.com/project.yaml",
+			Commit:   "aaaa111",
+			PulledAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var fetches int
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			fetches++
+			return []byte("profiles:\n  base:\n    env:\n      HOST: project\n"), "cccc333", nil
+		})
+		opts.Confirm = func(string, bool) (bool, error) {
+			t.Error("content from the record's own source is not a takeover")
+			return false, nil
+		}
+
+		summary, err := PullUpdate("llm", opts)
+		if err != nil {
+			t.Fatalf("PullUpdate: %v", err)
+		}
+		if fetches != 1 {
+			t.Fatalf("fetches = %d, want 1", fetches)
+		}
+		for _, unwanted := range []string{"stored content came from", "will now compose with content from"} {
+			if strings.Contains(summary, unwanted) {
+				t.Errorf("summary reports a takeover that did not happen (%q):\n%s", unwanted, summary)
+			}
+		}
+	})
+
+	// The merged view is the project's own declaration after a re-declaration, so
+	// a registration must judge the change against the sidecar: re-registering
+	// the source the project file already names still replaces content the global
+	// source served, which is exactly the takeover a patch cares about.
+	t.Run("registration against a poisoned merged view takes over against the sidecar", func(t *testing.T) {
+		f := cloneFixture(t)
+		opts := f.options(t, false, func(string, string) ([]byte, string, error) {
+			t.Error("a gated registration must not fetch")
+			return nil, "", nil
+		})
+		_, err := Pull("https://example.com/project.yaml", "llm", opts)
+		if err == nil || !strings.Contains(err.Error(), "--force") {
+			t.Fatalf("err = %v, want a non-zero error naming --force", err)
+		}
+		for _, want := range []string{"llm/secret", "instead of https://example.com/global.yaml"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want it to mention %q", err, want)
+			}
+		}
+	})
+}

@@ -570,3 +570,47 @@ func TestPullCmdFetchFailureKeepsEverything(t *testing.T) {
 		t.Fatalf("err = %v, want a plain source error, not ErrDowngrade", err)
 	}
 }
+
+// A project that re-declares a global record with its own source makes a plain
+// re-fetch a takeover: the stored content came from the global source and a
+// global patch profile sits under the prefix, so a non-interactive run must
+// refuse before fetching and name --force.
+func TestPullCmdRefetchTakeoverNeedsForceWhenNonInteractive(t *testing.T) {
+	setNonInteractive(t)
+	f := newPullCmdFixture(t)
+	writePullFile(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/global.yaml\nprofiles:\n  llm/secret:\n    extends: llm/base\n    env:\n      API_KEY: sk-live\n")
+	writePullFile(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/project.yaml\n")
+	if err := config.WriteRemoteContent("llm", []byte(pullContent)); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/global.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	var fetches int
+	withPullFlags(t, func(string, string) ([]byte, string, error) {
+		fetches++
+		return []byte(pullContent), "bbbb222", nil
+	})
+
+	_, err := runPull(t, "llm")
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want a non-zero error naming --force", err)
+	}
+	if fetches != 0 {
+		t.Fatalf("fetches = %d, want none before the takeover is accepted", fetches)
+	}
+
+	pullForce = true
+	out, err := runPull(t, "llm")
+	if err != nil {
+		t.Fatalf("pull --force llm: %v", err)
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches = %d, want the forced fetch", fetches)
+	}
+	for _, want := range []string{"will now compose with content from", "stored content came from https://example.com/global.yaml"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("forced re-fetch misses %q:\n%s", want, out)
+		}
+	}
+}
