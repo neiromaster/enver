@@ -104,9 +104,10 @@ Profile names may collide with subcommand verbs (`x`, `show`, `export`,
 
 ## Remotes
 
-`enver pull` is the only command that touches the network: it fetches a source,
+`enver pull` is the only command that fetches config: it fetches a source,
 validates it, and stores it as the lowest layer, so `show`, `x`, `list` and the
-TUI keep working offline against the stored copy.
+TUI keep working offline against the stored copy. (Only `enver update` reaches
+the network otherwise, and never for config.)
 
 ```
 enver pull github:someone/llm-profiles --as llm  register a source and fetch it
@@ -118,15 +119,14 @@ enver pull --rm llm                              remove the record and its conte
 Argument completion offers the registered record names, so `enver pull <Tab>`
 lists what can be re-fetched or removed. Registration writes the global config;
 `--local` writes the project's `.enver.yaml` instead, so the record travels with
-the repo. A remote's profiles
-load as `<name>/<profile>`; `--no-prefix` stores them under their bare upstream
-names, and a re-pull never changes the mode a record was stored with. `--rm`
-removes the closest declaration in the merged view (`-g`/`--local` target an
-explicit layer) and deletes the content only when no layer still declares the
-name. A re-registration that changes the source or the mode of a record your
-patches sit under is a takeover: pull warns and asks first, and `--force`
-accepts it without asking. Records, projection, the pull gate, the divergence
-warning and the patch flow are documented in
+the repo. A remote's profiles load as `<name>/<profile>`; `--no-prefix` stores
+them under their bare upstream names, and a re-pull never changes the mode a
+record was stored with. `--rm` removes the closest declaration in the merged
+view (`-g`/`--local` target an explicit layer) and deletes the content only when
+no layer still declares the name. A re-registration that changes the source or
+the mode of a record your patches sit under is a takeover: pull warns and asks
+first, and `--force` accepts it without asking. Records, projection, the pull
+gate, the divergence warning and the patch flow are documented in
 [`config.md`](./config.md#remotes).
 
 ## Removed forms

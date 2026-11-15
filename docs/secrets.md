@@ -152,7 +152,8 @@ On a key whose winning value a remote supplied:
 
 - `show` reports it per key — `(cannot decrypt: wrong key (remote))` in text,
   plus an `undecryptable` map in `--format json`, whose entries are left out of
-  `env`. (`list` reports counts only and never decrypts at all.)
+  `env`. (`list` never decrypts — a listing is read-only — so it says nothing
+  about ciphertext one way or the other.)
 - `x`, `export` and `dotenv` **refuse**, naming the keys and the patch path. A
   child process or an exported file missing a secret silently is worse than a
   loud refusal.

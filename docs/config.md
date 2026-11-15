@@ -118,8 +118,11 @@ At load, each remote's profiles are renamed `<name>/<profile>`: `llm` publishes
 `ollama` and `qwen`, you address `llm/ollama` and `llm/qwen`. The rename happens
 in memory, so the stored file stays byte-identical to what the source serves —
 you can `diff` it against the URL and see exactly what you trust. A record whose
-content was never fetched contributes no profiles; `enver validate` reports it,
-and `enver pull <name>` fetches it.
+content was never fetched contributes no profiles, and nothing complains until
+something names one: a reference to an unpulled remote's profile fails like any
+missing profile, with the hint naming the `enver pull <name>` that supplies it
+(see [`profiles.md`](./profiles.md#validate)). A record nothing references yet
+is silent by design.
 
 - An `extends` target the same file defines moves with it; a target the file
   does not define passes through unchanged and resolves against your namespace.

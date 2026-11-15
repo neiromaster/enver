@@ -11,7 +11,8 @@ import (
 // childPrinter returns a child command that prints the named env var raw
 // (no trailing newline beyond the child's own): sh on POSIX, cmd on windows.
 // Together with childAbsentProbe these are the only GOOS branches the suite
-// is allowed.
+// is allowed, plus the one in remote_test.go: a live fetch needs a trusted
+// certificate, and Go reads SSL_CERT_FILE only on Unix.
 func childPrinter(varName string) []string {
 	if runtime.GOOS == "windows" {
 		return []string{"cmd", "/c", "echo %" + varName + "%"}
