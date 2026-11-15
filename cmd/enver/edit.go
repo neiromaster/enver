@@ -1068,13 +1068,17 @@ func editTitle(s editState) string {
 
 // inheritedEntries returns resolved env keys that the profile does not define
 // itself, for read-only display, sorted, each with the secret mark its winning
-// entry carried.
+// entry carried and flagged when the value is sealed at rest. Resolution never
+// decrypts, so an inherited value arriving as ciphertext keeps that flag: the
+// menu masks the row instead of printing enc:v3: text, and a value taken from
+// such a row carries the flag, so the commit re-seals rather than writing what
+// nobody could read in the clear.
 func inheritedEntries(resolved map[string]string, marked map[string]bool, own map[string]string) []ui.EnvEntry {
 	var out []ui.EnvEntry
 	for k, v := range resolved {
 		if !envname.Has(own, k) {
 			secret, _ := envname.Get(marked, k)
-			out = append(out, ui.EnvEntry{Key: k, Value: v, Secret: secret})
+			out = append(out, ui.EnvEntry{Key: k, Value: v, Secret: secret, Encrypted: crypto.IsEncrypted(v)})
 		}
 	}
 	slices.SortFunc(out, func(a, b ui.EnvEntry) int { return cmp.Compare(a.Key, b.Key) })
