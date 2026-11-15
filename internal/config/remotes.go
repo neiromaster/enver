@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/neiromaster/enver/internal/remote/source"
 	"github.com/neiromaster/enver/internal/xdg"
@@ -179,6 +181,205 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// remoteLayer is the provenance label the content of remote name carries.
+func remoteLayer(name string) string {
+	return "remote:" + name
+}
+
+// loadRemoteContent parses a record's stored content the way a pull landed it.
+// A content file that is absent — or whose path cannot be read at all — is no
+// content: the load contributes nothing rather than failing, and the divergence
+// check reports a stored file it cannot inspect. Content that is present but
+// unparseable or invalid is an error, exactly as it would be for a user layer:
+// silently resolving without the user's declared remote would hide the breakage.
+func loadRemoteContent(name string) (Config, bool, error) {
+	path := RemoteContentPath(name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, false, nil
+	}
+	cfg, err := parseConfig(path, data)
+	if err != nil {
+		return Config{}, false, err
+	}
+	return cfg, true, nil
+}
+
+// remoteBase folds the stored content of every record that has some into the
+// bottom layer of the merged view. Each content file is projected through
+// Project and the projections stack in sorted record-name order, so two records
+// defining one profile name resolve the same way on every run — the later name
+// wins, as any later layer does — and every entry carries the remote that
+// supplied it. A record with no content contributes nothing. The returned label
+// names the topmost remote folded, the base label the next fold needs; it is
+// empty when no remote contributed, leaving that label for the caller to pick.
+func remoteBase(records map[string]RemoteRecord) (Config, string, error) {
+	var base Config
+	label := ""
+	for _, name := range slices.Sorted(maps.Keys(records)) {
+		content, ok, err := loadRemoteContent(name)
+		if err != nil {
+			return Config{}, "", err
+		}
+		if !ok {
+			continue
+		}
+		if label == "" {
+			// The accumulator opens empty, so the first remote has no layer below
+			// it to name; its own label stands in and nothing is left to stamp.
+			label = remoteLayer(name)
+		}
+		base = Merge(base, Project(content, name), label, remoteLayer(name))
+		label = remoteLayer(name)
+	}
+	return base, label, nil
+}
+
+// orphanWarnings reports stored content no merged record declares: the file
+// outlived its record, so its profiles can never load and no pull would refresh
+// it. A remotes directory that cannot be listed yields no advisories — the
+// per-record checks already report a directory they cannot inspect. Names that
+// could never be record names are reported too: the file still sits where enver
+// stores fetched content, and only removal can resolve it.
+func orphanWarnings(records map[string]RemoteRecord) []string {
+	entries, err := os.ReadDir(RemotesDir())
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name, ok := strings.CutSuffix(e.Name(), ".yaml")
+		if !ok {
+			continue
+		}
+		if _, declared := records[name]; declared {
+			continue
+		}
+		out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so its profiles are not loaded; remove %s or register the record to use it", name, RemoteContentPath(name)))
+	}
+	return out
+}
+
+// Project rewrites a remote's content into the namespace its record prefixes:
+// every profile lands under name+"/", and an extends target the same file
+// defines moves with it, while a target the file does not define keeps
+// resolving against the user's namespace. The two top-level sections a remote
+// author must not own are dropped: default, because which profile is default is
+// the user's decision, and remotes, because a remote can never register a
+// fetch. Control characters are stripped from every string the content supplies
+// — profile names, extends targets, env keys, values, comments — since they
+// reach terminals, error messages and completion candidates; newlines stay,
+// because a multi-line value and a multi-line comment are structure the format
+// supports. Secret marks ride through unchanged: a mark is not a secret, and a
+// patch written over a marked remote value must stay masked and remain an
+// encrypt candidate. Every projected profile is stamped with the remote:<name>
+// layer. Only what the file declares is projected — merge artifacts (Origins,
+// UnsetOrigins, Carried) are not carried — and the input is left untouched.
+func Project(c Config, name string) Config {
+	prefix := name + "/"
+	defined := make(map[string]bool, len(c.Profiles))
+	for pname := range c.Profiles {
+		defined[stripControls(pname)] = true
+	}
+	out := Config{
+		Profiles:     make(map[string]Profile, len(c.Profiles)),
+		ProfileLayer: make(map[string]string, len(c.Profiles)),
+	}
+	// Sorted so two upstream names that strip to one projected name resolve
+	// deterministically, the later spelling winning as a later entry does.
+	for _, pname := range slices.Sorted(maps.Keys(c.Profiles)) {
+		p := c.Profiles[pname]
+		projected := prefix + stripControls(pname)
+		out.Profiles[projected] = Profile{
+			Extends:  projectExtends(p.Extends, defined, prefix),
+			Unset:    Unsets(stripControlsAll(p.Unset)),
+			Env:      projectStrings(p.Env),
+			Comments: projectStrings(p.Comments),
+			Marked:   projectMarks(p.Marked),
+		}
+		out.ProfileLayer[projected] = remoteLayer(name)
+	}
+	return out
+}
+
+// projectExtends rewrites the targets the file itself defines to their prefixed
+// form. A target the file does not define passes through, binding whatever the
+// merged namespace defines under that name — a user profile or another remote's
+// projection, which is how cross-remote and user-provided parents compose.
+func projectExtends(list Extends, defined map[string]bool, prefix string) Extends {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make(Extends, 0, len(list))
+	for _, target := range list {
+		target = stripControls(target)
+		if defined[target] {
+			target = prefix + target
+		}
+		out = append(out, target)
+	}
+	return out
+}
+
+// stripControlsAll cleans a name list, keeping nil for an empty list so a
+// projected profile carries exactly the sections its file did.
+func stripControlsAll(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		out = append(out, stripControls(s))
+	}
+	return out
+}
+
+// projectStrings rebuilds a keyed string map with control characters stripped
+// from its keys and values, keeping nil for an empty input.
+func projectStrings(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[stripControls(k)] = stripControls(v)
+	}
+	return out
+}
+
+// projectMarks rebuilds a mark set under its stripped keys, keeping the nil
+// contract: no marks is nil, never an empty map.
+func projectMarks(m map[string]bool) map[string]bool {
+	var out map[string]bool
+	for k, v := range m {
+		if !v {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[stripControls(k)] = true
+	}
+	return out
+}
+
+// stripControls removes every control character from s except the newline. A
+// remote is an untrusted author, and its strings reach terminals, error
+// messages and completion candidates, where an escape sequence or a carriage
+// return can rewrite what the user reads. Newlines survive because multi-line
+// values and comments are structure the config and dotenv formats support.
+func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // remoteWarnings reports the merged records whose stored content disagrees with
