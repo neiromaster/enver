@@ -1,5 +1,5 @@
-// Package remote resolves the sources a remotes: section registers and fetches
-// their content.
+// Package remote resolves the sources a remotes: section registers into the
+// URL and ref to fetch.
 package remote
 
 import (
