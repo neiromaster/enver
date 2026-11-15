@@ -164,10 +164,17 @@ func LayerEra(layer string) int {
 // key, which layer ("global", "local", or "remote:<name>") provided the winning
 // value; it is filled by Merge and never serialized.
 type Config struct {
-	Default  string                       `yaml:"default"`
-	Profiles map[string]Profile           `yaml:"profiles"`
-	Remotes  map[string]RemoteRecord      `yaml:"remotes"` // record name → source; Merge folds by name
-	Origins  map[string]map[string]string `yaml:"-"`       // profile → env key → layer
+	Default  string                  `yaml:"default"`
+	Profiles map[string]Profile      `yaml:"profiles"`
+	Remotes  map[string]RemoteRecord `yaml:"remotes"` // record name → source; Merge folds by name
+	// Warnings holds the load-time advisories about the remotes content on disk:
+	// content fetched from a source its record no longer points at, and content
+	// whose provenance no sidecar records. config never prints — the load path is
+	// shared by shell completion and machine-output commands — so commands render
+	// these and the machine paths drop them. Filled by LoadMerged, never
+	// serialized, and dropped by Merge, which describes a different view.
+	Warnings []string                     `yaml:"-"`
+	Origins  map[string]map[string]string `yaml:"-"` // profile → env key → layer
 	// UnsetOrigins records, per profile and unset entry, which layer
 	// contributed the entry; like Origins it is filled by Merge and never
 	// serialized. Attribution is by exact spelling: Merge records the override
@@ -289,10 +296,13 @@ func findLocal() []string {
 // after the inherited fold. The merged profile's declared list is the
 // overriding layer's own, and UnsetOrigins attributes exactly those entries;
 // profiles absent from the override shed their earlier-era declared fences the
-// same way. Merge never mutates its inputs: the fold writes into clones, so
-// the returned config shares no state with base or override.
+// same way. Warnings describe the view a config was loaded as, so the fold drops
+// them: the merged config's advisories are the merge caller's to compute.
+// Merge never mutates its inputs: the fold writes into clones, so the returned
+// config shares no state with base or override.
 func Merge(base, override Config, baseLabel, overrideLabel string) Config {
 	out := base
+	out.Warnings = nil
 	out.Profiles = cloneProfiles(base.Profiles)
 	out.Origins = cloneProvenance(base.Origins)
 	out.UnsetOrigins = cloneProvenance(base.UnsetOrigins)
@@ -484,22 +494,25 @@ func mergeExtends(base, add Extends) Extends {
 	return Extends(out)
 }
 
-// LoadMerged loads the global config then applies local .enver.yaml layers.
+// LoadMerged loads the global config then applies local .enver.yaml layers, and
+// fills Config.Warnings with the advisories the merged records raise: content
+// pulled from a source the record no longer points at, content no sidecar
+// records, and content whose record no longer resolves.
 func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 	cfg, err := load(GlobalPath(globalOverride))
 	if err != nil {
 		return cfg, err
 	}
-	if !useLocal {
-		return cfg, nil
-	}
-	for _, p := range findLocal() {
-		overlay, err := load(p)
-		if err != nil {
-			return cfg, err
+	if useLocal {
+		for _, p := range findLocal() {
+			overlay, err := load(p)
+			if err != nil {
+				return cfg, err
+			}
+			cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 		}
-		cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 	}
+	cfg.Warnings = append(cfg.Warnings, remoteWarnings(cfg.Remotes)...)
 	return cfg, nil
 }
 

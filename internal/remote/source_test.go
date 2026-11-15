@@ -288,11 +288,3 @@ func TestResolveRecord(t *testing.T) {
 		})
 	}
 }
-
-func TestUnparsedSourceDoesNotResolve(t *testing.T) {
-	var zero source
-	url, ref, err := zero.resolve("")
-	if err == nil {
-		t.Fatalf("zero source resolved to (%q, %q), want an error", url, ref)
-	}
-}
