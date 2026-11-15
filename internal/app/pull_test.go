@@ -431,6 +431,44 @@ func TestPullRepointTakeoverConfirm(t *testing.T) {
 		}
 	})
 
+	// The reverse direction is a different consequence: adding the prefix makes
+	// existing name/... patches start meeting the record's profiles, where before
+	// they sat on bare names.
+	t.Run("bare-to-prefixed mode change says the patches start applying", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.globalPath, "remotes:\n  llm:\n    url: https://example.com/llm.yaml\n    no_prefix: true\n")
+		if err := config.WriteRemoteContent("llm", []byte(goodRemoteContent)); err != nil {
+			t.Fatal(err)
+		}
+		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
+			t.Fatal(err)
+		}
+		f.write(t, f.localPath, "profiles:\n  llm/ollama:\n    env:\n      OLLAMA_API_KEY: sk-live\n")
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte(goodRemoteContent), "", nil
+		})
+		var msg string
+		opts.Confirm = func(m string, def bool) (bool, error) {
+			msg = m
+			if def {
+				t.Error("the takeover prompt must default to no")
+			}
+			return true, nil
+		}
+
+		if _, err := Pull("https://example.com/llm.yaml", "llm", opts); err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		for _, want := range []string{"now stores prefixed names instead of bare names", "will now patch the remote's profiles under the prefix"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("confirm message misses %q: %q", want, msg)
+			}
+		}
+		if strings.Contains(msg, "no longer patch") {
+			t.Errorf("the prompt must not claim the patches stop applying when the prefix is added: %q", msg)
+		}
+	})
+
 	// No patches, no takeover: the mode change is reported in the summary and the
 	// pull proceeds without asking.
 	t.Run("mode change without patches does not prompt", func(t *testing.T) {
