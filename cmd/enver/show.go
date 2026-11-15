@@ -33,14 +33,18 @@ var showCmd = &cobra.Command{
 		}
 		opts := appOpts()
 		// Text can say what it cannot read; JSON hands values to machines, where
-		// ciphertext is a trap and a non-zero exit is the honest answer.
+		// ciphertext is a trap and a non-zero exit is the honest answer. Remote
+		// ciphertext is the one value a key holder may legitimately not read
+		// either way: both formats report it per key, and JSON keeps it out of
+		// env entirely.
 		opts.TolerateMissingKey = showFormat == "text"
+		opts.TolerateRemoteWrongKey = true
 		p, r, err := app.ResolveDefault(opts, profile)
 		if err != nil {
 			return err
 		}
 		if showFormat == "json" {
-			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets)
+			return printEnvJSON(cmd.OutOrStdout(), p, r.Chain, r.Env, r.Sources, r.Unsets, r.Undecryptable)
 		}
 		out := cmd.OutOrStdout()
 		return printEnv(out, r.Env, r.Chain, r.Sources, r.Unsets, envRender{
@@ -172,17 +176,39 @@ type showJSON struct {
 	Env     map[string]string        `json:"env"`
 	Sources map[string]config.Source `json:"sources,omitempty"`
 	Unsets  map[string]config.Source `json:"unsets,omitempty"`
+	// Undecryptable names the keys whose ciphertext stayed unread, with the
+	// reason. Those keys are absent from Env, so no consumer acts on ciphertext;
+	// the map is omitted when every value was readable.
+	Undecryptable map[string]string `json:"undecryptable,omitempty"`
 }
 
 // printEnvJSON writes the resolved env as JSON, always unmasked: JSON is a
 // machine contract (export, piping to tools), so masking would corrupt the
 // values a consumer reads back. Provenance rides along per key, as do the
 // unset tombstones — omitted entirely when there are none, so profiles
-// without unsets keep their previous shape.
-func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, sources, unsets map[string]config.Source) error {
+// without unsets keep their previous shape. A key whose ciphertext stayed unread
+// is reported instead of rendered: handing out enc:v3: text where a value
+// belongs is the trap the report exists to avoid.
+func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, sources, unsets map[string]config.Source, undecryptable map[string]string) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: env, Sources: sources, Unsets: unsets})
+	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: readableOnly(env, undecryptable), Sources: sources, Unsets: unsets, Undecryptable: undecryptable})
+}
+
+// readableOnly drops the keys reported unreadable from a machine payload: the
+// report says why they are absent, and nothing downstream mistakes ciphertext
+// for a value.
+func readableOnly(env map[string]string, undecryptable map[string]string) map[string]string {
+	if len(undecryptable) == 0 {
+		return env
+	}
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		if _, unread := undecryptable[k]; !unread {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // printExport writes the resolved env as shell assignments for eval. Unset

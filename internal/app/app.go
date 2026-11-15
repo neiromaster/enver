@@ -28,6 +28,12 @@ type Options struct {
 	// a failure. Only the text display path may set it: a child process or a
 	// machine consumer started with unreadable values fails somewhere else.
 	TolerateMissingKey bool
+	// TolerateRemoteWrongKey degrades a decrypt failure on a value a remote
+	// supplied to a per-key report instead of failing the whole profile: such
+	// ciphertext most likely belongs to its author's key, so it is a value to
+	// patch rather than a key mismatch about the user's own file. Only a display
+	// path may set it; the exec and export paths refuse instead.
+	TolerateRemoteWrongKey bool
 }
 
 // ErrNoKey reports that a key is needed and none was found: encrypted values
@@ -50,6 +56,10 @@ func WithEncryptedKeys(err error, keys []string) error {
 
 // noKeyReason is the short per-key explanation the display paths render.
 const noKeyReason = "no key — run enver keygen"
+
+// wrongKeyReason is the per-key explanation the display paths render for remote
+// ciphertext the configured key cannot read.
+const wrongKeyReason = "wrong key (remote)"
 
 // Interactive reports whether stdin is a terminal. Injected by the CLI layer
 // (cmd/enver sets it to ui.Interactive) so this package stays free of ui.
@@ -112,8 +122,10 @@ func Chdir(dir string) error {
 // enc:v3: values, and expands $VAR interpolation unless opts.NoExpand. A key
 // is required only when encrypted values are present, and then only a missing
 // key is forgivable: with opts.TolerateMissingKey the ciphertext stays in place
-// and each such key is reported in Undecryptable. Comments ride through
-// untouched.
+// and each such key is reported in Undecryptable. A present key that cannot
+// read a value a remote supplied degrades the same way under
+// opts.TolerateRemoteWrongKey and refuses the profile otherwise; one that cannot
+// read a user-layer value is always an error. Comments ride through untouched.
 func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
 	r, err := cfg.ResolveProfile(profile)
 	if err != nil {
@@ -159,19 +171,64 @@ func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, 
 		}
 		return r, nil
 	}
+	// A value a remote supplied is ciphertext its author may have written for a
+	// key nobody here holds, so a failure there costs only that key; a user-layer
+	// failure is a key mismatch about the user's own file and stays loud. Every
+	// failure is collected before deciding, so a refusal names them all.
+	var remoteWrong []string
 	for k, v := range r.Env {
-		if crypto.IsEncrypted(v) {
-			plain, err := crypto.DecryptValue(v, key)
-			if err != nil {
+		if !crypto.IsEncrypted(v) {
+			continue
+		}
+		plain, err := crypto.DecryptValue(v, key)
+		if err != nil {
+			if !remoteSourced(r.Sources, k) {
 				return config.Resolved{}, fmt.Errorf("decrypt %s: %w", k, err)
 			}
-			r.Env[k] = plain
+			remoteWrong = append(remoteWrong, k)
+			continue
 		}
+		r.Env[k] = plain
+	}
+	if len(remoteWrong) > 0 {
+		slices.Sort(remoteWrong)
+		if !opts.TolerateRemoteWrongKey {
+			return config.Resolved{}, wrongRemoteKeyError(remoteWrong)
+		}
+		r.Undecryptable = make(map[string]string, len(remoteWrong))
+		unread := make(map[string]bool, len(remoteWrong))
+		for _, k := range remoteWrong {
+			r.Undecryptable[k] = wrongKeyReason
+			unread[k] = true
+		}
+		if !opts.NoExpand {
+			r.Env = expandReadable(r.Env, unread)
+		}
+		return r, nil
 	}
 	if !opts.NoExpand {
 		r.Env = varsubst.Expand(r.Env, osEnvMap())
 	}
 	return r, nil
+}
+
+// remoteSourced reports whether k's winning entry came from a remote's content,
+// the only provenance whose ciphertext a consumer may legitimately lack the key
+// for. A value with no recorded source counts as the user's own, so an
+// unattributable failure never degrades quietly.
+func remoteSourced(sources map[string]config.Source, k string) bool {
+	s, ok := envname.Get(sources, k)
+	return ok && config.IsRemoteLayer(s.Layer)
+}
+
+// wrongRemoteKeyError refuses a path that must not carry a value it cannot
+// vouch for — a child environment or a file export — so a secret never goes
+// missing quietly: name every key, and the patch path the pull warning already
+// documents. Plaintext patches while foreign ciphertext remains, encryption only
+// once every foreign value is replaced: two salts in one profile break
+// passphrase recovery.
+func wrongRemoteKeyError(keys []string) error {
+	return fmt.Errorf("remote ciphertext cannot be decrypted with the configured key: %s; patch these keys with plaintext values in your own layer while foreign ciphertext remains, and encrypt only after every foreign value is replaced", strings.Join(keys, ", "))
 }
 
 // Run is the full run path: parse args, load config, resolve the profile, and

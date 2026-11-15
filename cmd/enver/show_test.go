@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -151,6 +152,70 @@ func TestShowDegradesWithoutKey(t *testing.T) {
 	}
 }
 
+// TestShowWrongKeyRemote pins the remote-provenance degradation end to end: a
+// pulled remote's ciphertext the local key cannot read costs only its own key,
+// so text reports it in place, JSON reports it as data with the ciphertext out
+// of env, and the readable values still resolve.
+func TestShowWrongKeyRemote(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("ENVER_KEY", "")
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+	savedFormat := showFormat
+	t.Cleanup(func() { showFormat = savedFormat })
+
+	content := fmt.Sprintf("profiles:\n  app:\n    env:\n      REMOTE_TOKEN: %s\n      PLAIN: remote-value\n", ciphertextV3(t, "author-secret"))
+	if err := config.WriteRemoteContent("llm", []byte(content)); err != nil {
+		t.Fatalf("write remote content: %v", err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/enver.yaml", PulledAt: time.Now()}); err != nil {
+		t.Fatalf("write remote state: %v", err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	writeDoc(t, cfgPath, "remotes:\n  llm:\n    url: https://example.com/enver.yaml\n")
+	keyPath := filepath.Join(dir, "wrong-key")
+	if err := crypto.GenerateKey(keyPath, true); err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	out, err := runCommand(t, "--config", cfgPath, "--key", keyPath, "--chdir", dir, "show", "llm/app")
+	if err != nil {
+		t.Fatalf("text show must report a remote wrong key instead of failing: %v", err)
+	}
+	if !strings.Contains(out, "REMOTE_TOKEN=(cannot decrypt: wrong key (remote))") {
+		t.Fatalf("degraded note missing:\n%s", out)
+	}
+	if !strings.Contains(out, "PLAIN=remote-value") {
+		t.Fatalf("readable remote value lost:\n%s", out)
+	}
+	if strings.Contains(out, "enc:v3:") {
+		t.Fatalf("ciphertext reached the display:\n%s", out)
+	}
+
+	jout, err := runCommand(t, "--config", cfgPath, "--key", keyPath, "--chdir", dir, "show", "--format", "json", "llm/app")
+	if err != nil {
+		t.Fatalf("JSON show must report a remote wrong key instead of failing: %v", err)
+	}
+	var got showJSON
+	if err := json.Unmarshal([]byte(jout), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, jout)
+	}
+	if got.Undecryptable["REMOTE_TOKEN"] != "wrong key (remote)" {
+		t.Fatalf("undecryptable report = %#v, want REMOTE_TOKEN with the remote wrong-key reason", got.Undecryptable)
+	}
+	if _, ok := got.Env["REMOTE_TOKEN"]; ok {
+		t.Fatalf("env must not carry ciphertext for an unread key: %#v", got.Env)
+	}
+	if got.Env["PLAIN"] != "remote-value" {
+		t.Fatalf("PLAIN = %q, want remote-value", got.Env["PLAIN"])
+	}
+	if strings.Contains(jout, "enc:v3:") {
+		t.Fatalf("ciphertext reached the JSON output:\n%s", jout)
+	}
+}
+
 // TestPrintEnvJSON pins the JSON contract: machine-readable output is always
 // unmasked. Text masking is for human eyes; a consumer piping JSON to a tool
 // needs the real values, and --no-mask stays a text-output concern.
@@ -162,7 +227,7 @@ func TestPrintEnvJSON(t *testing.T) {
 	chain := []string{"anth"}
 
 	var out bytes.Buffer
-	if err := printEnvJSON(&out, "anth", chain, env, nil, nil); err != nil {
+	if err := printEnvJSON(&out, "anth", chain, env, nil, nil, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -215,7 +280,7 @@ func TestPrintEnvProvenance(t *testing.T) {
 	}
 
 	var jout bytes.Buffer
-	if err := printEnvJSON(&jout, "dev", chain, env, sources, nil); err != nil {
+	if err := printEnvJSON(&jout, "dev", chain, env, sources, nil, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -336,7 +401,7 @@ func TestPrintEnvUnsets(t *testing.T) {
 	}
 
 	var jout bytes.Buffer
-	if err := printEnvJSON(&jout, "prod", chain, env, sources, unsets); err != nil {
+	if err := printEnvJSON(&jout, "prod", chain, env, sources, unsets, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	var got showJSON
@@ -356,7 +421,7 @@ func TestPrintEnvUnsets(t *testing.T) {
 // byte-identical output.
 func TestPrintEnvJSONOmitsEmptyUnsets(t *testing.T) {
 	var out bytes.Buffer
-	if err := printEnvJSON(&out, "p", []string{"p"}, map[string]string{"A": "1"}, nil, nil); err != nil {
+	if err := printEnvJSON(&out, "p", []string{"p"}, map[string]string{"A": "1"}, nil, nil, nil); err != nil {
 		t.Fatalf("printEnvJSON: %v", err)
 	}
 	if strings.Contains(out.String(), "unsets") {

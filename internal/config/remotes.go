@@ -204,7 +204,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 // callers that need to tell one remote's profiles from another read it here
 // rather than spelling the prefix themselves.
 func RemoteLayer(name string) string {
-	return "remote:" + name
+	return remoteLayerPrefix + name
 }
 
 // loadRemoteContent parses a record's stored content the way a pull landed it.
