@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.10.0 - 2026-11-16
+
 - **New:** a leading `~` on an env key marks the variable a secret candidate —
   `~PROJECT_PATH: /home/anna/enver` is encrypted by `enver encrypt` and masked
   by `enver show` even though its name matches no secret heuristic. The mark is
@@ -34,6 +36,32 @@
   and name the keys that blocked them. `add` refuses to overwrite an encrypted
   value without a key, and a mutating command now fails on a corrupt other
   layer instead of writing the key unmarked.
+- **New:** remote configs — a config layer can declare `remotes:` records that
+  fetch a config file from `github:owner/repo[/path][@ref]` or a plain `https`
+  URL and fold it into the merged view as the lowest-priority layer, so
+  personal or team configs live in a repository and follow you across machines.
+  `enver pull` registers, fetches and pins a record, `enver pull <name>`
+  re-fetches, `enver pull --rm <name>` removes it, and `enver pull --list`
+  shows each record with its URL, ref and last-pulled commit and time. Remote
+  profiles surface as `<record>/<profile>` with their same-file `extends`
+  rewritten, so they never shadow a user profile; `no_prefix: true` inlines
+  them bare with load-time collision warnings.
+- Pulling gates content before it lands (YAML sanity, env names, extends
+  cycles, KDF parameter caps, foreign ciphertext) and refuses cross-host
+  redirects, protocol downgrades and bodies over 8 MiB. Unpinned GitHub
+  content is pinned by commit sha, and a re-fetch whose stored content came
+  from another source warns and asks before replacing it while your patch
+  profiles exist for the prefix. A value the local key cannot read degrades
+  per key in `show` (with an `undecryptable` report in JSON), while `x`,
+  `export` and `dotenv` refuse and name the keys; your own wrong-key values
+  still fail everywhere.
+- `enver add <record>/<profile>` bootstraps a patch profile that composes over
+  a remote without shadowing it, and writers fold marks over the full
+  under-stack, so a remote's `~KEY` reaches a patch of it. `validate` grades a
+  remote's dangling `extends` as a warning naming the record while your own
+  stay errors, a reference into a declared-but-unpulled remote suggests the
+  pull, and `list --format json` reports skipped remote-dangling profiles in a
+  `skipped` array.
 
 ## v0.9.5 - 2026-11-09
 
