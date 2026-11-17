@@ -344,6 +344,23 @@ func TestPullGist(t *testing.T) {
 			t.Fatalf("state = %+v, want the https URL with no ref and no commit", st)
 		}
 	})
+
+	t.Run("a gist page names the gist form", func(t *testing.T) {
+		f := newPullFixture(t)
+		opts := f.options(t, true, func(string, string) ([]byte, string, error) {
+			return []byte("<!DOCTYPE html><html></html>"), "", nil
+		})
+
+		_, err := Pull("https://gist.github.com/someone/abc123", "llm", opts)
+		if err == nil {
+			t.Fatal("Pull err = nil, want the gate to refuse a gist page")
+		}
+		for _, want := range []string{"gist page", "gist:<owner>/<id>"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("Pull err = %v, want it to carry %q", err, want)
+			}
+		}
+	})
 }
 
 func TestPullRepointTakeoverConfirm(t *testing.T) {

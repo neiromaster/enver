@@ -545,6 +545,9 @@ func pullRecord(name string, rec config.RemoteRecord, opts PullOptions) (pullRes
 		Merged:   gateView(opts.Merged, name),
 	})
 	if err != nil {
+		if remote.IsGistPage(url) {
+			return pullResult{}, fmt.Errorf("%w; that is the gist page, not a config — gist:<owner>/<id>[/<file>] names a file in it", err)
+		}
 		return pullResult{}, err
 	}
 	if err := config.WriteRemoteContent(name, content); err != nil {
