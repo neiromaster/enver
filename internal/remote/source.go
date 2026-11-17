@@ -31,3 +31,9 @@ func Unpinned(ref string) bool {
 func SplitRef(raw string) (body, ref string, err error) {
 	return source.SplitRef(raw)
 }
+
+// IsGist reports whether a source spelling resolves as a gist;
+// source.IsGist carries the rule.
+func IsGist(raw string) bool {
+	return source.IsGist(raw)
+}

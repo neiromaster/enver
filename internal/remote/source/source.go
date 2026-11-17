@@ -17,6 +17,11 @@ const (
 	githubDefaultRef  = "HEAD"
 )
 
+const (
+	gistRawURL      = "https://gist.githubusercontent.com"
+	gistDefaultFile = "enver.yaml"
+)
+
 var (
 	// schemeRe matches an RFC 3986 scheme prefix, so a scheme the registry
 	// does not know is told apart from a source that has none at all.
@@ -25,6 +30,10 @@ var (
 	// escaping: a github owner, repo or path segment, and a ref, which is a
 	// path segment of the raw URL a pinned github source resolves to.
 	tokenRe = regexp.MustCompile(`^[A-Za-z0-9_.+~-]+$`)
+	// gistRevisionRe is the only ref a gist can carry: a gist has no branches
+	// or tags, and the raw endpoint resolves neither an abbreviated sha nor
+	// HEAD.
+	gistRevisionRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 // ParseSource resolves a source into the URL to fetch and the ref it pins.
@@ -34,6 +43,13 @@ var (
 // raw.githubusercontent.com file URL. The ref is a segment of that URL, so the
 // returned ref restates a segment already inside the returned URL: append it
 // nowhere.
+//
+// A gist: source takes owner/id, an optional file (default enver.yaml) and an
+// optional @revision, and resolves to the gist.githubusercontent.com raw file
+// URL, with the revision a segment of it as with a github ref. A gist has no
+// branches or tags, and its raw endpoint resolves neither an abbreviated sha
+// nor HEAD, so the only ref it can carry is the full 40-character lowercase
+// revision sha; unpinned it serves whatever the gist holds now.
 //
 // An https source is fetched exactly as written with a trailing @ref split off.
 // There the ref is a label: accepted and stored, compared by the divergence
@@ -61,10 +77,11 @@ func ResolveRecord(raw, ref string) (string, string, error) {
 	return src.resolve(ref)
 }
 
-// Unpinned reports whether a resolved ref leaves the content floating: no ref at
-// all on an https source, or the HEAD default a github source resolves to. Such
-// a source can serve different content at any time, so the commit a pull
-// resolved is the only fixed point worth reporting back to the user.
+// Unpinned reports whether a resolved ref leaves the content floating: no ref
+// at all on an https or gist source, or the HEAD default a github source
+// resolves to. Such a source can serve different content at any time, so the
+// commit a pull resolved is the only fixed point worth reporting back to the
+// user.
 func Unpinned(ref string) bool {
 	return ref == "" || ref == githubDefaultRef
 }
@@ -83,25 +100,35 @@ func SplitRef(raw string) (body, ref string, err error) {
 	return src.stored, src.ref, nil
 }
 
+// IsGist reports whether the spelling names a gist rather than a repo or a URL.
+func IsGist(raw string) bool {
+	scheme, _, ok := splitScheme(raw)
+	return ok && scheme == "gist"
+}
+
 // sourceKind is the form a source was written in. The zero value is no form, so
 // a source that was never parsed cannot resolve into a github URL.
 type sourceKind int
 
 const (
 	githubSource sourceKind = iota + 1
+	gistSource
 	urlSource
 )
 
 // source is a parsed source before its defaults are filled: the parts the
 // form contributes, plus the ref spelled inline, if any.
 type source struct {
-	raw   string
-	kind  sourceKind
-	base  string   // urlSource: the URL with the inline ref peeled off
-	owner string   // githubSource
-	repo  string   // githubSource
-	path  []string // githubSource: the file path inside the repo
-	ref   string   // spelled inline in raw, "" when absent
+	raw       string
+	kind      sourceKind
+	base      string   // urlSource: the URL with the inline ref peeled off
+	owner     string   // githubSource
+	repo      string   // githubSource
+	path      []string // githubSource: the file path inside the repo
+	gistOwner string   // gistSource
+	gistID    string   // gistSource
+	gistFile  string   // gistSource: the file inside the gist
+	ref       string   // spelled inline in raw, "" when absent
 	// stored is the spelling a record keeps: the source as written with only the
 	// inline ref peeled off, never the resolved URL.
 	stored string
@@ -110,17 +137,19 @@ type source struct {
 func parseSource(raw string) (source, error) {
 	scheme, rest, ok := splitScheme(raw)
 	if !ok {
-		return source{}, fmt.Errorf("source %q has no scheme; want the github:owner/repo or https:// form", raw)
+		return source{}, fmt.Errorf("source %q has no scheme; want the github:owner/repo, gist:owner/id or https:// form", raw)
 	}
 	switch scheme {
 	case "github":
 		return parseGitHubSource(raw, rest)
+	case "gist":
+		return parseGistSource(raw, rest)
 	case "https":
 		return parseURLSource(raw)
 	case "http":
 		return source{}, fmt.Errorf("source %q is plain http; enver fetches sources over https only", raw)
 	default:
-		return source{}, fmt.Errorf("source %q uses scheme %q, which enver does not resolve; want the github:owner/repo or https:// form", raw, scheme)
+		return source{}, fmt.Errorf("source %q uses scheme %q, which enver does not resolve; want the github:owner/repo, gist:owner/id or https:// form", raw, scheme)
 	}
 }
 
@@ -146,6 +175,33 @@ func parseGitHubSource(raw, rest string) (source, error) {
 		path = []string{githubDefaultPath}
 	}
 	return source{raw: raw, kind: githubSource, owner: segments[0], repo: segments[1], path: path, ref: ref, stored: "github:" + body}, nil
+}
+
+func parseGistSource(raw, rest string) (source, error) {
+	body, ref, _, err := splitRef(raw, rest)
+	if err != nil {
+		return source{}, err
+	}
+	segments := strings.Split(body, "/")
+	if len(segments) < 2 {
+		return source{}, fmt.Errorf("source %q is not gist:owner/id[/file][@revision]", raw)
+	}
+	if len(segments) > 3 {
+		return source{}, fmt.Errorf("source %q names more than one file; a gist has no directories", raw)
+	}
+	for _, segment := range segments {
+		if segment == "." || segment == ".." {
+			return source{}, fmt.Errorf("source %q has a %q segment; a source names one file in the gist, it does not move around it", raw, segment)
+		}
+		if !tokenRe.MatchString(segment) {
+			return source{}, fmt.Errorf("source %q has an unusable segment %q; an owner, id and file take letters, digits, . _ + ~ -", raw, segment)
+		}
+	}
+	file := gistDefaultFile
+	if len(segments) == 3 {
+		file = segments[2]
+	}
+	return source{raw: raw, kind: gistSource, gistOwner: segments[0], gistID: segments[1], gistFile: file, ref: ref, stored: "gist:" + body}, nil
 }
 
 func parseURLSource(raw string) (source, error) {
@@ -181,6 +237,15 @@ func (s source) resolve(override string) (string, string, error) {
 			ref = githubDefaultRef
 		}
 		return strings.Join(append([]string{githubRawURL, s.owner, s.repo, ref}, s.path...), "/"), ref, nil
+	case gistSource:
+		if ref != "" && !gistRevisionRe.MatchString(ref) {
+			return "", "", fmt.Errorf("source %q pins ref %q; a gist has no branches or tags, pin the full 40-character revision sha", s.raw, ref)
+		}
+		base := strings.Join([]string{gistRawURL, s.gistOwner, s.gistID, "raw"}, "/")
+		if ref != "" {
+			return base + "/" + ref + "/" + s.gistFile, ref, nil
+		}
+		return base + "/" + s.gistFile, "", nil
 	default:
 		return "", "", fmt.Errorf("source %q has no form", s.raw)
 	}

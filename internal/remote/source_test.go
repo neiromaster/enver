@@ -189,6 +189,36 @@ func TestParseSource(t *testing.T) {
 			raw:     "https://example.com/%zz",
 			wantErr: "not a URL",
 		},
+		{
+			name: "gist defaults to enver.yaml and no revision",
+			raw:  "gist:someone/abc123",
+			url:  "https://gist.githubusercontent.com/someone/abc123/raw/enver.yaml",
+		},
+		{
+			name: "gist names its file",
+			raw:  "gist:someone/abc123/settings.yaml",
+			url:  "https://gist.githubusercontent.com/someone/abc123/raw/settings.yaml",
+		},
+		{
+			name: "gist pins a revision",
+			raw:  "gist:someone/abc123@4fafbd300aaddbe4e16069d9fd25d4b5713c0130",
+			url:  "https://gist.githubusercontent.com/someone/abc123/raw/4fafbd300aaddbe4e16069d9fd25d4b5713c0130/enver.yaml",
+			ref:  "4fafbd300aaddbe4e16069d9fd25d4b5713c0130",
+		},
+		{
+			name: "gist names a file and a revision",
+			raw:  "gist:someone/abc123/settings.yaml@4fafbd300aaddbe4e16069d9fd25d4b5713c0130",
+			url:  "https://gist.githubusercontent.com/someone/abc123/raw/4fafbd300aaddbe4e16069d9fd25d4b5713c0130/settings.yaml",
+			ref:  "4fafbd300aaddbe4e16069d9fd25d4b5713c0130",
+		},
+		{name: "gist without an id", raw: "gist:someone", wantErr: "gist:owner/id"},
+		{name: "gist with nothing", raw: "gist:", wantErr: "gist:owner/id"},
+		{name: "gist with two file segments", raw: "gist:someone/abc123/a/b.yaml", wantErr: "one file"},
+		{name: "gist with an empty file segment", raw: "gist:someone/abc123/", wantErr: `segment ""`},
+		{name: "gist may not step up", raw: "gist:someone/../x", wantErr: `".."`},
+		{name: "gist ref may not be a branch", raw: "gist:someone/abc123@main", wantErr: "40-character"},
+		{name: "gist ref may not be short", raw: "gist:someone/abc123@4fafbd3", wantErr: "40-character"},
+		{name: "gist ref may not be uppercase", raw: "gist:someone/abc123@4FAFBD300AADDBE4E16069D9FD25D4B5713C0130", wantErr: "40-character"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -266,6 +296,17 @@ func TestResolveRecord(t *testing.T) {
 			rec:     config.RemoteRecord{URL: "gitlab:u/r"},
 			wantErr: `"gitlab"`,
 		},
+		{
+			name: "gist record ref wins over the inline one",
+			rec:  config.RemoteRecord{URL: "gist:someone/abc123", Ref: "d17e8cd41b54637698ffc5c33c26a92552fcf0a8"},
+			url:  "https://gist.githubusercontent.com/someone/abc123/raw/d17e8cd41b54637698ffc5c33c26a92552fcf0a8/enver.yaml",
+			ref:  "d17e8cd41b54637698ffc5c33c26a92552fcf0a8",
+		},
+		{
+			name:    "gist record ref may not be a branch",
+			rec:     config.RemoteRecord{URL: "gist:someone/abc123", Ref: "main"},
+			wantErr: "40-character",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -309,6 +350,8 @@ func TestSplitRef(t *testing.T) {
 		{name: "plain http is refused", raw: "http://example.com/c.yaml", wantErr: "https"},
 		{name: "no scheme is refused", raw: "llm", wantErr: "scheme"},
 		{name: "unusable ref is refused", raw: "github:u/r@a/b", wantErr: "ref"},
+		{name: "gist without a ref", raw: "gist:someone/abc123", body: "gist:someone/abc123"},
+		{name: "gist file and ref", raw: "gist:someone/abc123/settings.yaml@4fafbd300aaddbe4e16069d9fd25d4b5713c0130", body: "gist:someone/abc123/settings.yaml", ref: "4fafbd300aaddbe4e16069d9fd25d4b5713c0130"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -339,5 +382,18 @@ func TestSplitRef(t *testing.T) {
 				t.Fatalf("record (%q, %q) resolves (%q, %q), want (%q, %q)", body, ref, url, resolvedRef, wantURL, wantRef)
 			}
 		})
+	}
+}
+
+func TestIsGist(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"gist:someone/abc123":   true,
+		"Gist:someone/abc123":   true,
+		"github:someone/abc123": false,
+		"https://gist.githubusercontent.com/someone/abc123/raw/enver.yaml": false,
+	} {
+		if got := IsGist(raw); got != want {
+			t.Errorf("IsGist(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }
