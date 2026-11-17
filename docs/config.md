@@ -98,19 +98,27 @@ interact. The fields are:
 - `github:owner/repo[/path][@ref]` — one file in a public GitHub repo. `path`
   defaults to `enver.yaml` at the repo root, `ref` to `HEAD`, which
   raw.githubusercontent.com resolves to the default branch without an API call.
+- `gist:owner/id[/file][@revision]` — one file in a GitHub Gist; `file` defaults
+  to `enver.yaml`. A gist has no branches, tags or HEAD, so `revision` must be
+  the full 40-character revision sha. A secret gist works the same way: the raw
+  file is fetched anonymously, and anyone holding the id can read it.
 - `https://…` — stored and fetched exactly as written. A trailing `@ref` is
   split into the record's `ref` at registration, but on a plain https source
   that ref is **label-only metadata**: it is compared by the divergence check
   and reported by pull, never appended to the URL — what such a source serves
-  is whatever the address serves.
+  is whatever the address serves. A gist raw URL works as an ordinary https
+  source and gets no revision tracking — the `gist:` form is what records the
+  revision a pull served.
 - `http://` is rejected, and so is every other scheme: enver fetches sources
   over https only.
 
-A ref takes letters, digits, `.`, `_`, `+`, `~`, `-`. One grammar covers both
-forms — a github ref becomes a path segment, and everywhere else it travels into
-sidecar state and warnings — so a ref containing a slash is rejected in every
-spelling. Pin a branch whose name has one by its commit instead
-(`github:owner/repo@1f0c9ab`).
+A ref takes letters, digits, `.`, `_`, `+`, `~`, `-`. One grammar covers all
+three forms — a github ref and a gist revision become path segments, and a plain
+https ref travels into sidecar state and warnings — so a ref containing a slash
+is rejected in every spelling. Pin a branch whose name has one by its commit
+instead (`github:owner/repo@1f0c9ab`). A gist ref is a revision sha, not a
+branch: an abbreviated or uppercase sha is refused at parse time, since the raw
+endpoint resolves only the full 40-character lowercase sha.
 
 ### Prefix projection
 
@@ -199,9 +207,12 @@ the patch profiles a hidden local layer holds.
 
 `--list` is read-only: it renders every declared record with its source, whether
 it is pinned, and the commit and time of its last pull, saying so when a record
-was never pulled. An unpinned record — `@HEAD`, or an https source with no ref —
-shows the commit its content was actually fetched at, since nothing else about
-it is fixed.
+was never pulled. An unpinned record — `@HEAD`, an unpinned gist, or an https
+source with no ref — shows the commit its content was actually fetched at, since
+nothing else about it is fixed. An unpinned gist resolves the revision it serves
+through the gist API before the fetch, so its recorded commit names the stored
+bytes; with the API down or rate-limited the pull still succeeds and the commit
+is left empty.
 
 `--rm` removes the **closest declaration** in the merged view — the one that
 controls the source right now — so a removal never fails on the wrong layer;

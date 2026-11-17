@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **New:** `gist:owner/id[/file][@revision]` remote sources — one file in a
+  GitHub Gist, `enver.yaml` by default, pinned by the full 40-character
+  revision sha (a gist has no branches, tags or HEAD, so an abbreviated or
+  uppercase sha is refused at parse time). An unpinned gist pull resolves the
+  revision the gist serves through the gist API before fetching, so the
+  sidecar records the revision the stored content came from; a down or
+  rate-limited API costs that record, not the pull. An `https://` URL to a
+  gist raw file keeps working as an ordinary https source, without revision
+  tracking.
+
 ## v0.10.0 - 2026-11-16
 
 - **New:** a leading `~` on an env key marks the variable a secret candidate —
