@@ -73,7 +73,7 @@ func Fetch(rawURL, ref string) ([]byte, string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("fetch %s: %s", rawURL, resp.Status)
+		return nil, "", fmt.Errorf("fetch %s: %s%s", rawURL, resp.Status, gistNotFoundHint(resp.StatusCode, u))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {

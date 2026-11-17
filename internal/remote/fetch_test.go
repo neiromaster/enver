@@ -284,6 +284,67 @@ func TestFetchNoCommitResolution(t *testing.T) {
 	}
 }
 
+func TestFetchGistNotFoundHint(t *testing.T) {
+	const revision = "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name      string
+		path      string
+		status    int
+		pointGist bool
+		wantHint  string
+	}{
+		{
+			name:      "a gist raw 404 names the gist form",
+			path:      "/someone/abc123/raw/enver.yaml",
+			status:    http.StatusNotFound,
+			pointGist: true,
+			wantHint:  "; the gist may name its file differently — gist:someone/abc123/<file> selects it",
+		},
+		{
+			name:      "a pinned raw 404 already names its file",
+			path:      "/someone/abc123/raw/" + revision + "/enver.yaml",
+			status:    http.StatusNotFound,
+			pointGist: true,
+		},
+		{
+			name:      "another status on the gist origin stays bare",
+			path:      "/someone/abc123/raw/enver.yaml",
+			status:    http.StatusInternalServerError,
+			pointGist: true,
+		},
+		{
+			name:      "a 404 on another host stays bare",
+			path:      "/someone/abc123/raw/enver.yaml",
+			status:    http.StatusNotFound,
+			pointGist: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "refused", tc.status)
+			}))
+			if tc.pointGist {
+				pointGistAt(t, srv.URL)
+			}
+			_, _, err := Fetch(srv.URL+tc.path, "")
+			if err == nil {
+				t.Fatal("Fetch err = nil, want the failed status")
+			}
+			bare := fmt.Sprintf("fetch %s: %d %s", srv.URL+tc.path, tc.status, http.StatusText(tc.status))
+			if tc.wantHint == "" {
+				if err.Error() != bare {
+					t.Fatalf("Fetch err = %v, want the bare %q", err, bare)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), tc.wantHint) {
+				t.Fatalf("Fetch err = %v, want it to carry %q", err, tc.wantHint)
+			}
+		})
+	}
+}
+
 func TestFetchHEADOutsideGitHub(t *testing.T) {
 	var lookups atomic.Int32
 	mux := http.NewServeMux()
