@@ -111,6 +111,7 @@ the network otherwise, and never for config.)
 
 ```
 enver pull github:someone/llm-profiles --as llm  register a source and fetch it
+enver pull gist:someone/abc123 --as llm          register a source and fetch it
 enver pull llm                                   re-fetch one remote
 enver pull                                       re-fetch every registered remote
 enver pull --list                                list records with their source and last pull

@@ -15,7 +15,7 @@
 #
 # remotes:
 #   llm:
-#     url: github:someone/llm-profiles   # or https://example.com/enver.yaml
+#     url: github:someone/llm-profiles   # or https://example.com/enver.yaml / gist:someone/abc123
 #     ref: v2                            # optional; defaults to HEAD
 
 default: anth
