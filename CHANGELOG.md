@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.11.0 - 2026-11-17
+
 - **New:** `gist:owner/id[/file][@revision]` remote sources — one file in a
   GitHub Gist, `enver.yaml` by default, pinned by the full 40-character
   revision sha (a gist has no branches, tags or HEAD, so an abbreviated or
