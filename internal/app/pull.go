@@ -50,6 +50,9 @@ type PullOptions struct {
 	// Fetch downloads a resolved source; nil means remote.Fetch. Tests inject it
 	// to make a pull hermetic and to fail one on purpose.
 	Fetch func(url, ref string) ([]byte, string, error)
+	// GistHead resolves the revision a gist head serves; nil means remote.GistHead.
+	// Tests inject it so a pull never reaches the network.
+	GistHead func(rawURL string) (pinned, revision string)
 }
 
 // Pull registers a source under name in the target layer and fetches it. A name
@@ -493,6 +496,12 @@ func (r pullResult) render() string {
 // record, so a failed pull leaves the previous content, sidecar, and record set
 // untouched.
 //
+// A gist head serves whatever the gist holds now, so an unpinned one is fetched
+// at the revision the head lookup reports, and a pinned one already carries its
+// revision in its URL. The sidecar still records the record's own source: the
+// pinned URL is how the bytes were reached, not where they came from, and the
+// next pull judges divergence against the spelling the user can act on.
+//
 // Content goes first and the sidecar second: if the sidecar write fails, the new
 // content stays under the old provenance, which the load path reports as a
 // divergence, while the reverse order would leave a sidecar naming content that
@@ -507,9 +516,28 @@ func pullRecord(name string, rec config.RemoteRecord, opts PullOptions) (pullRes
 	if err != nil {
 		return pullResult{}, fmt.Errorf("remote %q: %w", name, err)
 	}
-	content, commit, err := fetch(url, ref)
+	fetchURL, commitHint := url, ""
+	if remote.IsGist(rec.URL) {
+		if remote.Unpinned(ref) {
+			gistHead := opts.GistHead
+			if gistHead == nil {
+				gistHead = remote.GistHead
+			}
+			if pinned, revision := gistHead(url); revision != "" {
+				fetchURL, commitHint = pinned, revision
+			}
+		} else {
+			commitHint = ref
+		}
+	}
+	content, commit, err := fetch(fetchURL, ref)
 	if err != nil {
 		return pullResult{}, fmt.Errorf("remote %q: %w", name, err)
+	}
+	// Fetch cannot resolve a gist commit itself, so the revision (or a pinned
+	// record's ref) travels as a hint; a commit the fetch did resolve wins.
+	if commit == "" {
+		commit = commitHint
 	}
 	warnings, err := remote.Gate(content, remote.GateOpts{
 		Record:   name,

@@ -217,6 +217,135 @@ func TestPullRegistersAndFetches(t *testing.T) {
 	})
 }
 
+// An unpinned gist serves whatever the gist holds now, so a pull pins the
+// revision the head lookup reports before fetching: the sidecar's commit then
+// names the bytes actually stored. A pinned gist already names its revision and
+// a plain https URL is not a gist source, so neither one looks up.
+func TestPullGist(t *testing.T) {
+	const (
+		gistRevision    = "4fafbd300aaddbe4e16069d9fd25d4b5713c0130"
+		unpinnedGistURL = "https://gist.githubusercontent.com/someone/abc123/raw/enver.yaml"
+		pinnedGistURL   = "https://gist.githubusercontent.com/someone/abc123/raw/" + gistRevision + "/enver.yaml"
+	)
+
+	t.Run("unpinned gist pins the served revision", func(t *testing.T) {
+		f := newPullFixture(t)
+		var gotURL, gotRef string
+		opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+			gotURL, gotRef = url, ref
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.GistHead = func(string) (string, string) {
+			return pinnedGistURL, gistRevision
+		}
+
+		summary, err := Pull("gist:someone/abc123", "llm", opts)
+		if err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if gotURL != pinnedGistURL {
+			t.Fatalf("fetched URL = %q, want %q", gotURL, pinnedGistURL)
+		}
+		if gotRef != "" {
+			t.Fatalf("fetched ref = %q, want none; the revision is already a segment of the pinned URL", gotRef)
+		}
+		st, ok := f.state(t, "llm")
+		if !ok {
+			t.Fatal("sidecar not written")
+		}
+		if st.URL != unpinnedGistURL || st.Ref != "" || st.Commit != gistRevision {
+			t.Fatalf("state = %+v, want the record source, no ref, and the served revision", st)
+		}
+		if !strings.Contains(summary, "commit: "+gistRevision) {
+			t.Errorf("summary misses the pinned revision:\n%s", summary)
+		}
+	})
+
+	t.Run("pinned gist makes no lookup", func(t *testing.T) {
+		f := newPullFixture(t)
+		var gotURL, gotRef string
+		opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+			gotURL, gotRef = url, ref
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.GistHead = func(string) (string, string) {
+			t.Error("a pinned gist must not look up the head revision")
+			return "", ""
+		}
+
+		if _, err := Pull("gist:someone/abc123@"+gistRevision, "llm", opts); err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if gotURL != pinnedGistURL {
+			t.Fatalf("fetched URL = %q, want %q", gotURL, pinnedGistURL)
+		}
+		if gotRef != gistRevision {
+			t.Fatalf("fetched ref = %q, want the pinned revision", gotRef)
+		}
+		st, ok := f.state(t, "llm")
+		if !ok {
+			t.Fatal("sidecar not written")
+		}
+		if st.Commit != gistRevision {
+			t.Fatalf("state = %+v, want the pinned revision recorded", st)
+		}
+	})
+
+	t.Run("a silent API still pulls", func(t *testing.T) {
+		f := newPullFixture(t)
+		var gotURL string
+		opts := f.options(t, true, func(url, _ string) ([]byte, string, error) {
+			gotURL = url
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.GistHead = func(string) (string, string) { return "", "" }
+
+		if _, err := Pull("gist:someone/abc123", "llm", opts); err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if gotURL != unpinnedGistURL {
+			t.Fatalf("fetched URL = %q, want the revision-free %q", gotURL, unpinnedGistURL)
+		}
+		st, ok := f.state(t, "llm")
+		if !ok {
+			t.Fatal("sidecar not written")
+		}
+		if st.Commit != "" {
+			t.Fatalf("state = %+v, want no commit recorded when the lookup stays silent", st)
+		}
+	})
+
+	t.Run("an https gist URL is untouched", func(t *testing.T) {
+		f := newPullFixture(t)
+		var gotURL, gotRef string
+		opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+			gotURL, gotRef = url, ref
+			return []byte(goodRemoteContent), "", nil
+		})
+		opts.GistHead = func(string) (string, string) {
+			t.Error("an https URL is not a gist source and must not be looked up")
+			return "", ""
+		}
+
+		if _, err := Pull(unpinnedGistURL, "llm", opts); err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		if gotURL != unpinnedGistURL {
+			t.Fatalf("fetched URL = %q, want %q fetched exactly as spelled", gotURL, unpinnedGistURL)
+		}
+		if gotRef != "" {
+			t.Fatalf("fetched ref = %q, want none", gotRef)
+		}
+		st, ok := f.state(t, "llm")
+		if !ok {
+			t.Fatal("sidecar not written")
+		}
+		if st.URL != unpinnedGistURL || st.Ref != "" || st.Commit != "" {
+			t.Fatalf("state = %+v, want the https URL with no ref and no commit", st)
+		}
+	})
+}
+
 func TestPullRepointTakeoverConfirm(t *testing.T) {
 	setup := func(t *testing.T) *pullFixture {
 		t.Helper()

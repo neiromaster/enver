@@ -17,6 +17,9 @@ import (
 // replace it so a pull runs hermetic.
 var pullFetch = remote.Fetch
 
+// pullGistHead is the gist-revision seam, replaced by tests like pullFetch.
+var pullGistHead = remote.GistHead
+
 var (
 	pullAs       string
 	pullLocal    bool
@@ -38,11 +41,12 @@ loads it as the lowest layer.
   enver pull --list                     list registered remotes and their last pull
   enver pull --rm <name>                remove the record (and its content)
 
-A source is github:owner/repo[@ref], optionally with a path inside the repo, or
-an https URL. Registration writes the global config; --local writes the
-project's .enver.yaml instead, so the record travels with the repository. A
-remote's profiles appear under its record name as a prefix, unless --no-prefix
-stores them under their bare upstream names.
+A source is github:owner/repo[@ref], optionally with a path inside the repo,
+gist:owner/id[/file][@revision] (a gist has no branches or tags, so a revision
+is the full 40-character sha), or an https URL. Registration writes the global
+config; --local writes the project's .enver.yaml instead, so the record travels
+with the repository. A remote's profiles appear under its record name as a
+prefix, unless --no-prefix stores them under their bare upstream names.
 
 Nothing is resolved from the network when a profile is read: run enver pull
 again to refresh. Removing a record deletes its content only when no visible
@@ -140,6 +144,7 @@ func pullOptions() (app.PullOptions, error) {
 		Force:          pullForce,
 		Merged:         merged,
 		Fetch:          pullFetch,
+		GistHead:       pullGistHead,
 		Confirm:        ui.Confirm,
 		TargetPath:     config.GlobalPath(globalFlags.configPath),
 		OtherPath:      config.LocalPath(),
