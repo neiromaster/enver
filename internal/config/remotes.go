@@ -271,9 +271,11 @@ func composeTree(path, prefix string, contentOf func(path string) ([]byte, bool)
 		if len(chain) == 1 {
 			return nil, nil, nil
 		}
-		return nil, []string{fmt.Sprintf("remote %q: declared by remote %q but no stored content was found for it, so its profiles are not loaded; run \"enver pull %s\" to fetch the subtree", path, chain[len(chain)-2], chain[0])}, nil
+		return nil, []string{fmt.Sprintf("remote %q: declared by remote %q but no stored content could be loaded, so its profiles are not loaded; run \"enver pull %s\" to fetch the subtree", path, chain[len(chain)-2], chain[0])}, nil
 	}
-	content, err := parseConfig(path, data)
+	// The wrap names the record, so the parse step labels the content by its role
+	// rather than spelling the record path a second time back-to-back.
+	content, err := parseConfig("stored content", data)
 	if err != nil {
 		return nil, nil, fmt.Errorf("remote %q: %w", path, err)
 	}
