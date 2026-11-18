@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1265,4 +1266,358 @@ func TestPullRefetchTakeoverFromStoredSource(t *testing.T) {
 			}
 		}
 	})
+}
+
+// nestedOllamaContent is the motivating shape: a provider profile extending a
+// base the file's own remotes: section declares, so one pull brings both.
+const nestedOllamaContent = `profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      MODEL: glm-4
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`
+
+// nestedClaudeContent is the base the provider declares: one profile the
+// provider's extends target names.
+const nestedClaudeContent = `profiles:
+  default:
+    env:
+      API_BASE: https://api.example.com
+`
+
+// serveNested serves the two-level tree by URL, failing the test on anything
+// else so an unexpected fetch is loud.
+func serveNested(t *testing.T, url, ref string) ([]byte, string, error) {
+	t.Helper()
+	switch url {
+	case "https://example.com/ollama.yaml":
+		return []byte(nestedOllamaContent), "ollama-commit", nil
+	case "https://example.com/claude.yaml":
+		return []byte(nestedClaudeContent), "claude-commit", nil
+	}
+	t.Errorf("unexpected fetch of %s", url)
+	return nil, "", nil
+}
+
+// remoteFiles lists every file under dir: the negative assertion a refused
+// pull makes, since nothing may be stored when the walk or the tree check
+// refuses.
+func remoteFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		out = append(out, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestPullFetchesNestedTree(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		return serveNested(t, url, ref)
+	})
+
+	summary, err := Pull("https://example.com/ollama.yaml", "ollama", opts)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	for path, want := range map[string]string{
+		"ollama":        nestedOllamaContent,
+		"ollama/claude": nestedClaudeContent,
+	} {
+		content, ok := readOrMissing(t, config.RemoteContentPath(path))
+		if !ok || content != want {
+			t.Fatalf("content for %s = %q ok=%v, want the fetched bytes verbatim", path, content, ok)
+		}
+		st, ok := f.state(t, path)
+		if !ok {
+			t.Fatalf("sidecar for %s not written", path)
+		}
+		if st.Commit == "" {
+			t.Fatalf("state for %s = %+v, want the fetch commit recorded", path, st)
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(f.remotesDir, "ollama")); err != nil || !fi.IsDir() {
+		t.Fatalf("the nested record's directory was not created (stat err = %v)", err)
+	}
+	parent := strings.Index(summary, "✓ remote \"ollama\"")
+	child := strings.Index(summary, "✓ remote \"ollama/claude\"")
+	if parent < 0 || child < 0 || child < parent {
+		t.Fatalf("summary does not render the parent block before the child:\n%s", summary)
+	}
+	if !strings.Contains(summary, "\n  ✓ remote \"ollama/claude\"") {
+		t.Fatalf("the child block is not indented under its parent:\n%s", summary)
+	}
+	for _, want := range []string{
+		"profiles: ollama/glm-models",
+		"profiles: ollama/claude/default",
+		"commit: ollama-commit",
+		"commit: claude-commit",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary misses %q:\n%s", want, summary)
+		}
+	}
+
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := merged.Profiles["ollama/glm-models"].Extends; len(got) != 1 || got[0] != "ollama/claude/default" {
+		t.Fatalf("extends = %q, want ollama/claude/default", got)
+	}
+	r, err := merged.ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("resolve ollama/glm-models: %v", err)
+	}
+	if r.Env["MODEL"] != "glm-4" || r.Env["API_BASE"] != "https://api.example.com" {
+		t.Fatalf("env = %q, want the profile's own key and the inherited base key", r.Env)
+	}
+}
+
+func TestPullAsRenamesSubtree(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		return serveNested(t, url, ref)
+	})
+
+	if _, err := Pull("https://example.com/ollama.yaml", "my-ollama", opts); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	for path, want := range map[string]string{
+		"my-ollama":        nestedOllamaContent,
+		"my-ollama/claude": nestedClaudeContent,
+	} {
+		content, ok := readOrMissing(t, config.RemoteContentPath(path))
+		if !ok || content != want {
+			t.Fatalf("content for %s = %q ok=%v, want the served bytes unchanged", path, content, ok)
+		}
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("ollama")); ok {
+		t.Fatal("the pull stored content under a name it was not registered as")
+	}
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := merged.Profiles["my-ollama/glm-models"].Extends; len(got) != 1 || got[0] != "my-ollama/claude/default" {
+		t.Fatalf("extends = %q, want the subtree re-composed under the new prefix", got)
+	}
+	if _, ok := merged.Profiles["my-ollama/claude/default"]; !ok {
+		t.Fatal("the nested base did not land under the new prefix")
+	}
+}
+
+func TestPullCycleRefused(t *testing.T) {
+	t.Run("a loop of declarations", func(t *testing.T) {
+		f := newPullFixture(t)
+		opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+			switch url {
+			case "https://example.com/a.yaml":
+				return []byte("profiles:\n  a:\n    env:\n      K: v\nremotes:\n  b:\n    url: https://example.com/b.yaml\n"), "", nil
+			case "https://example.com/b.yaml":
+				return []byte("profiles:\n  b:\n    env:\n      J: w\nremotes:\n  a:\n    url: https://example.com/a.yaml\n"), "", nil
+			}
+			t.Errorf("unexpected fetch of %s", url)
+			return nil, "", nil
+		})
+
+		_, err := Pull("https://example.com/a.yaml", "top", opts)
+		if err == nil || !strings.Contains(err.Error(), "loops back") {
+			t.Fatalf("err = %v, want the cycle refusal", err)
+		}
+		chain := "https://example.com/a.yaml -> https://example.com/b.yaml -> https://example.com/a.yaml"
+		if !strings.Contains(err.Error(), chain) {
+			t.Fatalf("err = %v, want the chain %q", err, chain)
+		}
+		if entries := remoteFiles(t, f.remotesDir); len(entries) != 0 {
+			t.Fatalf("a refused cycle stored %q", entries)
+		}
+	})
+
+	// A cycle is a source reappearing on one walk, not a source used twice:
+	// the same source under two parents is two records with separate pristine
+	// copies, exactly as two top-level records would be.
+	t.Run("a shared source under two parents is not a cycle", func(t *testing.T) {
+		f := newPullFixture(t)
+		opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+			switch url {
+			case "https://example.com/top.yaml":
+				return []byte("profiles:\n  a:\n    env:\n      K: v\nremotes:\n  one:\n    url: https://example.com/mid1.yaml\n  two:\n    url: https://example.com/mid2.yaml\n"), "", nil
+			case "https://example.com/mid1.yaml", "https://example.com/mid2.yaml":
+				return []byte("profiles:\n  b:\n    env:\n      J: w\nremotes:\n  shared:\n    url: https://example.com/shared.yaml\n"), "", nil
+			case "https://example.com/shared.yaml":
+				return []byte("profiles:\n  c:\n    env:\n      L: x\n"), "", nil
+			}
+			t.Errorf("unexpected fetch of %s", url)
+			return nil, "", nil
+		})
+
+		summary, err := Pull("https://example.com/top.yaml", "top", opts)
+		if err != nil {
+			t.Fatalf("Pull: %v", err)
+		}
+		for _, want := range []string{"top/one/shared", "top/two/shared"} {
+			if _, ok := readOrMissing(t, config.RemoteContentPath(want)); !ok {
+				t.Fatalf("record %s not stored as its own copy", want)
+			}
+			if !strings.Contains(summary, want) {
+				t.Fatalf("summary misses %s:\n%s", want, summary)
+			}
+		}
+		merged, err := Load(Options{})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if _, ok := merged.Profiles["top/one/shared/c"]; !ok {
+			t.Fatal("both copies of the shared source must load")
+		}
+		if _, ok := merged.Profiles["top/two/shared/c"]; !ok {
+			t.Fatal("both copies of the shared source must load")
+		}
+	})
+}
+
+func TestPullDepthCap(t *testing.T) {
+	// One source past config.MaxRemoteDepth: the cap fires before the record
+	// that would exceed it is fetched.
+	const chainLen = 17
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		var n int
+		if _, err := fmt.Sscanf(url, "https://example.com/s%d.yaml", &n); err != nil {
+			t.Errorf("unexpected fetch of %s", url)
+			return nil, "", nil
+		}
+		if n >= chainLen {
+			t.Errorf("fetched %s, at or past the depth cap", url)
+			return nil, "", nil
+		}
+		return []byte(fmt.Sprintf("profiles:\n  p%d:\n    env:\n      K: v\nremotes:\n  c:\n    url: https://example.com/s%d.yaml\n", n, n+1)), "", nil
+	})
+
+	_, err := Pull("https://example.com/s1.yaml", "deep", opts)
+	if err == nil || !strings.Contains(err.Error(), "16 record cap") {
+		t.Fatalf("err = %v, want the depth cap named", err)
+	}
+	for _, want := range []string{"https://example.com/s1.yaml", "https://example.com/s17.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want the chain to name %s", err, want)
+		}
+	}
+	if entries := remoteFiles(t, f.remotesDir); len(entries) != 0 {
+		t.Fatalf("a depth-capped pull stored %q", entries)
+	}
+}
+
+func TestPullTreeCheckRefusesDangling(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		switch url {
+		case "https://example.com/ollama.yaml":
+			return []byte(nestedOllamaContent), "", nil
+		case "https://example.com/claude.yaml":
+			return []byte("profiles:\n  base:\n    env:\n      K: v\n"), "", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	})
+
+	_, err := Pull("https://example.com/ollama.yaml", "ollama", opts)
+	if err == nil {
+		t.Fatal("a dangling subtree target must fail the pull")
+	}
+	for _, want := range []string{`remote "ollama"`, `"ollama/claude/default"`, "no profile in the pulled subtree defines"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want it to carry %q", err, want)
+		}
+	}
+	if entries := remoteFiles(t, f.remotesDir); len(entries) != 0 {
+		t.Fatalf("a refused tree check stored %q", entries)
+	}
+	if _, ok := f.remotes(t, f.globalPath)["ollama"]; ok {
+		t.Fatal("a refused tree check must not register the record")
+	}
+}
+
+func TestPullNestedNameNotCallable(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		return serveNested(t, url, ref)
+	})
+	if _, err := Pull("https://example.com/ollama.yaml", "ollama", opts); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	before, _ := readOrMissing(t, config.RemoteContentPath("ollama/claude"))
+	update := f.options(t, true, func(string, string) ([]byte, string, error) {
+		t.Error("an update by a nested record path must not fetch")
+		return nil, "", nil
+	})
+
+	_, err := PullUpdate("ollama/claude", update)
+	if err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("err = %v, want the not-registered refusal", err)
+	}
+	if !strings.Contains(err.Error(), "enver pull ollama") {
+		t.Fatalf("err = %v, want the hint to refresh through the parent", err)
+	}
+	if after, _ := readOrMissing(t, config.RemoteContentPath("ollama/claude")); after != before {
+		t.Fatal("the refused update must leave the nested content untouched")
+	}
+}
+
+// A no-prefix child under a no-prefix top-level record lands bare beside the
+// parent's own bare names; the fold makes the later record win, and the pull
+// must say which record that is by its path.
+func TestPullNoPrefixTreeCollisions(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		switch url {
+		case "https://example.com/team.yaml":
+			return []byte("profiles:\n  base:\n    env:\n      A: one\nremotes:\n  child:\n    url: https://example.com/child.yaml\n    no_prefix: true\n"), "", nil
+		case "https://example.com/child.yaml":
+			return []byte("profiles:\n  base:\n    env:\n      B: two\n"), "", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	})
+	opts.NoPrefix = true
+
+	summary, err := Pull("https://example.com/team.yaml", "team", opts)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("team/child")); !ok {
+		t.Fatal("the no-prefix child was not stored under its parent's directory")
+	}
+	for _, want := range []string{
+		"collides with the same profile name already loaded from remote",
+		`"team/child" wins`,
+		`remote "team/child"`,
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary misses %q:\n%s", want, summary)
+		}
+	}
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	r, err := merged.ResolveProfile("base")
+	if err != nil {
+		t.Fatalf("resolve base: %v", err)
+	}
+	if r.Env["A"] != "one" || r.Env["B"] != "two" {
+		t.Fatalf("env = %q, want both records' keys under the bare name", r.Env)
+	}
 }

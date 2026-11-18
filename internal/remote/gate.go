@@ -48,15 +48,19 @@ type GateOpts struct {
 // rejects, whose profile names break the bare upstream rule (no slash, non-empty,
 // no control characters), whose extends targets reach outside the file's own
 // namespace or carry a segment no profile can be named by, that carries an
-// extends cycle within the file, whose ciphertext is
+// extends cycle within the file, whose nested declarations a pull could not
+// act on (no URL, an unresolvable source, a name no filesystem can carry, a
+// case-fold sibling), whose ciphertext is
 // foreign-era or mixes eras, whose enc:v3 parameters sit beyond the parse caps,
 // or that carries more than maxEncryptedValues enc: values.
 //
 // It admits with a warning a no-prefix pull whose bare names collide with
-// profiles the merged view already defines, and admits in silence content that
-// declares its own remotes: section, which nested composition loads from. It
-// also admits current-era ciphertext the gate cannot decrypt - including the
-// mixed-salt guidance a consumer patching those keys needs.
+// profiles the merged view already defines, and a file that declares a record
+// named like one of its own profiles, which coexists with it but seldom means
+// to. It admits in silence content that declares its own remotes: section,
+// which nested composition loads from. It also admits current-era ciphertext
+// the gate cannot decrypt - including the mixed-salt guidance a consumer
+// patching those keys needs.
 //
 // Extends cycles that span files are out of scope here: the gate resolves only
 // the file's own graph, and the load backstop catches the rest.
@@ -66,6 +70,9 @@ func Gate(content []byte, opts GateOpts) (warnings []string, err error) {
 		return nil, err
 	}
 	if err := checkRemoteProfiles(cfg, opts); err != nil {
+		return nil, err
+	}
+	if err := checkNestedDeclarations(cfg, opts.Record); err != nil {
 		return nil, err
 	}
 	cryptoWarnings, err := checkRemoteCiphertext(cfg, opts.Record)
@@ -235,6 +242,23 @@ func inFileEdge(target string, defined map[string]bool) (string, bool) {
 	return "", false
 }
 
+// checkNestedDeclarations applies the record usability rule to the records a
+// fetched file declares: the pull is about to fetch each of them and store
+// content under its name, so a declaration no pull could act on — a missing or
+// unresolvable source, a name no filesystem can carry, two names the
+// filesystem may not tell apart — must refuse the file now rather than fail
+// the walk after the parent has landed. One rule serves both authors: this is
+// the same validation a user's own remotes: section passes on write.
+func checkNestedDeclarations(cfg config.Config, record string) error {
+	if len(cfg.Remotes) == 0 {
+		return nil
+	}
+	if err := config.ValidateRemotes(cfg.Remotes); err != nil {
+		return fmt.Errorf("%s: declares remotes a pull cannot use: %w", gateLabel(record), err)
+	}
+	return nil
+}
+
 // encRef is one env value the gate inspects at rest, labelled the way the
 // message should name it: profile and env key, both already validated.
 type encRef struct {
@@ -359,15 +383,33 @@ func joinRefs(refs []encRef, all bool) string {
 }
 
 // gateWarnings collects the advisories that admit the content: the namespace
-// collisions a bare-name pull would cause. A declared remotes: section is
-// admitted in silence - it is the shape nested composition loads from, and its
-// record names and gated targets are validated outright.
+// collisions a bare-name pull would cause, and the records declared under a
+// name the file also gives one of its own profiles. A declared remotes:
+// section is otherwise admitted in silence - it is the shape nested
+// composition loads from, and its record names and gated targets are validated
+// outright.
 func gateWarnings(cfg config.Config, opts GateOpts) []string {
 	var warnings []string
 	if collision := collisionWarning(cfg, opts); collision != "" {
 		warnings = append(warnings, collision)
 	}
-	return warnings
+	return append(warnings, childNameWarnings(cfg, opts)...)
+}
+
+// childNameWarnings reports each declared record whose name equals one of the
+// file's own profile names. The two coexist — the record's profiles land under
+// <name>/ while the profile keeps the bare name — so the declaration is
+// allowed, but a reader can easily have meant one thing where the config now
+// holds two, and the pull output is where they find out.
+func childNameWarnings(cfg config.Config, opts GateOpts) []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
+		if _, ok := cfg.Profiles[name]; !ok {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: declares a record %q beside its own profile of the same name; the record's profiles land under %s/ while the profile keeps the bare name, so both load — check that is intended", gateLabel(opts.Record), quoteName(name), quoteName(name)))
+	}
+	return out
 }
 
 // collisionWarning reports every bare name a no-prefix pull would land on top of

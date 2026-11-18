@@ -84,7 +84,7 @@ func Pull(rawSource, name string, opts PullOptions) (string, error) {
 	if !proceed {
 		return "", nil
 	}
-	res, err := pullRecord(name, rec, opts)
+	res, err := pullTree(name, rec, opts)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +116,7 @@ func PullUpdate(name string, opts PullOptions) (string, error) {
 	if !proceed {
 		return "", nil
 	}
-	res, err := pullRecord(name, rec, opts)
+	res, err := pullTree(name, rec, opts)
 	if err != nil {
 		return "", err
 	}
@@ -143,7 +143,7 @@ func PullAll(opts PullOptions) (string, error) {
 			fmt.Fprintf(&b, "\n- remote %q left unchanged: takeover declined\n", name)
 			continue
 		}
-		res, err := pullRecord(name, rec, opts)
+		res, err := pullTree(name, rec, opts)
 		if err != nil {
 			fmt.Fprintf(&b, "\n✗ %v\n", err)
 			errs = append(errs, err)
@@ -221,7 +221,13 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 	return b.String(), nil
 }
 
+// notRegistered refuses a record no config declares. A path-shaped name can
+// never be one: the config sections hold top-level records only, and a nested
+// record is refreshed by pulling the record that declares it.
 func notRegistered(name string) error {
+	if parent, _, nested := strings.Cut(name, "/"); nested {
+		return fmt.Errorf("remote %q is not registered; nested records are fetched with the record that declares them, so run enver pull %s", name, parent)
+	}
 	return fmt.Errorf("remote %q is not registered; register it with enver pull <source> --as %s", name, name)
 }
 
@@ -327,7 +333,7 @@ func confirmTakeover(name string, rec config.RemoteRecord, opts PullOptions) (ch
 func confirmRefetch(name string, rec config.RemoteRecord, opts PullOptions) (changes []string, proceed bool, err error) {
 	url, ref, resolveErr := remote.ResolveRecord(rec)
 	if resolveErr != nil {
-		return nil, true, nil // pullRecord reports the unusable source
+		return nil, true, nil // pullTree reports the unusable source
 	}
 	st, ok := config.ReadRemoteState(name)
 	if !ok || (st.URL == url && st.Ref == ref) {
@@ -463,7 +469,8 @@ func writeRecord(name string, rec config.RemoteRecord, opts PullOptions) error {
 	return config.WriteRemotes(opts.TargetPath, next)
 }
 
-// pullResult is what one record's pull reports.
+// pullResult is what one record's pull reports: its own block plus one block
+// per record its content declared, indented under it.
 type pullResult struct {
 	name     string
 	source   string
@@ -471,68 +478,150 @@ type pullResult struct {
 	commit   string
 	changes  []string
 	warnings []string
+	children []pullResult
 }
 
 func (r pullResult) render() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n✓ remote %q ← %s\n", r.name, r.source)
-	for _, change := range r.changes {
-		fmt.Fprintf(&b, "  %s\n", change)
-	}
-	if len(r.profiles) > 0 {
-		fmt.Fprintf(&b, "  profiles: %s\n", strings.Join(r.profiles, ", "))
-	}
-	if r.commit != "" {
-		fmt.Fprintf(&b, "  commit: %s\n", r.commit)
-	}
-	for _, warning := range r.warnings {
-		fmt.Fprintf(&b, "  warning: %s\n", warning)
-	}
+	r.renderBlock(&b, 0)
 	return b.String()
 }
 
-// pullRecord fetches and gates one record's content, then stores it and its
-// provenance. The content and sidecar are written before any caller writes the
-// record, so a failed pull leaves the previous content, sidecar, and record set
-// untouched.
+// renderBlock writes one record's block and then its children's, two spaces
+// further in per level, so a subtree reads as the tree it lands as on disk.
+func (r pullResult) renderBlock(b *strings.Builder, depth int) {
+	indent := strings.Repeat("  ", depth)
+	fmt.Fprintf(b, "\n%s✓ remote %q ← %s\n", indent, r.name, r.source)
+	for _, change := range r.changes {
+		fmt.Fprintf(b, "%s  %s\n", indent, change)
+	}
+	if len(r.profiles) > 0 {
+		fmt.Fprintf(b, "%s  profiles: %s\n", indent, strings.Join(r.profiles, ", "))
+	}
+	if r.commit != "" {
+		fmt.Fprintf(b, "%s  commit: %s\n", indent, r.commit)
+	}
+	for _, warning := range r.warnings {
+		fmt.Fprintf(b, "%s  warning: %s\n", indent, warning)
+	}
+	for _, child := range r.children {
+		child.renderBlock(b, depth+1)
+	}
+}
+
+// pulledRecord is one record the walk has fetched and gated, with the records
+// its content declared below it. Nothing is written until the whole tree has
+// passed the tree check, so the walk keeps every content in memory.
+type pulledRecord struct {
+	path     string
+	url      string
+	ref      string
+	commit   string
+	content  []byte
+	source   string
+	profiles []string
+	warnings []string
+	children []*pulledRecord
+}
+
+// pullWalk is one recursive pull: the fetch seams, the view every record is
+// gated against, the fresh composition built so far, and the contents the tree
+// check will compose.
+type pullWalk struct {
+	fetch    func(url, ref string) ([]byte, string, error)
+	gistHead func(rawURL string) (pinned, revision string)
+	base     config.Config
+	fresh    config.Config
+	// freshLabel names the layer the fresh fold last stamped; the gate reads
+	// profile names only, but the fold wants a label for every merge.
+	freshLabel string
+	fetched    map[string][]byte
+}
+
+// pullTree fetches and gates one record's content together with every record
+// its content declares, recursively, then stores the whole tree. The walk is
+// depth-first with children in sorted record order, each record carrying the
+// chain of resolved sources above it: a source already on the chain is a cycle,
+// and a chain longer than config.MaxRemoteDepth is a pathological tree — both
+// are refused before anything is written, as is a tree whose projected extends
+// targets resolve to nothing once composed. A failed pull therefore leaves the
+// previous content, sidecars, and record set untouched.
+//
+// Each record is gated against the merged view minus the whole subtree being
+// pulled, folded with the fresh composition the walk has built so far: the
+// pre-pull view holds the previous pull's tree, which the fetch is replacing,
+// so it would answer collision questions with stale names either way.
 //
 // A gist head serves whatever the gist holds now, so an unpinned one is fetched
 // at the revision the head lookup reports, and a pinned one already carries its
 // revision in its URL. The sidecar still records the record's own source: the
 // pinned URL is how the bytes were reached, not where they came from, and the
 // next pull judges divergence against the spelling the user can act on.
-//
-// Content goes first and the sidecar second: if the sidecar write fails, the new
-// content stays under the old provenance, which the load path reports as a
-// divergence, while the reverse order would leave a sidecar naming content that
-// is not there and nothing to compare. A failed write of either leaves the
-// record untouched, so the next pull repairs it.
-func pullRecord(name string, rec config.RemoteRecord, opts PullOptions) (pullResult, error) {
-	fetch := opts.Fetch
-	if fetch == nil {
-		fetch = remote.Fetch
+func pullTree(name string, rec config.RemoteRecord, opts PullOptions) (pullResult, error) {
+	w := &pullWalk{
+		fetch:      opts.Fetch,
+		gistHead:   opts.GistHead,
+		base:       gateViewSubtree(opts.Merged, name),
+		freshLabel: config.LayerGlobal,
+		fetched:    map[string][]byte{},
 	}
+	if w.fetch == nil {
+		w.fetch = remote.Fetch
+	}
+	if w.gistHead == nil {
+		w.gistHead = remote.GistHead
+	}
+	root, err := w.record(name, rec, childPrefix("", name, rec.NoPrefix), nil)
+	if err != nil {
+		return pullResult{}, err
+	}
+	warnings, err := w.checkTree(name, rec.NoPrefix)
+	if err != nil {
+		return pullResult{}, err
+	}
+	if err := commitPulled(root); err != nil {
+		return pullResult{}, err
+	}
+	res := root.result()
+	res.warnings = append(res.warnings, warnings...)
+	return res, nil
+}
+
+// record resolves, fetches, and gates one record of the tree, then recurses
+// into the children its content declares. prefix is the namespace this
+// record's profiles land under once the whole tree composes, and chain holds
+// the resolved sources of the records above it, in walk order. Children have
+// no takeover gate of their own: the parent's declaration is their config, and
+// it just passed this pull's gate.
+func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, chain []string) (*pulledRecord, error) {
 	url, ref, err := remote.ResolveRecord(rec)
 	if err != nil {
-		return pullResult{}, fmt.Errorf("remote %q: %w", name, err)
+		return nil, fmt.Errorf("remote %q: %w", path, err)
+	}
+	src := chainSource(url, ref)
+	next := append(slices.Clone(chain), src)
+	if len(next) > config.MaxRemoteDepth {
+		return nil, fmt.Errorf("remote %q: pulling it would stack nested remotes deeper than the %d record cap: %s", path, config.MaxRemoteDepth, strings.Join(next, " -> "))
+	}
+	// The same source twice on one walk is a loop of declarations, whatever
+	// the record names spell; the same source under two parents is fine, which
+	// is why the check runs against the active chain and not everything seen.
+	if slices.Contains(chain, src) {
+		return nil, fmt.Errorf("remote %q: its declaration tree loops back to a source this pull is already fetching: %s", path, strings.Join(next, " -> "))
 	}
 	fetchURL, commitHint := url, ""
 	if remote.IsGist(rec.URL) {
 		if remote.Unpinned(ref) {
-			gistHead := opts.GistHead
-			if gistHead == nil {
-				gistHead = remote.GistHead
-			}
-			if pinned, revision := gistHead(url); revision != "" {
+			if pinned, revision := w.gistHead(url); revision != "" {
 				fetchURL, commitHint = pinned, revision
 			}
 		} else {
 			commitHint = ref
 		}
 	}
-	content, commit, err := fetch(fetchURL, ref)
+	content, commit, err := w.fetch(fetchURL, ref)
 	if err != nil {
-		return pullResult{}, fmt.Errorf("remote %q: %w", name, err)
+		return nil, fmt.Errorf("remote %q: %w", path, err)
 	}
 	// Fetch cannot resolve a gist commit itself, so the revision (or a pinned
 	// record's ref) travels as a hint; a commit the fetch did resolve wins.
@@ -540,50 +629,163 @@ func pullRecord(name string, rec config.RemoteRecord, opts PullOptions) (pullRes
 		commit = commitHint
 	}
 	warnings, err := remote.Gate(content, remote.GateOpts{
-		Record:   name,
-		NoPrefix: rec.NoPrefix,
-		Merged:   gateView(opts.Merged, name),
+		Record:   path,
+		NoPrefix: prefix == "",
+		Merged:   config.Merge(w.base, w.fresh, config.LayerGlobal, w.freshLabel),
 	})
 	if err != nil {
 		if remote.IsGistPage(url) {
-			return pullResult{}, fmt.Errorf("%w; that is the gist page, not a config — gist:<owner>/<id>[/<file>] names a file in it", err)
+			return nil, fmt.Errorf("%w; that is the gist page, not a config — gist:<owner>/<id>[/<file>] names a file in it", err)
 		}
-		return pullResult{}, err
+		return nil, err
 	}
-	if err := config.WriteRemoteContent(name, content); err != nil {
-		return pullResult{}, err
+	file, projected, err := projectFetched(content, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("remote %q: %w", path, err)
 	}
-	if err := config.WriteRemoteState(name, config.RemoteState{
-		URL:      url,
-		Ref:      ref,
-		Commit:   commit,
-		PulledAt: time.Now().UTC(),
-	}); err != nil {
-		return pullResult{}, err
-	}
-	return pullResult{
-		name:     name,
-		source:   sourceLabel(rec, ref),
-		profiles: projectedNames(content, name, rec.NoPrefix),
+	w.fresh = config.Merge(w.fresh, projected, w.freshLabel, config.RemoteLayer(path))
+	w.freshLabel = config.RemoteLayer(path)
+	w.fetched[path] = content
+	out := &pulledRecord{
+		path:     path,
+		url:      url,
+		ref:      ref,
 		commit:   commit,
+		content:  content,
+		source:   sourceLabel(rec, ref),
+		profiles: projected.ProfileNames(),
 		warnings: warnings,
-	}, nil
+	}
+	for _, name := range slices.Sorted(maps.Keys(file.Remotes)) {
+		child := file.Remotes[name]
+		pulled, err := w.record(path+"/"+name, child, childPrefix(prefix, name, child.NoPrefix), next)
+		if err != nil {
+			return nil, err
+		}
+		out.children = append(out.children, pulled)
+	}
+	return out, nil
 }
 
-// gateView is the merged view the gate judges fetched content against: every
-// layer and every other remote's projection, minus this record's own projection.
-// The projection under the pulled prefix is what the fetch is about to replace,
-// so keeping it would make a repeat no-prefix pull report its own profiles as
-// collisions and would classify an own-prefix extends target as bound to content
-// that no longer exists.
-func gateView(merged config.Config, name string) config.Config {
+// checkTree composes the fetched tree exactly as load will and refuses a pull
+// whose projected extends targets resolve to nothing. The gate already scoped
+// every target to its own file's namespace, so a target that misses inside the
+// subtree is a base the declaration promised and the content did not deliver;
+// nothing has been written yet, so the refusal costs the stored tree nothing.
+// The composition's own advisories — duplicate names the fold collapses onto
+// one record — ride along as warnings, since the pull is the moment to tell the
+// user their upstream composes that way.
+func (w *pullWalk) checkTree(root string, noPrefix bool) ([]string, error) {
+	layers, warnings, err := config.ComposeTree(root, noPrefix, func(path string) ([]byte, bool) {
+		data, ok := w.fetched[path]
+		return data, ok
+	})
+	if err != nil {
+		return nil, err
+	}
+	defined := make(map[string]bool)
+	for _, layer := range layers {
+		for name := range layer.Config.Profiles {
+			defined[name] = true
+		}
+	}
+	for _, layer := range layers {
+		record, _ := config.RemoteName(layer.Label)
+		for _, name := range layer.Config.ProfileNames() {
+			for _, target := range layer.Config.Profiles[name].Extends {
+				if defined[target] {
+					continue
+				}
+				return nil, fmt.Errorf("remote %q: profile %q extends %q, which no profile in the pulled subtree defines; a remote file resolves only its own profiles and the records in its own remotes: section", record, name, target)
+			}
+		}
+	}
+	return warnings, nil
+}
+
+// commitPulled stores the fetched tree, parent first, content before sidecar
+// per record: if a sidecar write fails, the new content stays under the old
+// provenance, which the load path reports as a divergence, while the reverse
+// order would leave a sidecar naming content that is not there and nothing to
+// compare. A failed write of either leaves the record untouched, so the next
+// pull repairs it.
+func commitPulled(r *pulledRecord) error {
+	if err := config.WriteRemoteContent(r.path, r.content); err != nil {
+		return err
+	}
+	if err := config.WriteRemoteState(r.path, config.RemoteState{
+		URL:      r.url,
+		Ref:      r.ref,
+		Commit:   r.commit,
+		PulledAt: time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	for _, child := range r.children {
+		if err := commitPulled(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// result renders the walked tree as the pull's report, children indented under
+// their parent.
+func (r *pulledRecord) result() pullResult {
+	out := pullResult{
+		name:     r.path,
+		source:   r.source,
+		profiles: r.profiles,
+		commit:   r.commit,
+		warnings: r.warnings,
+	}
+	for _, child := range r.children {
+		out.children = append(out.children, child.result())
+	}
+	return out
+}
+
+// childPrefix is the namespace a record's profiles land under inside the
+// subtree, given the namespace its parent lands under: a no-prefix record
+// contributes no segment of its own, so its profiles land directly under the
+// parent's prefix (bare at the top level), while a prefixed record appends its
+// segment. A parent of "" is the top-level record, so the same arithmetic
+// covers both levels. It restates what composition applies at load, so the
+// gate and the summary name profiles by where they will resolve.
+func childPrefix(parent, name string, noPrefix bool) string {
+	if noPrefix {
+		return parent
+	}
+	if parent == "" {
+		return name
+	}
+	return parent + "/" + name
+}
+
+// chainSource names a resolved source inside a chain message: the URL with its
+// ref attached, so records that differ only in ref stay told apart.
+func chainSource(url, ref string) string {
+	if ref == "" {
+		return url
+	}
+	return url + "@" + ref
+}
+
+// gateViewSubtree is the merged view the gate judges fetched content against:
+// every layer and every other remote's projection, minus the whole subtree the
+// named record owns — its own projection and every descendant's. The walk
+// replaces that subtree wholesale, so keeping any of it would make a repeat
+// pull report the profiles it is about to replace as collisions, and would
+// have the fresh composition judged against content that is on its way out.
+func gateViewSubtree(merged config.Config, name string) config.Config {
 	own := config.RemoteLayer(name)
+	under := own + "/"
 	out := merged
 	out.Profiles = make(map[string]config.Profile, len(merged.Profiles))
 	out.ProfileLayer = make(map[string]string, len(merged.ProfileLayer))
 	out.ExtendsOrigins = make(map[string]map[string]string, len(merged.ExtendsOrigins))
 	for profile, p := range merged.Profiles {
-		if merged.ProfileLayer[profile] == own {
+		if layer := merged.ProfileLayer[profile]; layer == own || strings.HasPrefix(layer, under) {
 			continue
 		}
 		out.Profiles[profile] = p
@@ -597,21 +799,23 @@ func gateView(merged config.Config, name string) config.Config {
 	return out
 }
 
-// projectedNames is what the fetched content will land as: the profile names the
-// merged view gains once the record's pull mode is applied. The gate has already
-// accepted the content, so a parse or projection failure here can only mean the
-// gate and this report disagree, which is reported as no names rather than as a
-// failed pull.
-func projectedNames(content []byte, name string, noPrefix bool) []string {
+// projectFetched parses one gated file and projects it into the namespace its
+// composed prefix names, the way composition lands it at load. The parsed file
+// still carries the remotes: section the walk recurses through, the projection
+// supplies the profile names the report lists and the composition the next
+// gate collides against. The gate has already accepted the bytes, so a failure
+// here means the gate and the projection disagree about the same content,
+// which is an error rather than a silent gap in the report.
+func projectFetched(content []byte, prefix string) (config.Config, config.Config, error) {
 	var cfg config.Config
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
-		return nil
+		return config.Config{}, config.Config{}, err
 	}
-	projected, err := config.Project(cfg, name, noPrefix)
+	projected, err := config.Project(cfg, prefix, prefix == "")
 	if err != nil {
-		return nil
+		return config.Config{}, config.Config{}, err
 	}
-	return projected.ProfileNames()
+	return cfg, projected, nil
 }
 
 // recordSource names a record's source in a summary or warning: the spelling the

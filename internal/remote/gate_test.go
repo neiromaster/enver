@@ -487,3 +487,51 @@ func TestGateRejectsAliasFlood(t *testing.T) {
 		t.Fatalf("Gate refused exactly 1000 anchors and aliases: %v", err)
 	}
 }
+
+// The records a fetched file declares are about to be fetched and stored under
+// their names, so they pass the same usability rule a user's own remotes:
+// section passes on write: a declaration the pull could never act on must
+// refuse the file before any of it lands.
+func TestGateRejectsUnusableNestedDeclarations(t *testing.T) {
+	cases := []struct {
+		name    string
+		remotes string
+		want    []string
+	}{
+		{"plain http url", "  claude:\n    url: http://example.com/c.yaml\n", []string{"https only", "http://example.com/c.yaml"}},
+		{"a source with no scheme", "  claude:\n    url: not-a-source\n", []string{"no scheme", "not-a-source"}},
+		{"missing url", "  claude:\n    ref: v1\n", []string{"url is required", "claude"}},
+		{"case-fold siblings", "  Claude:\n    url: https://example.com/c.yaml\n  claude:\n    url: https://example.com/c.yaml\n", []string{"differ only in case", "Claude", "claude"}},
+		{"reserved device name", "  con:\n    url: https://example.com/c.yaml\n", []string{"reserved Windows device name", "con"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("profiles:\n  a:\n    env:\n      K: v\nremotes:\n" + tc.remotes)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, tc.want...)
+		})
+	}
+}
+
+// A record whose name equals one of the file's own profile names is no
+// technical collision — the record's profiles land under <name>/ while the
+// profile keeps the bare name — so it is admitted, with one warning for the
+// human reading the file.
+func TestGateWarnsChildNameEqualsProfile(t *testing.T) {
+	content := []byte(`profiles:
+  claude:
+    env:
+      K: v
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+	warnings, err := Gate(content, GateOpts{Record: "llm"})
+	if err != nil {
+		t.Fatalf("Gate refused a record named like a profile: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one name-shared-with-a-profile warning", warnings)
+	}
+	gateRequireWarning(t, warnings, `"claude"`)
+}
