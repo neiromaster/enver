@@ -167,7 +167,10 @@ func PullAll(opts PullOptions) (string, error) {
 // source, and lists user-layer profiles under the prefix, which survive as
 // standalone profiles but lose every inherited key.
 func PullRemove(name string, opts PullOptions) (string, error) {
-	if !config.ValidRecordName(name) {
+	if parent, _, nested := strings.Cut(name, "/"); nested && config.ValidRecordName(parent) {
+		return "", fmt.Errorf("remote %q is not a top-level record; nested records are removed with the record that declares them, so run enver pull --rm %s", name, parent)
+	}
+	if !config.ValidRecordPath(name) {
 		return "", fmt.Errorf("remote name %q is not a valid record name", name)
 	}
 	target := remoteLayerState{path: opts.TargetPath, cfg: opts.Target, global: opts.TargetIsGlobal}
