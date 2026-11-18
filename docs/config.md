@@ -130,23 +130,30 @@ content was never fetched contributes no profiles, and nothing complains until
 something names one: a reference to an unpulled remote's profile fails like any
 missing profile, with the hint naming the `enver pull <name>` that supplies it
 (see [`profiles.md`](./profiles.md#validate)). A record nothing references yet
-is silent by design.
+is silent by design. (A declared child with no stored content is the exception
+— see [Nested remotes](#nested-remotes).)
 
-- An `extends` target the same file defines moves with it; a target the file
-  does not define passes through unchanged and resolves against your namespace.
-  That is how a remote extends a profile you provide, and how cross-remote
-  extends compose. Cross-file extends cycles are caught at load, not by pull.
-  Pull lists every such target and what it binds to — one of your profiles,
-  another remote, or nothing yet — so a remote growing a parent in your
-  namespace never happens silently.
+- An `extends` target resolves inside the file's own namespace: a bare name one
+  of its profiles defines, or a `record/...` name under a record that file
+  itself declares. Everything else — your profiles, another record's
+  projection, the name the file was pulled under — is out of namespace, and a
+  target outside it is refused at pull and errors at load, naming the file and
+  the target. A base a file needs therefore travels with it: the author
+  declares it in the file's own `remotes:` section (see
+  [Nested remotes](#nested-remotes)). Composition across the boundary is yours
+  to write: a local profile may extend a projected name, and a local profile
+  with the same name as a projected one patches it per key — your keys win,
+  the remote's other keys survive.
 - `unset` entries are env keys, not profile names — never rewritten.
 - Secret marks (`~KEY`) ride through untouched, so a patch you write over a
   marked remote value stays masked and remains an encrypt candidate.
 - A remote's `default:` is discarded: which profile is default is your decision,
   not the author's.
-- A `remotes:` section inside remote content is ignored, and pull warns about
-  it. A remote can never register a fetch, so no pull fetches a URL you did not
-  register.
+- A `remotes:` section inside remote content declares that file's own subtree:
+  pull fetches each declared record under the pulling record's path, and
+  projection drops the section, so the declarations never join your registry —
+  your own `remotes:` section stays the only thing that registers a record you
+  can address (see [Nested remotes](#nested-remotes)).
 - Control characters are stripped from every remote-sourced name, value and
   comment — they reach terminals, error messages and completion candidates.
 
@@ -158,10 +165,63 @@ on every pull, first or repeat. When two `--no-prefix` remotes define the same
 name, the fold runs in sorted record order — the later record wins — and load
 says so. A record's pull mode is stored in it, so re-pulling never re-asks.
 
+### Nested remotes
+
+A fetched file can declare its own `remotes:`, and one pull of it fetches the
+whole tree. A provider config that declares the base it extends brings both:
+its own `model` and the base's `default` land as `ollama/model` and
+`ollama/claude/default`, with the `extends` between them rewritten to the
+composed names. Pull gates every file it fetches, then checks the composed
+tree before anything is written — a pull that fails anywhere leaves the
+previous content, sidecars and record set exactly as they were.
+
+Scoping is lexical. A file sees its own profiles, bare names, and the subtrees
+of the records its own `remotes:` block declares — nothing else: not your
+profiles, not its siblings, not the name it was pulled under. Prefixes compose
+at boundaries and never leak inward: every file is written in its own
+coordinates, and it stays correct no matter what it is pulled under or how
+deep. A `no_prefix` record inside a tree removes just that boundary's segment:
+a no-prefix `claude` under prefixed `ollama` lands its profiles directly under
+`ollama/`, and at the top level it lands them bare.
+
+The stored tree mirrors the record paths — `remotes/ollama.yaml` plus
+`ollama.meta`, and beside them a directory `ollama/` holding
+`ollama/claude.yaml` plus `claude.meta` when the record declares a child.
+Each record has its own sidecar, so a child carries its own commit and pull
+time, and provenance names the exact record (`remote:ollama/claude`). A nested
+record is not registered anywhere: your config's `remotes:` section holds
+top-level records only, and the CLI addresses only those — `enver pull ollama`
+refreshes the whole subtree, `enver pull ollama/claude` is not a thing, and
+`pull --rm ollama` removes the whole stored subtree with the record.
+
+Renaming never touches a file. Pull a provider under a different name
+(`--as my-ollama`) and the whole subtree moves wholesale —
+`my-ollama/claude/default` — with only the prefix changed: prefixes are
+applied in memory, and the stored bytes stay byte-identical to what the
+sources serve.
+
+Siblings are strangers, and nothing deduplicates. The same source under two
+parents is two records, with separate pristine copies and separate freshness —
+`ollama/claude` and `zai/claude` may sit at different revisions. A sibling
+that needs the same base declares its own record.
+
+A re-pull syncs the subtree to the parent's current declaration. Newly
+declared children are fetched; a child whose declaration changed URL is
+fetched fresh under the same name; children the declaration dropped have their
+stored files deleted — they are reproducible cache, and each deletion is
+listed in the pull output. A child whose stored content and sidecar still
+match its declaration is left untouched. A declaration tree that loops back to
+a source already being fetched is refused naming the chain of sources, and a
+chain deeper than 16 records is refused loudly — both before anything is
+written. Loading never touches the network either: a declared child whose
+stored content is missing contributes no profiles and warns, naming the
+`enver pull` that fetches the subtree again.
+
 ### Stored content, and what pull guarantees
 
-- **Content** lives in `$XDG_CONFIG_HOME/enver/remotes/<name>.yaml`, one file
-  per record, replaced whole on every pull (temp file plus rename). It is
+- **Content** lives in `$XDG_CONFIG_HOME/enver/remotes/` at each record's
+  path — `ollama.yaml`, and `ollama/claude.yaml` for a nested record — one
+  file per record, replaced whole on every pull (temp file plus rename). It is
   config, not cache: XDG cache is disposable by convention, and deleting it
   must never silently change what `enver x` exports.
 - **Provenance** lives in a machine-local sidecar, `remotes/<name>.meta`: the
@@ -175,11 +235,13 @@ says so. A record's pull mode is stored in it, so re-pulling never re-asks.
   A refused upstream fails the pull and leaves the record, the content and the
   sidecar exactly as they were.
 - **Divergence.** At load, the record's resolved source is compared with the
-  sidecar. When they disagree — a hand-edited ref, a re-pointed record — the
-  stored content still serves (resolution stays offline) but the command warns
-  loudly on stderr, naming both sources and the `enver pull <name>` that
-  re-syncs. Serving stale content silently is the failure the sidecar exists to
-  prevent.
+  sidecar, and the check recurses into the subtree: a nested record is judged
+  against the declaration its parent carries. When they disagree — a
+  hand-edited ref, a re-pointed record, a child whose sync was interrupted —
+  the stored content still serves (resolution stays offline) but the command
+  warns loudly on stderr, naming both sources and the `enver pull <name>` —
+  the top-level record — that re-syncs the subtree. Serving stale content
+  silently is the failure the sidecar exists to prevent.
 
 ### Pull, patch, remove
 
@@ -219,9 +281,11 @@ controls the source right now — so a removal never fails on the wrong layer;
 `-g`/`--local` target an explicit layer instead. The content file is deleted
 only when no layer still declares the name, hidden ones included — a record
 `--no-local` keeps out of view still needs its content; a surviving declaration
-is reported with the source it now resolves to. A removal also lists the user
-profiles under the removed prefix: they survive as standalone profiles but lose
-every inherited key.
+is reported with the source it now resolves to. Deleting the content takes the
+record's whole stored subtree with it, since a nested record's files live under
+its parent's directory. A removal also lists the user profiles under the
+removed prefix: they survive as standalone profiles but lose every inherited
+key.
 
 Pulled content is never hand-edited. Changes live in your own layers, which are
 always above:
@@ -290,12 +354,13 @@ nothing about that.
   it warns and asks before fetching into a record whose patches would now
   compose with different content.
 
-`enver validate` grades remote-authored dangling extends as warnings, not
-errors: a remote may legitimately extend a profile you or another remote
-provide, so an unpulled parent is a hint (which remote expects it, and the
-`enver pull` that supplies it) rather than a broken config. Your own dangling
-extends stay errors. `enver list --format json` leaves such profiles out and
-records them in its `skipped` array instead of failing.
+A dangling `extends` is an error whoever authored it. Strict scoping removed
+the authorship grading: a remote file can no longer name a parent outside its
+own namespace, so a reference no profile defines is a broken config, not one
+waiting to be completed — `enver validate` reports every dangling `extends`
+as an error, yours and a remote's alike. The hint survives where a pull can
+help: a parent whose record is declared but not yet pulled carries the
+`enver pull <name>` that supplies it.
 
 ## Multiple parents
 

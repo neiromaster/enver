@@ -69,9 +69,9 @@ those keys out of `env` entirely. A text `show` tolerates a missing key; JSON
 still fails on one. A key that is present but cannot read a value a remote
 supplied is the exception — it degrades per key in both formats (see
 [`secrets.md`](./secrets.md#ciphertext-someone-else-wrote)).
-`enver list --format json` carries the same idea for profiles it cannot
-resolve: an unresolvable chain a remote caused is listed in a `skipped` array
-(`{name, reason}`) with a note on stderr, rather than failing the listing.
+`enver list` marks a profile whose chain cannot resolve the same way — its
+vars cell reads `N (→?)` instead of a resolved count — while `--format json`
+errors instead of listing a partial config.
 
 In a terminal, text output is styled: keys are bold, and every comment — the
 `# profile:` header, provenance suffixes, unset rows — is dim. Styling is
@@ -117,6 +117,28 @@ enver pull                                       re-fetch every registered remot
 enver pull --list                                list records with their source and last pull
 enver pull --rm llm                              remove the record and its content
 ```
+
+A fetched file may declare its own `remotes:` records, and one pull fetches
+the whole tree it declares. Pulling a provider that declares the base it
+extends stores both under the record's path, and the summary indents the
+subtree:
+
+```
+✓ remote "ollama" ← github:someone/ollama-profiles at ref v2
+  profiles: ollama/glm-models
+  commit: 1f0c9ab
+  ✓ remote "ollama/claude" ← github:someone/claude-base at ref v1
+    added
+    profiles: ollama/claude/default
+    commit: 90e77c1
+```
+
+`ollama/glm-models` extends `ollama/claude/default` with no local wiring. The
+tree re-fetches, lists and removes through the top-level record: `--list`
+indents each declared child under its declarer, `--rm` removes the record's
+whole stored subtree, and a re-pull names the children it added, re-pointed or
+removed. Nested records are not registered in any config, so completion never
+offers one and a nested path cannot be addressed by name.
 
 Argument completion offers the registered record names, so `enver pull <Tab>`
 lists what can be re-fetched or removed. Registration writes the global config;
