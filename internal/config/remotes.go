@@ -435,10 +435,10 @@ func reachableRecords(records map[string]RemoteRecord) map[string]bool {
 // refresh them. Reachability follows stored declarations, so a subtree left
 // behind by a renamed or removed record is reported by its root path, once —
 // the directory tells the whole story, and the files under it add nothing.
-// Entries that could never be record paths are reported too: they still sit
-// where enver stores fetched content, and only removal can resolve them. A
-// remotes directory that cannot be walked yields no advisories — the
-// per-record checks already report content they cannot inspect.
+// Content and sidecar entries that could never be record paths are reported
+// too: they still sit where enver stores fetched content, and only removal can
+// resolve them. A remotes directory that cannot be walked yields no advisories
+// — the per-record checks already report content they cannot inspect.
 func orphanWarnings(records map[string]RemoteRecord) []string {
 	reachable := reachableRecords(records)
 	reported := map[string]bool{}
@@ -460,7 +460,7 @@ func orphanWarnings(records map[string]RemoteRecord) []string {
 				return nil
 			}
 			reported[name] = true
-			out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so the whole subtree is orphaned and its profiles are not loaded; remove %s or register the record to use it", name, filepath.Join(RemotesDir(), filepath.FromSlash(name))))
+			out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so the whole subtree is orphaned and its profiles are not loaded; remove %s or register the record to use it", name, path))
 			return filepath.SkipDir
 		}
 		recordPath, ok := strings.CutSuffix(name, ".yaml")
