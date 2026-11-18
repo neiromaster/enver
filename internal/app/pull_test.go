@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1977,5 +1978,110 @@ remotes:
 	}
 	if !strings.Contains(summary, "re-pointed from https://example.com/mid-old.yaml to https://example.com/mid.yaml") {
 		t.Errorf("summary misses the child's re-point line:\n%s", summary)
+	}
+}
+
+// An upstream rename of a child key that changes only its spelling must not
+// leave the keep decision and the sweep answering the question "is this child
+// stored?" differently: on a filesystem that folds name case, the stored copy
+// opens under either spelling while the sweep compares byte-exact, so one pull
+// would keep the child and then delete it. A case-only mismatch is a rename:
+// the child is fetched fresh under the declared spelling, the old spelling
+// leaves the disk, and the next pull keeps the child at the new one. The probe
+// skips filesystems that tell names apart by case, where the mismatch cannot
+// arise.
+func TestPullSyncRefetchesCaseRenamedChild(t *testing.T) {
+	probeDir := t.TempDir()
+	probe := filepath.Join(probeDir, "Foo")
+	if err := os.WriteFile(probe, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(probeDir, "foo")); err != nil {
+		t.Skip("the filesystem tells file names apart by case, so a case-only rename cannot happen here")
+	}
+
+	f := newPullFixture(t)
+	parent := func(child string) []byte {
+		return []byte(fmt.Sprintf(`profiles:
+  glm-models:
+    extends: %s/default
+    env:
+      MODEL: glm-4
+remotes:
+  %s:
+    url: https://example.com/claude.yaml
+`, child, child))
+	}
+	fetches := map[string]int{}
+	var childKey string
+	seam := func(url, _ string) ([]byte, string, error) {
+		fetches[url]++
+		switch url {
+		case "https://example.com/ollama.yaml":
+			return parent(childKey), "ollama-commit", nil
+		case "https://example.com/claude.yaml":
+			return []byte(nestedClaudeContent), "claude-commit", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	}
+
+	childKey = "Claude"
+	if _, err := Pull("https://example.com/ollama.yaml", "ollama", f.options(t, true, seam)); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("ollama/Claude")); !ok {
+		t.Fatal("the first pull did not store the child")
+	}
+
+	childKey = "claude"
+	summary, err := PullUpdate("ollama", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("PullUpdate: %v", err)
+	}
+	if fetches["https://example.com/claude.yaml"] != 2 {
+		t.Errorf("the renamed child was fetched %d times, want a fresh fetch at the re-pull", fetches["https://example.com/claude.yaml"])
+	}
+	want := `renamed from "ollama/Claude"`
+	if !strings.Contains(summary, want) {
+		t.Errorf("summary misses the rename line %q:\n%s", want, summary)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.remotesDir, "ollama"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"claude.meta", "claude.yaml"}) {
+		t.Errorf("the record directory holds %q, want the declared spelling only", names)
+	}
+	content, ok := readOrMissing(t, config.RemoteContentPath("ollama/claude"))
+	if !ok || content != nestedClaudeContent {
+		t.Errorf("content for ollama/claude = %q ok=%v, want the fetched bytes under the declared spelling", content, ok)
+	}
+	if _, ok := f.state(t, "ollama/claude"); !ok {
+		t.Error("the re-pull did not write the child's sidecar under the declared spelling")
+	}
+
+	if _, err := PullUpdate("ollama", f.options(t, true, seam)); err != nil {
+		t.Fatalf("second PullUpdate: %v", err)
+	}
+	if fetches["https://example.com/claude.yaml"] != 2 {
+		t.Errorf("the child was fetched %d times; a case-only rename must not loop", fetches["https://example.com/claude.yaml"])
+	}
+
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	r, err := merged.ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("resolve ollama/glm-models: %v", err)
+	}
+	if r.Env["API_BASE"] != "https://api.example.com" {
+		t.Fatalf("env = %q, want the renamed child's key inherited", r.Env)
 	}
 }
