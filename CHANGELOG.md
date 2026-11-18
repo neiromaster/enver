@@ -15,8 +15,8 @@
   boundary's segment. A re-pull syncs the subtree to the parent's current
   declaration: newly declared children are fetched, dropped children's stored
   files are deleted as reproducible cache and listed in the output, a child
-  whose declaration changed URL is fetched fresh, and an unchanged child is
-  kept untouched. `pull --list` renders the tree with nested rows indented
+  whose declaration changed URL or ref is fetched fresh, and an unchanged
+  child is kept untouched. `pull --list` renders the tree with nested rows indented
   under their parent, and loading never touches the network: a declared child
   with no stored content contributes no profiles and advises the re-pull. A
   declaration tree that loops back to a source is refused at pull naming the
