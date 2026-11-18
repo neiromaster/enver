@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -88,7 +90,7 @@ func Pull(rawSource, name string, opts PullOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	res.changes = changes
+	res.changes = append(changes, res.changes...)
 	if err := writeRecord(name, rec, opts); err != nil {
 		return "", err
 	}
@@ -120,7 +122,7 @@ func PullUpdate(name string, opts PullOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	res.changes = changes
+	res.changes = append(changes, res.changes...)
 	return res.render(), nil
 }
 
@@ -149,7 +151,7 @@ func PullAll(opts PullOptions) (string, error) {
 			errs = append(errs, err)
 			continue
 		}
-		res.changes = changes
+		res.changes = append(changes, res.changes...)
 		b.WriteString(res.render())
 	}
 	return b.String(), errors.Join(errs...)
@@ -511,7 +513,9 @@ func (r pullResult) renderBlock(b *strings.Builder, depth int) {
 
 // pulledRecord is one record the walk has fetched and gated, with the records
 // its content declared below it. Nothing is written until the whole tree has
-// passed the tree check, so the walk keeps every content in memory.
+// passed the tree check, so the walk keeps every content in memory. kept marks
+// a child whose stored copy stands in for a fetch, and changes names what the
+// re-pull did to the subtree around it.
 type pulledRecord struct {
 	path     string
 	url      string
@@ -521,6 +525,8 @@ type pulledRecord struct {
 	source   string
 	profiles []string
 	warnings []string
+	kept     bool
+	changes  []string
 	children []*pulledRecord
 }
 
@@ -569,6 +575,13 @@ type pullScope struct {
 // revision in its URL. The sidecar still records the record's own source: the
 // pinned URL is how the bytes were reached, not where they came from, and the
 // next pull judges divergence against the spelling the user can act on.
+//
+// A re-pull keeps what still holds: a declared child whose stored copy the
+// sidecar vouches for is neither fetched nor rewritten, its stored bytes feed
+// the tree check, and only children the declarations added or re-pointed are
+// fetched and reported. After the commit, stored entries the committed tree no
+// longer reaches are swept and reported too, so the summary tells the whole
+// story of an upstream re-organization.
 func pullTree(name string, rec config.RemoteRecord, opts PullOptions) (pullResult, error) {
 	w := &pullWalk{
 		fetch:      opts.Fetch,
@@ -595,17 +608,21 @@ func pullTree(name string, rec config.RemoteRecord, opts PullOptions) (pullResul
 	if err := commitPulled(root); err != nil {
 		return pullResult{}, err
 	}
+	if err := sweepStale(root); err != nil {
+		return pullResult{}, err
+	}
 	res := root.result()
 	res.warnings = append(res.warnings, warnings...)
 	return res, nil
 }
 
-// record resolves, fetches, and gates one record of the tree, then recurses
-// into the children its content declares. prefix is the namespace this
-// record's profiles land under once the whole tree composes, and chain holds
-// the resolved sources of the records above it, in walk order. Children have
-// no takeover gate of their own: the parent's declaration is their config, and
-// it just passed this pull's gate.
+// record resolves, fetches or keeps, and gates one record of the tree, then
+// recurses into the children its content declares. prefix is the namespace
+// this record's profiles land under once the whole tree composes, and chain
+// holds the resolved sources of the records above it, in walk order — a
+// non-empty chain is what marks the record as a child, and only children are
+// eligible for keeping. Children have no takeover gate of their own: the
+// parent's declaration is their config, and it just passed this pull's gate.
 func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, chain []string) (*pulledRecord, error) {
 	url, ref, err := remote.ResolveRecord(rec)
 	if err != nil {
@@ -622,24 +639,35 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 	if slices.Contains(chain, src) {
 		return nil, fmt.Errorf("remote %q: its declaration tree loops back to a source this pull is already fetching: %s", path, strings.Join(next, " -> "))
 	}
-	fetchURL, commitHint := url, ""
-	if remote.IsGist(rec.URL) {
-		if remote.Unpinned(ref) {
-			if pinned, revision := w.gistHead(url); revision != "" {
-				fetchURL, commitHint = pinned, revision
+	// A child with stored content its sidecar vouches for stays as it stands:
+	// the load path would not flag it as diverged, so re-fetching it would
+	// only rewrite bytes that are already right. The pulled record itself
+	// always refetches — it is the one this run is about.
+	var content []byte
+	commit, change, kept := "", "", false
+	if len(chain) > 0 {
+		content, commit, change, kept = syncChild(path, rec, url, ref)
+	}
+	if !kept {
+		fetchURL, commitHint := url, ""
+		if remote.IsGist(rec.URL) {
+			if remote.Unpinned(ref) {
+				if pinned, revision := w.gistHead(url); revision != "" {
+					fetchURL, commitHint = pinned, revision
+				}
+			} else {
+				commitHint = ref
 			}
-		} else {
-			commitHint = ref
 		}
-	}
-	content, commit, err := w.fetch(fetchURL, ref)
-	if err != nil {
-		return nil, fmt.Errorf("remote %q: %w", path, err)
-	}
-	// Fetch cannot resolve a gist commit itself, so the revision (or a pinned
-	// record's ref) travels as a hint; a commit the fetch did resolve wins.
-	if commit == "" {
-		commit = commitHint
+		content, commit, err = w.fetch(fetchURL, ref)
+		if err != nil {
+			return nil, fmt.Errorf("remote %q: %w", path, err)
+		}
+		// Fetch cannot resolve a gist commit itself, so the revision (or a pinned
+		// record's ref) travels as a hint; a commit the fetch did resolve wins.
+		if commit == "" {
+			commit = commitHint
+		}
 	}
 	warnings, err := remote.Gate(content, remote.GateOpts{
 		Record:   path,
@@ -669,6 +697,10 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 		source:   sourceLabel(rec, ref),
 		profiles: projected.ProfileNames(),
 		warnings: warnings,
+		kept:     kept,
+	}
+	if change != "" {
+		out.changes = append(out.changes, change)
 	}
 	for _, name := range slices.Sorted(maps.Keys(file.Remotes)) {
 		child := file.Remotes[name]
@@ -679,6 +711,33 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 		out.children = append(out.children, pulled)
 	}
 	return out, nil
+}
+
+// syncChild classifies a declared child against its stored copy, with the same
+// sidecar comparison the load-side divergence advisory makes: what a child
+// load would not warn about is exactly what a child re-pull keeps. A kept
+// child's stored bytes stand in for the fetch, dated by the sidecar's commit;
+// otherwise the child is fetched and change names why — no stored provenance
+// at all is added, a sidecar naming another source is re-pointed, and a
+// sidecar whose content vanished refetches silently, since repair is not
+// re-organization.
+func syncChild(path string, rec config.RemoteRecord, url, ref string) (content []byte, commit, change string, kept bool) {
+	st, ok := config.ReadRemoteState(path)
+	if !ok {
+		return nil, "", "added", false
+	}
+	if st.URL != url || st.Ref != ref {
+		old := recordSource(config.RemoteRecord{URL: st.URL, Ref: st.Ref})
+		return nil, "", fmt.Sprintf("re-pointed from %s to %s", old, recordSource(rec)), false
+	}
+	if fi, err := os.Stat(config.RemoteContentPath(path)); err != nil || fi.IsDir() {
+		return nil, "", "", false
+	}
+	data, err := os.ReadFile(config.RemoteContentPath(path))
+	if err != nil {
+		return nil, "", "", false
+	}
+	return data, st.Commit, "", true
 }
 
 // checkTree composes the fetched tree exactly as load will and refuses a pull
@@ -745,23 +804,89 @@ func danglingError(record, name, target string, scope pullScope) error {
 // provenance, which the load path reports as a divergence, while the reverse
 // order would leave a sidecar naming content that is not there and nothing to
 // compare. A failed write of either leaves the record untouched, so the next
-// pull repairs it.
+// pull repairs it. A kept record is skipped: its stored bytes are the ones the
+// tree check approved, and rewriting them would churn provenance the sidecar
+// still answers for.
 func commitPulled(r *pulledRecord) error {
-	if err := config.WriteRemoteContent(r.path, r.content); err != nil {
-		return err
-	}
-	if err := config.WriteRemoteState(r.path, config.RemoteState{
-		URL:      r.url,
-		Ref:      r.ref,
-		Commit:   r.commit,
-		PulledAt: time.Now().UTC(),
-	}); err != nil {
-		return err
+	if !r.kept {
+		if err := config.WriteRemoteContent(r.path, r.content); err != nil {
+			return err
+		}
+		if err := config.WriteRemoteState(r.path, config.RemoteState{
+			URL:      r.url,
+			Ref:      r.ref,
+			Commit:   r.commit,
+			PulledAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
 	}
 	for _, child := range r.children {
 		if err := commitPulled(child); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// sweepStale drops stored entries under the pulled record's directory that the
+// committed tree no longer reaches, and reports each on the nearest record the
+// tree still reaches: the dropped entries are reproducible cache on disk, and
+// these lines are the summary's only window into upstream re-organization.
+// Removal runs after the commit, so a tree the check refused sweeps nothing,
+// and unknown file names are left for the load-side orphan advisories, which
+// already report what no record path can address.
+func sweepStale(root *pulledRecord) error {
+	reached := map[string]*pulledRecord{}
+	var collect func(r *pulledRecord)
+	collect = func(r *pulledRecord) {
+		reached[r.path] = r
+		for _, child := range r.children {
+			collect(child)
+		}
+	}
+	collect(root)
+
+	base := filepath.Join(config.RemotesDir(), filepath.FromSlash(root.path))
+	stale := map[string]bool{}
+	_ = filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return nil
+		}
+		name := filepath.ToSlash(rel)
+		tail, ok := strings.CutSuffix(name, ".yaml")
+		if !ok {
+			tail, ok = strings.CutSuffix(name, ".meta")
+		}
+		if !ok {
+			return nil
+		}
+		full := root.path + "/" + tail
+		if !config.ValidRecordPath(full) || reached[full] != nil {
+			return nil
+		}
+		stale[full] = true
+		return nil
+	})
+	for _, path := range slices.Sorted(maps.Keys(stale)) {
+		if err := config.RemoveRemoteContent(path); err != nil {
+			return err
+		}
+		if err := config.RemoveRemoteState(path); err != nil {
+			return err
+		}
+		owner := root
+		for seg := path; seg != root.path; seg = seg[:strings.LastIndex(seg, "/")] {
+			if r := reached[seg]; r != nil {
+				owner = r
+				break
+			}
+		}
+		owner.changes = append(owner.changes, fmt.Sprintf("removed stored content %q", path))
 	}
 	return nil
 }
@@ -774,6 +899,7 @@ func (r *pulledRecord) result() pullResult {
 		source:   r.source,
 		profiles: r.profiles,
 		commit:   r.commit,
+		changes:  r.changes,
 		warnings: r.warnings,
 	}
 	for _, child := range r.children {

@@ -1655,3 +1655,327 @@ func TestPullNoPrefixTreeCollisions(t *testing.T) {
 		t.Fatalf("env = %q, want both records' keys under the bare name", r.Env)
 	}
 }
+
+// syncParentFirst declares one child; syncParentSecond replaces it with
+// another, so one re-pull exercises the add and the remove together.
+const (
+	syncParentFirst = `profiles:
+  base:
+    env:
+      HOST: first-upstream
+remotes:
+  first:
+    url: https://example.com/first.yaml
+`
+
+	syncParentSecond = `profiles:
+  base:
+    env:
+      HOST: second-upstream
+remotes:
+  second:
+    url: https://example.com/second.yaml
+`
+
+	syncChildFirst = `profiles:
+  one:
+    env:
+      K: v1
+`
+
+	syncChildSecond = `profiles:
+  two:
+    env:
+      K: v2
+`
+)
+
+// A re-pull lands the tree the upstream serves now: a child the declaration
+// dropped is swept from disk, a child it added is stored, and both changes are
+// reported, since the sweep is the only place stale entries leave.
+func TestPullSyncAddsAndRemovesChildren(t *testing.T) {
+	f := newPullFixture(t)
+	fetches := map[string]int{}
+	var parentContent string
+	seam := func(url, _ string) ([]byte, string, error) {
+		fetches[url]++
+		switch url {
+		case "https://example.com/tree.yaml":
+			return []byte(parentContent), "root-commit", nil
+		case "https://example.com/first.yaml":
+			return []byte(syncChildFirst), "first-commit", nil
+		case "https://example.com/second.yaml":
+			return []byte(syncChildSecond), "second-commit", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	}
+
+	parentContent = syncParentFirst
+	first, err := Pull("https://example.com/tree.yaml", "tree", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !strings.Contains(first, "added") {
+		t.Errorf("the first pull does not report the declared child as added:\n%s", first)
+	}
+	for path, want := range map[string]string{
+		"tree":       syncParentFirst,
+		"tree/first": syncChildFirst,
+	} {
+		content, ok := readOrMissing(t, config.RemoteContentPath(path))
+		if !ok || content != want {
+			t.Errorf("content for %s = %q ok=%v, want the fetched bytes verbatim", path, content, ok)
+		}
+	}
+
+	parentContent = syncParentSecond
+	summary, err := PullUpdate("tree", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("PullUpdate: %v", err)
+	}
+	if fetches["https://example.com/first.yaml"] != 1 {
+		t.Errorf("the dropped child was fetched %d times, want no fetch past the first pull", fetches["https://example.com/first.yaml"])
+	}
+	if fetches["https://example.com/second.yaml"] != 1 {
+		t.Errorf("the added child was fetched %d times, want 1", fetches["https://example.com/second.yaml"])
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("tree/first")); ok {
+		t.Error("the dropped child's content survived the re-pull")
+	}
+	if _, ok := readOrMissing(t, config.RemoteStatePath("tree/first")); ok {
+		t.Error("the dropped child's sidecar survived the re-pull")
+	}
+	content, ok := readOrMissing(t, config.RemoteContentPath("tree/second"))
+	if !ok || content != syncChildSecond {
+		t.Errorf("content for tree/second = %q ok=%v, want the fetched bytes verbatim", content, ok)
+	}
+	st, ok := f.state(t, "tree/second")
+	if !ok || st.Commit != "second-commit" {
+		t.Errorf("state for tree/second = %+v ok=%v, want the fetch recorded", st, ok)
+	}
+	removedAt := strings.Index(summary, `removed stored content "tree/first"`)
+	addedAt := strings.Index(summary, "added")
+	childAt := strings.Index(summary, `✓ remote "tree/second"`)
+	if removedAt < 0 || addedAt < 0 || childAt < 0 {
+		t.Fatalf("summary misses the change lines:\n%s", summary)
+	}
+	if removedAt > childAt || addedAt < childAt {
+		t.Errorf("the change lines render outside their owning blocks:\n%s", summary)
+	}
+
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := merged.Profiles["tree/second/two"]; !ok {
+		t.Error("the added child's profile does not resolve after the re-pull")
+	}
+	if _, ok := merged.Profiles["tree/first/one"]; ok {
+		t.Error("the dropped child's profile still resolves after the re-pull")
+	}
+}
+
+// A child whose stored copy the sidecar still vouches for is carried across a
+// re-pull untouched: the fetch seam sees it exactly once across both pulls,
+// and neither its content nor its sidecar is rewritten.
+func TestPullSyncKeepsUnchangedChild(t *testing.T) {
+	f := newPullFixture(t)
+	fetches := map[string]int{}
+	seam := func(url, ref string) ([]byte, string, error) {
+		fetches[url]++
+		return serveNested(t, url, ref)
+	}
+
+	if _, err := Pull("https://example.com/ollama.yaml", "ollama", f.options(t, true, seam)); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	contentPath := config.RemoteContentPath("ollama/claude")
+	statePath := config.RemoteStatePath("ollama/claude")
+	beforeContent, ok := readOrMissing(t, contentPath)
+	if !ok {
+		t.Fatal("the first pull did not store the child")
+	}
+	beforeContentFi, err := os.Stat(contentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeStateFi, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeState, ok := f.state(t, "ollama/claude")
+	if !ok {
+		t.Fatal("the first pull did not write the child's sidecar")
+	}
+
+	summary, err := PullUpdate("ollama", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("PullUpdate: %v", err)
+	}
+	if fetches["https://example.com/claude.yaml"] != 1 {
+		t.Errorf("the child was fetched %d times across both pulls, want 1", fetches["https://example.com/claude.yaml"])
+	}
+	if fetches["https://example.com/ollama.yaml"] != 2 {
+		t.Errorf("the pulled record was fetched %d times, want 2", fetches["https://example.com/ollama.yaml"])
+	}
+	afterContent, ok := readOrMissing(t, contentPath)
+	if !ok || afterContent != beforeContent {
+		t.Errorf("child content changed across the re-pull: %q", afterContent)
+	}
+	afterContentFi, err := os.Stat(contentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !afterContentFi.ModTime().Equal(beforeContentFi.ModTime()) {
+		t.Error("the kept child's content file was rewritten")
+	}
+	afterStateFi, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !afterStateFi.ModTime().Equal(beforeStateFi.ModTime()) {
+		t.Error("the kept child's sidecar was rewritten")
+	}
+	afterState, ok := f.state(t, "ollama/claude")
+	if !ok || !afterState.PulledAt.Equal(beforeState.PulledAt) {
+		t.Errorf("sidecar state changed across the re-pull: %+v -> %+v", beforeState, afterState)
+	}
+	for _, unwanted := range []string{"added", "re-pointed", "removed stored content"} {
+		if strings.Contains(summary, unwanted) {
+			t.Errorf("a kept child must not be reported %q:\n%s", unwanted, summary)
+		}
+	}
+}
+
+// A child re-pointed at another source is fetched fresh, and the summary names
+// both sources, so the provenance flip is never silent.
+func TestPullSyncRepointsChild(t *testing.T) {
+	f := newPullFixture(t)
+	parent := func(childURL string) []byte {
+		return []byte(fmt.Sprintf(`profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      MODEL: glm-4
+remotes:
+  claude:
+    url: %s
+`, childURL))
+	}
+	fetches := map[string]int{}
+	var childURL string
+	seam := func(url, _ string) ([]byte, string, error) {
+		fetches[url]++
+		switch url {
+		case "https://example.com/ollama.yaml":
+			return parent(childURL), "root-commit", nil
+		case "https://example.com/claude-old.yaml", "https://example.com/claude.yaml":
+			return []byte(nestedClaudeContent), "claude-commit", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	}
+
+	childURL = "https://example.com/claude-old.yaml"
+	if _, err := Pull("https://example.com/ollama.yaml", "ollama", f.options(t, true, seam)); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	childURL = "https://example.com/claude.yaml"
+	summary, err := PullUpdate("ollama", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("PullUpdate: %v", err)
+	}
+	if fetches["https://example.com/claude-old.yaml"] != 1 {
+		t.Errorf("the old source was fetched %d times, want once at the first pull", fetches["https://example.com/claude-old.yaml"])
+	}
+	if fetches["https://example.com/claude.yaml"] != 1 {
+		t.Errorf("the new source was fetched %d times, want 1", fetches["https://example.com/claude.yaml"])
+	}
+	want := "re-pointed from https://example.com/claude-old.yaml to https://example.com/claude.yaml"
+	if !strings.Contains(summary, want) {
+		t.Errorf("summary misses the re-point line %q:\n%s", want, summary)
+	}
+	st, ok := f.state(t, "ollama/claude")
+	if !ok || st.URL != "https://example.com/claude.yaml" {
+		t.Errorf("state = %+v ok=%v, want the new source recorded", st, ok)
+	}
+	content, ok := readOrMissing(t, config.RemoteContentPath("ollama/claude"))
+	if !ok || content != nestedClaudeContent {
+		t.Errorf("content = %q ok=%v, want the freshly fetched bytes", content, ok)
+	}
+	merged, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	r, err := merged.ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("resolve ollama/glm-models: %v", err)
+	}
+	if r.Env["API_BASE"] != "https://api.example.com" {
+		t.Fatalf("env = %q, want the re-pointed child's key inherited", r.Env)
+	}
+}
+
+// A grandchild a re-pointed child drops is swept too, and its removal reports
+// on the child's own block: the nearest record the new tree still reaches owns
+// the line.
+func TestPullSyncSweepsDroppedGrandchild(t *testing.T) {
+	f := newPullFixture(t)
+	var midURL string
+	seam := func(url, _ string) ([]byte, string, error) {
+		switch url {
+		case "https://example.com/tree.yaml":
+			return []byte(fmt.Sprintf(`profiles:
+  base:
+    env:
+      K: v
+remotes:
+  mid:
+    url: %s
+`, midURL)), "root-commit", nil
+		case "https://example.com/mid-old.yaml":
+			return []byte(`profiles:
+  mid-p:
+    env:
+      K: v
+remotes:
+  leaf:
+    url: https://example.com/leaf.yaml
+`), "mid-commit", nil
+		case "https://example.com/mid.yaml":
+			return []byte("profiles:\n  mid-p:\n    env:\n      K: v\n"), "mid-commit", nil
+		case "https://example.com/leaf.yaml":
+			return []byte("profiles:\n  leaf-p:\n    env:\n      K: v\n"), "leaf-commit", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	}
+
+	midURL = "https://example.com/mid-old.yaml"
+	if _, err := Pull("https://example.com/tree.yaml", "tree", f.options(t, true, seam)); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	midURL = "https://example.com/mid.yaml"
+	summary, err := PullUpdate("tree", f.options(t, true, seam))
+	if err != nil {
+		t.Fatalf("PullUpdate: %v", err)
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("tree/mid/leaf")); ok {
+		t.Fatal("the dropped grandchild's content survived the re-pull")
+	}
+	if _, ok := readOrMissing(t, config.RemoteStatePath("tree/mid/leaf")); ok {
+		t.Fatal("the dropped grandchild's sidecar survived the re-pull")
+	}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("tree/mid")); !ok {
+		t.Fatal("the re-pointed child itself must stay stored")
+	}
+	removedAt := strings.Index(summary, `removed stored content "tree/mid/leaf"`)
+	midAt := strings.Index(summary, `✓ remote "tree/mid"`)
+	if removedAt < 0 || midAt < 0 || removedAt < midAt {
+		t.Fatalf("the grandchild's removal does not report inside the child's block:\n%s", summary)
+	}
+	if !strings.Contains(summary, "re-pointed from https://example.com/mid-old.yaml to https://example.com/mid.yaml") {
+		t.Errorf("summary misses the child's re-point line:\n%s", summary)
+	}
+}

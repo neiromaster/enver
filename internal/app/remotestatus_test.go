@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,4 +142,79 @@ func TestRemoteStatusesReadOnly(t *testing.T) {
 			t.Fatalf("listing changed %s", path)
 		}
 	}
+}
+
+// TestRemoteStatusesTree pins the tree a listing walks: every stored
+// declaration becomes a row keyed by its full record path, one depth below its
+// declarer, depth-first with siblings sorted — the order the pull summary and
+// the printout both render.
+func TestRemoteStatusesTree(t *testing.T) {
+	f := newPullFixture(t)
+	f.write(t, f.globalPath, `remotes:
+  flat:
+    url: https://example.com/flat.yaml
+  tree:
+    url: https://example.com/tree.yaml
+`)
+	for path, content := range map[string]string{
+		"flat":            goodRemoteContent,
+		"tree":            "profiles:\n  top:\n    env:\n      K: v\nremotes:\n  alpha:\n    url: https://example.com/alpha.yaml\n",
+		"tree/alpha":      "profiles:\n  mid:\n    env:\n      K: v\nremotes:\n  deep:\n    url: https://example.com/deep.yaml\n",
+		"tree/alpha/deep": "profiles:\n  bottom:\n    env:\n      K: v\n",
+	} {
+		if err := config.WriteRemoteContent(path, []byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.LoadMerged("", true)
+	if err != nil {
+		t.Fatalf("LoadMerged: %v", err)
+	}
+
+	rows := RemoteStatuses(cfg)
+	want := []struct {
+		name  string
+		depth int
+	}{
+		{"flat", 1},
+		{"tree", 1},
+		{"tree/alpha", 2},
+		{"tree/alpha/deep", 3},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %d, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].Name != w.name || rows[i].Depth != w.depth {
+			t.Errorf("row %d = (%q, depth %d), want (%q, depth %d)", i, rows[i].Name, rows[i].Depth, w.name, w.depth)
+		}
+	}
+
+	t.Run("a declaration naming an ancestor does not loop the walk", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.globalPath, "remotes:\n  loop:\n    url: https://example.com/loop.yaml\n")
+		for path, content := range map[string]string{
+			"loop":           "profiles:\n  a:\n    env:\n      K: v\nremotes:\n  next:\n    url: https://example.com/next.yaml\n",
+			"loop/next":      "profiles:\n  b:\n    env:\n      K: v\nremotes:\n  back:\n    url: https://example.com/back.yaml\n",
+			"loop/next/back": "profiles:\n  c:\n    env:\n      K: v\nremotes:\n  loop:\n    url: https://example.com/loop.yaml\n",
+		} {
+			if err := config.WriteRemoteContent(path, []byte(content)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cfg, err := config.LoadMerged("", true)
+		if err != nil {
+			t.Fatalf("LoadMerged: %v", err)
+		}
+		var names []string
+		for _, row := range RemoteStatuses(cfg) {
+			names = append(names, row.Name)
+		}
+		// The ancestor-named declaration is a deeper path, and its missing
+		// content is where the walk ends — a row like any declared-but-unpulled
+		// record, never a recursion.
+		if got := strings.Join(names, ","); got != "loop,loop/next,loop/next/back,loop/next/back/loop" {
+			t.Fatalf("rows = %q, want each declared record once, in tree order", got)
+		}
+	})
 }
