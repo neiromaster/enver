@@ -398,31 +398,82 @@ func remoteBase(records map[string]RemoteRecord) (Config, string, []string, erro
 	return base, layers[len(layers)-1].Label, warnings, nil
 }
 
-// orphanWarnings reports stored content no merged record declares: the file
-// outlived its record, so its profiles can never load and no pull would refresh
-// it. A remotes directory that cannot be listed yields no advisories — the
-// per-record checks already report a directory they cannot inspect. Names that
-// could never be record names are reported too: the file still sits where enver
-// stores fetched content, and only removal can resolve it.
+// reachableRecords collects the record paths the config's declarations reach:
+// every declared top-level record plus every child each reachable record's
+// stored content declares, recursively. It reads declarations only — the plain
+// parse every stored file gets — so a record with no stored content reaches
+// nothing further, and content the load cannot parse ends the walk there,
+// where composition itself refuses the file.
+func reachableRecords(records map[string]RemoteRecord) map[string]bool {
+	reachable := make(map[string]bool, len(records))
+	var walk func(path string)
+	walk = func(path string) {
+		if reachable[path] {
+			return
+		}
+		reachable[path] = true
+		data, err := os.ReadFile(RemoteContentPath(path))
+		if err != nil {
+			return
+		}
+		content, err := parseConfig("stored content", data)
+		if err != nil {
+			return
+		}
+		for _, name := range slices.Sorted(maps.Keys(content.Remotes)) {
+			walk(path + "/" + name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(records)) {
+		walk(name)
+	}
+	return reachable
+}
+
+// orphanWarnings reports stored entries no declared record reaches: the files
+// outlived their records, so their profiles can never load and no pull would
+// refresh them. Reachability follows stored declarations, so a subtree left
+// behind by a renamed or removed record is reported by its root path, once —
+// the directory tells the whole story, and the files under it add nothing.
+// Entries that could never be record paths are reported too: they still sit
+// where enver stores fetched content, and only removal can resolve them. A
+// remotes directory that cannot be walked yields no advisories — the
+// per-record checks already report content they cannot inspect.
 func orphanWarnings(records map[string]RemoteRecord) []string {
-	entries, err := os.ReadDir(RemotesDir())
-	if err != nil {
-		return nil
-	}
+	reachable := reachableRecords(records)
+	reported := map[string]bool{}
 	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	_ = filepath.Walk(RemotesDir(), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
 		}
-		name, ok := strings.CutSuffix(e.Name(), ".yaml")
+		rel, err := filepath.Rel(RemotesDir(), path)
+		if err != nil {
+			return nil
+		}
+		if rel == "." {
+			return nil
+		}
+		name := filepath.ToSlash(rel)
+		if info.IsDir() {
+			if reachable[name] || reported[name] {
+				return nil
+			}
+			reported[name] = true
+			out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so the whole subtree is orphaned and its profiles are not loaded; remove %s or register the record to use it", name, filepath.Join(RemotesDir(), filepath.FromSlash(name))))
+			return filepath.SkipDir
+		}
+		recordPath, ok := strings.CutSuffix(name, ".yaml")
 		if !ok {
-			continue
+			recordPath, ok = strings.CutSuffix(name, ".meta")
 		}
-		if _, declared := records[name]; declared {
-			continue
+		if !ok || reachable[recordPath] || reported[recordPath] {
+			return nil
 		}
-		out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so its profiles are not loaded; remove %s or register the record to use it", name, RemoteContentPath(name)))
-	}
+		reported[recordPath] = true
+		out = append(out, fmt.Sprintf("remote %q: stored content has no record declaring it, so its profiles are not loaded; remove %s or register the record to use it", recordPath, path))
+		return nil
+	})
 	return out
 }
 
@@ -608,44 +659,76 @@ func stripControlsKeepLines(s string) string {
 	}, s)
 }
 
-// remoteWarnings reports the merged records whose stored content disagrees with
-// the source the record points at: content fetched from another URL or ref, or
-// content with no recorded provenance at all. Resolution stays offline and keeps
-// serving what is on disk — the warning is how a mismatch stops being silent.
-// A record that pins no ref also reports the commit its content came from: with
-// no fixed ref, that sha is the only thing the stale content can be held to.
-// A record with no content yet has nothing to disagree with and contributes
-// nothing.
+// remoteWarnings reports the records whose stored content disagrees with the
+// source its declaration points at: content fetched from another URL or ref,
+// or content with no recorded provenance at all. The declaration is the
+// config's remotes: section for a top-level record and the parent's stored
+// content for a nested one, and the check recurses through stored
+// declarations, so a child its parent re-pointed is named by its own path.
+// Resolution stays offline and keeps serving what is on disk — the warning is
+// how a mismatch stops being silent. A record that pins no ref also reports
+// the commit its content came from: with no fixed ref, that sha is the only
+// thing the stale content can be held to. A record with no content yet has
+// nothing to disagree with and contributes nothing.
 func remoteWarnings(records map[string]RemoteRecord) []string {
 	var out []string
 	for _, name := range slices.Sorted(maps.Keys(records)) {
-		if _, err := os.Stat(RemoteContentPath(name)); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			out = append(out, fmt.Sprintf("remote %q: stored content cannot be inspected (%v); run \"enver pull %s\" to re-fetch it", name, err, name))
-			continue
-		}
-		url, ref, err := source.ResolveRecord(records[name].URL, records[name].Ref)
-		if err != nil {
-			out = append(out, fmt.Sprintf("remote %q: the record's source is unusable (%v); the stored content cannot be verified, so run \"enver pull %s\" once the record is fixed", name, err, name))
-			continue
-		}
-		st, ok := ReadRemoteState(name)
-		if !ok {
-			out = append(out, fmt.Sprintf("remote %q: content has no pull state to compare, and the record points at %s; run \"enver pull %s\" to re-fetch it", name, sourceLabel(url, ref), name))
-			continue
-		}
-		if url == st.URL && ref == st.Ref {
-			continue
-		}
-		warning := fmt.Sprintf("remote %q: content was fetched from %s, but the record now points at %s", name, sourceLabel(st.URL, st.Ref), sourceLabel(url, ref))
-		if source.Unpinned(ref) && st.Commit != "" {
-			warning += fmt.Sprintf("; the record pins no ref, so that source can serve different content at any time and the stored content is commit %s", st.Commit)
-		}
-		out = append(out, warning+fmt.Sprintf("; run \"enver pull %s\" to re-sync", name))
+		out = append(out, divergenceWarnings(name, records[name], name)...)
 	}
 	return out
+}
+
+// divergenceWarnings checks one record's stored content against the source its
+// declaration resolves to, then recurses into the children that content
+// declares, each checked against the declaration its parent carries. pullTarget
+// is the top-level record the re-pull hints name: pull fetches a subtree whole,
+// never by a nested path. The sidecar comparison needs no content bytes, so it
+// runs on whatever a stat can see; only the recursion into declared children
+// needs the file itself, and unreadable or unparseable content ends the walk
+// there, where the read seam and composition report the file.
+func divergenceWarnings(path string, rec RemoteRecord, pullTarget string) []string {
+	if _, err := os.Stat(RemoteContentPath(path)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return []string{fmt.Sprintf("remote %q: stored content cannot be inspected (%v); run \"enver pull %s\" to re-fetch it", path, err, pullTarget)}
+	}
+	out := stateDivergenceWarning(path, rec, pullTarget)
+	data, err := os.ReadFile(RemoteContentPath(path))
+	if err != nil {
+		return out
+	}
+	content, err := parseConfig("stored content", data)
+	if err != nil {
+		return out
+	}
+	for _, name := range slices.Sorted(maps.Keys(content.Remotes)) {
+		out = append(out, divergenceWarnings(path+"/"+name, content.Remotes[name], pullTarget)...)
+	}
+	return out
+}
+
+// stateDivergenceWarning compares the sidecar stored for path against the
+// source its declaration resolves to, in the voice the top-level check has
+// always used, with the unpinned-commit note for a record whose source can
+// serve different content at any time.
+func stateDivergenceWarning(path string, rec RemoteRecord, pullTarget string) []string {
+	url, ref, err := source.ResolveRecord(rec.URL, rec.Ref)
+	if err != nil {
+		return []string{fmt.Sprintf("remote %q: the record's source is unusable (%v); the stored content cannot be verified, so run \"enver pull %s\" once the record is fixed", path, err, pullTarget)}
+	}
+	st, ok := ReadRemoteState(path)
+	if !ok {
+		return []string{fmt.Sprintf("remote %q: content has no pull state to compare, and the record points at %s; run \"enver pull %s\" to re-fetch it", path, sourceLabel(url, ref), pullTarget)}
+	}
+	if url == st.URL && ref == st.Ref {
+		return nil
+	}
+	warning := fmt.Sprintf("remote %q: content was fetched from %s, but the record now points at %s", path, sourceLabel(st.URL, st.Ref), sourceLabel(url, ref))
+	if source.Unpinned(ref) && st.Commit != "" {
+		warning += fmt.Sprintf("; the record pins no ref, so that source can serve different content at any time and the stored content is commit %s", st.Commit)
+	}
+	return []string{warning + fmt.Sprintf("; run \"enver pull %s\" to re-sync", pullTarget)}
 }
 
 // sourceLabel names a resolved source in a warning: the URL alone when the
