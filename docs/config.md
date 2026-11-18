@@ -206,7 +206,7 @@ parents is two records, with separate pristine copies and separate freshness —
 that needs the same base declares its own record.
 
 A re-pull syncs the subtree to the parent's current declaration. Newly
-declared children are fetched; a child whose declaration changed URL is
+declared children are fetched; a child whose declaration changed URL or ref is
 fetched fresh under the same name; children the declaration dropped have their
 stored files deleted — they are reproducible cache, and each deletion is
 listed in the pull output. A child whose stored content and sidecar still
@@ -221,9 +221,11 @@ stored content is missing contributes no profiles and warns, naming the
 
 - **Content** lives in `$XDG_CONFIG_HOME/enver/remotes/` at each record's
   path — `ollama.yaml`, and `ollama/claude.yaml` for a nested record — one
-  file per record, replaced whole on every pull (temp file plus rename). It is
-  config, not cache: XDG cache is disposable by convention, and deleting it
-  must never silently change what `enver x` exports.
+  file per record, replaced whole whenever pull writes it (temp file plus
+  rename; a child whose stored copy still matches its declaration is not
+  rewritten at all). It is config, not cache: XDG cache is disposable by
+  convention, and deleting it must never silently change what `enver x`
+  exports.
 - **Provenance** lives in a machine-local sidecar, `remotes/<name>.meta`: the
   fetched URL, the resolved ref, the commit sha a fetch resolved, and when the
   pull ran. Recording it in the record would dirty a checked-in `.enver.yaml`
