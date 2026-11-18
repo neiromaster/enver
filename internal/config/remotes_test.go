@@ -269,8 +269,13 @@ func TestRemoteContentNestedRoundtrip(t *testing.T) {
 	}
 
 	for _, name := range []string{"a//b", ""} {
-		if err := WriteRemoteState(name, st); err == nil {
+		err := WriteRemoteState(name, st)
+		if err == nil {
 			t.Errorf("WriteRemoteState(%q) accepted an unusable record path", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "not a valid record path") {
+			t.Errorf("WriteRemoteState(%q) err = %v, want it to name the record-path rule", name, err)
 		}
 	}
 }
