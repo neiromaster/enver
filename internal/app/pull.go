@@ -514,20 +514,23 @@ func (r pullResult) renderBlock(b *strings.Builder, depth int) {
 // pulledRecord is one record the walk has fetched and gated, with the records
 // its content declared below it. Nothing is written until the whole tree has
 // passed the tree check, so the walk keeps every content in memory. kept marks
-// a child whose stored copy stands in for a fetch, and changes names what the
-// re-pull did to the subtree around it.
+// a child whose stored copy stands in for a fetch, changes names what the
+// re-pull did to the subtree around it, and renamedFrom carries the old
+// spelling of a child the upstream renamed, which the commit must clear before
+// the fresh write can land under the declared one.
 type pulledRecord struct {
-	path     string
-	url      string
-	ref      string
-	commit   string
-	content  []byte
-	source   string
-	profiles []string
-	warnings []string
-	kept     bool
-	changes  []string
-	children []*pulledRecord
+	path        string
+	url         string
+	ref         string
+	commit      string
+	content     []byte
+	source      string
+	profiles    []string
+	warnings    []string
+	kept        bool
+	renamedFrom string
+	changes     []string
+	children    []*pulledRecord
 }
 
 // pullWalk is one recursive pull: the fetch seams, the view every record is
@@ -644,9 +647,9 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 	// only rewrite bytes that are already right. The pulled record itself
 	// always refetches — it is the one this run is about.
 	var content []byte
-	commit, change, kept := "", "", false
+	commit, change, renamedFrom, kept := "", "", "", false
 	if len(chain) > 0 {
-		content, commit, change, kept = syncChild(path, rec, url, ref)
+		content, commit, change, renamedFrom, kept = syncChild(path, rec, url, ref)
 	}
 	if !kept {
 		fetchURL, commitHint := url, ""
@@ -689,15 +692,16 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 	w.fetched[path] = content
 	w.scopes[path] = pullScope{prefix: prefix, declared: file.Remotes}
 	out := &pulledRecord{
-		path:     path,
-		url:      url,
-		ref:      ref,
-		commit:   commit,
-		content:  content,
-		source:   sourceLabel(rec, ref),
-		profiles: projected.ProfileNames(),
-		warnings: warnings,
-		kept:     kept,
+		path:        path,
+		url:         url,
+		ref:         ref,
+		commit:      commit,
+		content:     content,
+		source:      sourceLabel(rec, ref),
+		profiles:    projected.ProfileNames(),
+		warnings:    warnings,
+		kept:        kept,
+		renamedFrom: renamedFrom,
 	}
 	if change != "" {
 		out.changes = append(out.changes, change)
@@ -721,23 +725,95 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 // at all is added, a sidecar naming another source is re-pointed, and a
 // sidecar whose content vanished refetches silently, since repair is not
 // re-organization.
-func syncChild(path string, rec config.RemoteRecord, url, ref string) (content []byte, commit, change string, kept bool) {
+//
+// The comparison only runs when the stored entry sits spelled exactly as the
+// declaration spells it. On a filesystem that folds name case, a differently
+// spelled entry opens under the declared name as if it were the same file, so
+// the reads cannot tell — but the sweep compares byte-exact, so keeping such an
+// entry would have one pull keep the child and then delete it. A mismatch is a
+// rename: the child is fetched fresh under the declared spelling, renamedFrom
+// carries the old spelling for the commit to clear, and the change line names
+// what moved.
+func syncChild(path string, rec config.RemoteRecord, url, ref string) (content []byte, commit, change, renamedFrom string, kept bool) {
+	exact, old := storedSpelling(path)
+	if !exact && old != "" {
+		return nil, "", fmt.Sprintf("renamed from %q", old), old, false
+	}
 	st, ok := config.ReadRemoteState(path)
 	if !ok {
-		return nil, "", "added", false
+		return nil, "", "added", "", false
 	}
 	if st.URL != url || st.Ref != ref {
-		old := recordSource(config.RemoteRecord{URL: st.URL, Ref: st.Ref})
-		return nil, "", fmt.Sprintf("re-pointed from %s to %s", old, recordSource(rec)), false
+		from := recordSource(config.RemoteRecord{URL: st.URL, Ref: st.Ref})
+		return nil, "", fmt.Sprintf("re-pointed from %s to %s", from, recordSource(rec)), "", false
+	}
+	if !exact {
+		return nil, "", "", "", false
 	}
 	if fi, err := os.Stat(config.RemoteContentPath(path)); err != nil || fi.IsDir() {
-		return nil, "", "", false
+		return nil, "", "", "", false
 	}
 	data, err := os.ReadFile(config.RemoteContentPath(path))
 	if err != nil {
-		return nil, "", "", false
+		return nil, "", "", "", false
 	}
-	return data, st.Commit, "", true
+	return data, st.Commit, "", "", true
+}
+
+// storedSpelling reports whether the record's whole stored path sits spelled
+// exactly as the declaration spells it, and — when the record's own files sit
+// under another spelling — that other spelling as a record path. Every
+// ancestor segment is checked against the directory entries along the way: a
+// case-folded ancestor renames the subtree wholesale, and keep requires the
+// exact path, or the sweep's byte-exact walk would drop entries a kept record
+// still answers for. An entry under no spelling at all reports exact=false
+// with no old spelling, which leaves the classification to the sidecar.
+func storedSpelling(path string) (exact bool, old string) {
+	segments := strings.Split(path, "/")
+	dir := config.RemotesDir()
+	for _, segment := range segments[:len(segments)-1] {
+		entries, err := os.ReadDir(dir)
+		if err != nil || !hasEntry(entries, segment) {
+			return false, ""
+		}
+		dir = filepath.Join(dir, filepath.FromSlash(segment))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, ""
+	}
+	segment := segments[len(segments)-1]
+	files := 0
+	for _, entry := range entries {
+		switch entry.Name() {
+		case segment + ".yaml", segment + ".meta":
+			files++
+		}
+	}
+	if files == 2 {
+		return true, ""
+	}
+	for _, entry := range entries {
+		name, ok := strings.CutSuffix(entry.Name(), ".yaml")
+		if !ok {
+			name, ok = strings.CutSuffix(entry.Name(), ".meta")
+		}
+		if ok && name != segment && strings.EqualFold(name, segment) {
+			return false, strings.Join(append(slices.Clone(segments[:len(segments)-1]), name), "/")
+		}
+	}
+	return false, ""
+}
+
+// hasEntry reports whether one directory entry names name exactly, the check a
+// case-folding filesystem cannot make through an open.
+func hasEntry(entries []os.DirEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 // checkTree composes the fetched tree exactly as load will and refuses a pull
@@ -807,8 +883,25 @@ func danglingError(record, name, target string, scope pullScope) error {
 // pull repairs it. A kept record is skipped: its stored bytes are the ones the
 // tree check approved, and rewriting them would churn provenance the sidecar
 // still answers for.
+//
+// A renamed record's old-spelled entry is cleared before the fresh write. On a
+// case-folding filesystem a rename cannot re-spell an existing entry, so a
+// write over the old spelling would land there — and the sweep, byte-exact by
+// design, would then delete it as unreached, content and all. Clearing the old
+// entry first lets the write create the declared spelling, and the sweep finds
+// nothing to disagree with. Descendants of a renamed record are never kept
+// (their stored path is not exact either), so clearing the old subtree removes
+// only bytes this commit re-stores.
 func commitPulled(r *pulledRecord) error {
 	if !r.kept {
+		if r.renamedFrom != "" {
+			if err := config.RemoveRemoteContent(r.renamedFrom); err != nil {
+				return err
+			}
+			if err := config.RemoveRemoteState(r.renamedFrom); err != nil {
+				return err
+			}
+		}
 		if err := config.WriteRemoteContent(r.path, r.content); err != nil {
 			return err
 		}
