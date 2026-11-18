@@ -206,7 +206,7 @@ func TestRemoteContentWriteAndRemoval(t *testing.T) {
 		t.Fatalf("removing absent state must be done, not an error: %v", err)
 	}
 
-	for _, name := range []string{"", "../escape", "a/b"} {
+	for _, name := range []string{"", "../escape"} {
 		if err := WriteRemoteContent(name, nil); err == nil {
 			t.Errorf("WriteRemoteContent(%q) accepted an unusable record name", name)
 		}
@@ -216,6 +216,97 @@ func TestRemoteContentWriteAndRemoval(t *testing.T) {
 		if err := RemoveRemoteState(name); err == nil {
 			t.Errorf("RemoveRemoteState(%q) accepted an unusable record name", name)
 		}
+	}
+
+	if err := RemoveRemoteContent("a/b"); err != nil {
+		t.Errorf("RemoveRemoteContent(a/b) on absent content = %v, want done", err)
+	}
+}
+
+func TestValidRecordPath(t *testing.T) {
+	for _, path := range []string{"ollama", "ollama/claude", "a/b/c"} {
+		if !ValidRecordPath(path) {
+			t.Errorf("ValidRecordPath(%q) = false, want true", path)
+		}
+	}
+	for _, path := range []string{"", "/x", "x/", "a//b", "a/.", "..", "a/../b", "a/b.profiles"} {
+		if ValidRecordPath(path) {
+			t.Errorf("ValidRecordPath(%q) = true, want false", path)
+		}
+	}
+}
+
+func TestRemoteContentNestedRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	defer remotesDirIn(dir)()
+
+	content := "profiles:\n  base:\n    env:\n      K: pulled\n"
+	if err := WriteRemoteContent("ollama/claude", []byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(dir, "ollama", "claude.yaml")
+	if RemoteContentPath("ollama/claude") != wantPath {
+		t.Fatalf("RemoteContentPath = %q, want %q", RemoteContentPath("ollama/claude"), wantPath)
+	}
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("content not written where the path function promises it: %v", err)
+	}
+	if string(got) != content {
+		t.Fatalf("content = %q, want %q", got, content)
+	}
+
+	st := RemoteState{URL: "https://example.com/claude.yaml", Ref: "v2", Commit: "9f2c1ab"}
+	if err := WriteRemoteState("ollama/claude", st); err != nil {
+		t.Fatal(err)
+	}
+	gotState, ok := ReadRemoteState("ollama/claude")
+	if !ok {
+		t.Fatal("ReadRemoteState reported no state after a write")
+	}
+	if gotState.URL != st.URL || gotState.Ref != st.Ref || gotState.Commit != st.Commit {
+		t.Fatalf("state = %+v, want %+v", gotState, st)
+	}
+
+	for _, name := range []string{"a//b", ""} {
+		if err := WriteRemoteState(name, st); err == nil {
+			t.Errorf("WriteRemoteState(%q) accepted an unusable record path", name)
+		}
+	}
+}
+
+func TestRemoveRemoteContentRemovesSubtree(t *testing.T) {
+	dir := t.TempDir()
+	defer remotesDirIn(dir)()
+
+	if err := WriteRemoteContent("ollama", []byte("profiles:\n  base:\n    env:\n      K: flat\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRemoteContent("ollama/claude", []byte("profiles:\n  base:\n    env:\n      K: nested\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRemoteState("ollama", RemoteState{URL: "https://example.com/ollama.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveRemoteContent("ollama"); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "ollama.yaml"),
+		filepath.Join(dir, "ollama", "claude.yaml"),
+		filepath.Join(dir, "ollama"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("%s survived RemoveRemoteContent: %v", path, err)
+		}
+	}
+
+	if err := RemoveRemoteState("ollama"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ollama.meta")); !os.IsNotExist(err) {
+		t.Errorf(".meta survived RemoveRemoteState: %v", err)
 	}
 }
 
