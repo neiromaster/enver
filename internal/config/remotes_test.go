@@ -851,7 +851,7 @@ func TestComposeTreeSiblingIndependence(t *testing.T) {
     extends: claude/default
 remotes:
   claude:
-    url: https://example.com/claude.yaml
+    url: https://example.com/ollama/claude.yaml
 `,
 		"ollama/claude": `profiles:
   default:
@@ -863,7 +863,7 @@ remotes:
     extends: claude/default
 remotes:
   claude:
-    url: https://example.com/claude.yaml
+    url: https://example.com/zai/claude.yaml
 `,
 		"zai/claude": `profiles:
   default:
@@ -1123,7 +1123,7 @@ func TestLocalPatchOverNestedProfile(t *testing.T) {
       HOST: remote-host
 remotes:
   claude:
-    url: https://example.com/claude.yaml
+    url: https://example.com/ollama/claude.yaml
 `,
 		"ollama/claude": `profiles:
   default:
@@ -1257,4 +1257,183 @@ func TestNoPrefixFoldDeterminism(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The orphan check sees the whole stored tree: an entry on disk is legitimate
+// only when a declared record reaches it through stored declarations, so an
+// undeclared child, a stray sidecar and a subtree left behind by a renamed
+// record are all named by path — the subtree once, by its root, since the root
+// alone tells the story.
+func TestOrphanWarningsRecurse(t *testing.T) {
+	t.Run("an undeclared child is named by path", func(t *testing.T) {
+		load := useRemoteFixture(t, remoteRecordsYAML("ollama"), "", map[string]string{
+			"ollama": `profiles:
+  glm-models:
+    env:
+      HOST: h
+remotes:
+  claude:
+    url: https://example.com/ollama/claude.yaml
+`,
+			"ollama/claude": `profiles:
+  default:
+    env:
+      MODEL: m
+`,
+			"ollama/ghost": `profiles:
+  ghost:
+    env:
+      K: v
+`,
+		})
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the ghost orphan", cfg.Warnings)
+		}
+		for _, want := range []string{`"ollama/ghost"`, "no record declaring it", "its profiles are not loaded", "remove", "register the record"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+
+	t.Run("a tree orphaned by a renamed key is reported whole", func(t *testing.T) {
+		load := useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{
+			"ollama": `profiles:
+  glm-models:
+    env:
+      HOST: h
+remotes:
+  claude:
+    url: https://example.com/ollama/claude.yaml
+`,
+			"ollama/claude": `profiles:
+  default:
+    env:
+      MODEL: m
+`,
+		})
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want one warning for the whole orphaned tree", cfg.Warnings)
+		}
+		w := cfg.Warnings[0]
+		for _, want := range []string{`"ollama"`, "no record declaring it", "whole subtree is orphaned", "remove"} {
+			if !strings.Contains(w, want) {
+				t.Fatalf("warning %q does not mention %q", w, want)
+			}
+		}
+		if strings.Contains(w, "ollama/claude") {
+			t.Fatalf("warning %q itemizes the tree contents; the root tells the story", w)
+		}
+	})
+
+	t.Run("a sidecar outliving its record is named too", func(t *testing.T) {
+		load := useRemoteFixture(t, remoteRecordsYAML("ollama"), "", map[string]string{
+			"ollama": `profiles:
+  glm-models:
+    env:
+      HOST: h
+`,
+		})
+		if err := WriteRemoteState("legacy", RemoteState{URL: remoteContentSource("legacy")}); err != nil {
+			t.Fatal(err)
+		}
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the stray sidecar", cfg.Warnings)
+		}
+		for _, want := range []string{`"legacy"`, "no record declaring it", ".meta"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+}
+
+// The divergence check recurses through stored declarations: each child's
+// sidecar is compared against the declaration its parent's stored content
+// carries, with the warning naming the child by path and the re-pull hint
+// naming the subtree root pull fetches.
+func TestDivergenceRecursesIntoChildren(t *testing.T) {
+	declaredChildFixture := func(t *testing.T, parentRemotes string) func(bool) Config {
+		t.Helper()
+		return useRemoteFixture(t, remoteRecordsYAML("ollama"), "", map[string]string{
+			"ollama": `profiles:
+  glm-models:
+    env:
+      HOST: h
+` + parentRemotes,
+			"ollama/claude": `profiles:
+  default:
+    env:
+      MODEL: m
+`,
+		})
+	}
+
+	t.Run("a child re-declared at another URL is named by path", func(t *testing.T) {
+		cfg := declaredChildFixture(t, "remotes:\n  claude:\n    url: https://example.com/claude-v2.yaml\n")(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the child divergence", cfg.Warnings)
+		}
+		for _, want := range []string{
+			`"ollama/claude"`,
+			remoteContentSource("ollama/claude"),
+			"https://example.com/claude-v2.yaml",
+			"enver pull ollama",
+		} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+
+	t.Run("a child re-pinned at another ref is named by path", func(t *testing.T) {
+		load := declaredChildFixture(t, "remotes:\n  claude:\n    url: "+remoteContentSource("ollama/claude")+"\n    ref: v2\n")
+		if err := WriteRemoteState("ollama/claude", RemoteState{URL: remoteContentSource("ollama/claude"), Ref: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the child divergence", cfg.Warnings)
+		}
+		for _, want := range []string{`"ollama/claude"`, "at ref v1", "at ref v2", "enver pull ollama"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+
+	t.Run("an unpinned child reports the commit its content came from", func(t *testing.T) {
+		load := declaredChildFixture(t, "remotes:\n  claude:\n    url: https://example.com/claude-fresh.yaml\n")
+		if err := WriteRemoteState("ollama/claude", RemoteState{URL: remoteContentSource("ollama/claude"), Commit: "9f2c1ab"}); err != nil {
+			t.Fatal(err)
+		}
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the child divergence", cfg.Warnings)
+		}
+		for _, want := range []string{`"ollama/claude"`, "pins no ref", "9f2c1ab", "enver pull ollama"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+
+	t.Run("a child with no sidecar asks for a re-pull", func(t *testing.T) {
+		load := declaredChildFixture(t, "remotes:\n  claude:\n    url: "+remoteContentSource("ollama/claude")+"\n")
+		if err := os.Remove(RemoteStatePath("ollama/claude")); err != nil {
+			t.Fatal(err)
+		}
+		cfg := load(false)
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the missing-sidecar advisory", cfg.Warnings)
+		}
+		for _, want := range []string{`"ollama/claude"`, "no pull state to compare", remoteContentSource("ollama/claude"), "enver pull ollama"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
 }
