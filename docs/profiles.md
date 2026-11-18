@@ -162,10 +162,7 @@ the remote content it sits on (a global profile may extend a remote-provided
 name; extending a local-only one is flagged, since it is fine in this directory
 and broken elsewhere). Exits non-zero if any error is found.
 
-Authorship decides how a dangling `extends` is graded: a parent missing because
-**your own** config names it is an error, while one a **remote** authored is a
-warning carrying a hint — which remote expects the parent, and the `enver pull`
-that would supply it. A remote may legitimately extend a profile you provide, so
-an unpulled parent is a config to complete, not a broken one. `enver list
---format json` grades the same way: such profiles are left out of `profiles` and
-named in `skipped`, with a note on stderr, instead of failing the listing.
+Every dangling `extends` is an error: strict scoping leaves no authorship to
+grade, since a remote file can no longer name a parent outside its own
+namespace. The hint survives where a pull can help — a parent whose record is
+declared but not yet pulled carries the `enver pull <name>` that supplies it.

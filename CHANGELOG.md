@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **New:** a fetched remote config can declare its own `remotes:` records, and
+  one pull brings the whole tree: the provider config and the base it extends
+  are fetched, gated and stored together, nested under the record's path
+  (`remotes/ollama.yaml` beside a directory `ollama/` holding
+  `ollama/claude.yaml`, each record with its own sidecar, commit and pull
+  time). Scoping is lexical — a file resolves only its own profiles and the
+  records its own `remotes:` block declares — and prefixes compose at
+  boundaries without leaking inward, so pulling a provider under another name
+  (`enver pull <source> --as my-ollama`) moves the whole subtree wholesale and
+  rewrites nothing inside the files. `no_prefix` on a record drops just that
+  boundary's segment. A re-pull syncs the subtree to the parent's current
+  declaration: newly declared children are fetched, dropped children's stored
+  files are deleted as reproducible cache and listed in the output, a child
+  whose declaration changed URL is fetched fresh, and an unchanged child is
+  kept untouched. `pull --list` renders the tree with nested rows indented
+  under their parent, and loading never touches the network: a declared child
+  with no stored content contributes no profiles and advises the re-pull. A
+  declaration tree that loops back to a source is refused at pull naming the
+  chain, and a tree deeper than 16 records is refused loudly rather than
+  truncated.
+- **Breaking:** the passthrough form of remote `extends` is gone. A remote
+  file whose `extends` named a target it did not define used to resolve that
+  target against the pulling user's namespace — how a remote extended a
+  profile you provide, and how cross-remote extends composed. An
+  out-of-namespace target in any remote file, top-level or nested, now refuses
+  at pull and errors at load; `enver validate` reports every dangling
+  `extends` as an error, with no more authorship grading, and `list --format
+  json` carries no `skipped` array. A remote that needs a base now declares it
+  in its own `remotes:` and the pull fetches it; user-side composition is
+  unchanged — a local profile extends `record/profile` as before, and a local
+  profile with the same name as a projected one patches it per key, local keys
+  winning while the remote's other keys survive.
+
 ## v0.11.0 - 2026-11-17
 
 - **New:** `gist:owner/id[/file][@revision]` remote sources — one file in a

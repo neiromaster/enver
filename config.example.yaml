@@ -10,7 +10,9 @@
 # Remote configs: a config someone else publishes, fetched on demand and read
 # offline afterwards. Register one with `enver pull <source> --as <name>` (this
 # section is what that writes), or write it by hand. Its profiles load as
-# <name>/<profile>; --no-prefix keeps their bare upstream names instead. Patch a
+# <name>/<profile>; --no-prefix keeps their bare upstream names instead. A
+# fetched file may declare its own remotes: records, and one pull fetches that
+# whole subtree (nested profiles load under <name>/<child>/<profile>). Patch a
 # projected profile with a profile of the same name below (or in ./.enver.yaml):
 #
 # remotes:
