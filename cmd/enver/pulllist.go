@@ -43,7 +43,9 @@ func runPullList(cmd *cobra.Command, args []string) error {
 
 // printRemoteStatuses renders one line per record: the name as the key, its
 // source plain so it copies cleanly, and the freshness of its stored content as
-// a dim comment. The color gate follows the writer, exactly as enver show does,
+// a dim comment. A record declared by another record's stored content indents
+// two spaces per level under its declarer, so the listing reads as the tree a
+// pull stores. The color gate follows the writer, exactly as enver show does,
 // so a redirect or NO_COLOR keeps the listing escape-free.
 func printRemoteStatuses(w io.Writer, rows []app.RemoteStatus) error {
 	var dim, bold lipgloss.Style
@@ -59,7 +61,8 @@ func printRemoteStatuses(w io.Writer, rows []app.RemoteStatus) error {
 	}
 	now := pullListNow()
 	for _, row := range rows {
-		line := bold.Render(row.Name) + "  " + row.Source + "  " + dim.Render("# "+freshnessNote(row, now))
+		indent := strings.Repeat("  ", max(row.Depth-1, 0))
+		line := indent + bold.Render(row.Name) + "  " + row.Source + "  " + dim.Render("# "+freshnessNote(row, now))
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}

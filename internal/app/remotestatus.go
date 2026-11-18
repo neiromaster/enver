@@ -8,6 +8,7 @@ import (
 
 	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/remote"
+	"gopkg.in/yaml.v3"
 )
 
 // RemoteStatus is one record the merged view declares and the freshness of the
@@ -16,6 +17,9 @@ import (
 // enver pull --list renders.
 type RemoteStatus struct {
 	Name string
+	// Depth is how deep the record sits in its tree: 1 for a record the config
+	// declares, one more per stored declaration below it.
+	Depth int
 	// Source is the source as a reader should see it: the record's spelling with
 	// the ref it resolves to when the record pins one, the record's spelling
 	// alone when it does not. Ref carries the resolved ref either way.
@@ -39,13 +43,37 @@ type RemoteStatus struct {
 	StaleFrom string
 }
 
-// RemoteStatuses lists every record the merged view declares, sorted by name,
-// with the provenance of its stored content. It only reads: no fetch and no
-// write, so a listing never changes what a later resolve sees.
+// RemoteStatuses lists every record the merged view declares plus every child
+// its stored content declares, recursively, depth-first with siblings sorted:
+// the same tree a pull stores and the summary indents. Declarations are read
+// the light way — the plain parse of stored content — since a listing needs no
+// projection, and content that is absent or unparseable ends its walk there,
+// where load and pull already report it. It only reads: no fetch and no write,
+// so a listing never changes what a later resolve sees.
 func RemoteStatuses(cfg config.Config) []RemoteStatus {
 	out := make([]RemoteStatus, 0, len(cfg.Remotes))
+	seen := make(map[string]bool, len(cfg.Remotes))
+	var walk func(path string, rec config.RemoteRecord, depth int)
+	walk = func(path string, rec config.RemoteRecord, depth int) {
+		if seen[path] {
+			return
+		}
+		seen[path] = true
+		out = append(out, remoteStatus(path, rec, depth))
+		data, err := os.ReadFile(config.RemoteContentPath(path))
+		if err != nil {
+			return
+		}
+		var stored config.Config
+		if err := yaml.Unmarshal(data, &stored); err != nil {
+			return
+		}
+		for _, name := range slices.Sorted(maps.Keys(stored.Remotes)) {
+			walk(path+"/"+name, stored.Remotes[name], depth+1)
+		}
+	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
-		out = append(out, remoteStatus(name, cfg.Remotes[name]))
+		walk(name, cfg.Remotes[name], 1)
 	}
 	return out
 }
@@ -53,8 +81,8 @@ func RemoteStatuses(cfg config.Config) []RemoteStatus {
 // remoteStatus assembles one record's row. An unresolvable source keeps the
 // spelling the record holds and contributes no pin state: the load path already
 // reports what the resolver could not read.
-func remoteStatus(name string, rec config.RemoteRecord) RemoteStatus {
-	status := RemoteStatus{Name: name}
+func remoteStatus(name string, rec config.RemoteRecord, depth int) RemoteStatus {
+	status := RemoteStatus{Name: name, Depth: depth}
 	url, ref, err := remote.ResolveRecord(rec)
 	if err != nil {
 		status.Source = rec.URL
