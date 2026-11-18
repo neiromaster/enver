@@ -83,8 +83,9 @@ type RemoteState struct {
 }
 
 // RemotesDir is the directory holding a remote's pristine content and its state
-// sidecar, one <name>.yaml and one <name>.meta per record. A var so tests and
-// callers embedding enver can redirect it.
+// sidecar, one <name>.yaml and one <name>.meta per record, where a record name
+// may be a slash path whose segments become nested directories. A var so tests
+// and callers embedding enver can redirect it.
 var RemotesDir = func() string {
 	return filepath.Join(xdg.ConfigHome(), "enver", "remotes")
 }
@@ -133,7 +134,7 @@ func ReadRemoteState(name string) (RemoteState, bool) {
 // one.
 func WriteRemoteState(name string, st RemoteState) error {
 	if !ValidRecordPath(name) {
-		return fmt.Errorf("remote %q: not a valid record name", name)
+		return fmt.Errorf("remote %q: not a valid record path", name)
 	}
 	data, err := yaml.Marshal(st)
 	if err != nil {
@@ -151,7 +152,7 @@ func WriteRemoteState(name string, st RemoteState) error {
 // truncated one.
 func WriteRemoteContent(name string, data []byte) error {
 	if !ValidRecordPath(name) {
-		return fmt.Errorf("remote %q: not a valid record name", name)
+		return fmt.Errorf("remote %q: not a valid record path", name)
 	}
 	if err := writeFileAtomic(RemoteContentPath(name), data, 0o600); err != nil {
 		return fmt.Errorf("remote %q: write content: %w", name, err)
@@ -187,7 +188,7 @@ func RemoveRemoteState(name string) error {
 // differ only in which one it is.
 func removeRemoteFile(name, path, kind string) error {
 	if !ValidRecordPath(name) {
-		return fmt.Errorf("remote %q: not a valid record name", name)
+		return fmt.Errorf("remote %q: not a valid record path", name)
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remote %q: remove %s: %w", name, kind, err)
