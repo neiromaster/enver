@@ -1949,6 +1949,29 @@ func TestLoadMergedMultipleRemotes(t *testing.T) {
 	}
 }
 
+// Content a pre-scoping pull stored, or a hand-edited file left behind, can name
+// a target outside its own namespace: stored state predating the rule never
+// passed the gate, so the load must refuse it just as loudly, never resolve
+// around it.
+func TestLoadMergedRefusesOutOfNamespaceStoredContent(t *testing.T) {
+	const legacy = `profiles:
+  qwen:
+    extends: provider
+    env:
+      MODEL: qwen
+`
+	useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{"llm": legacy})
+	_, err := LoadMerged("", false)
+	if err == nil {
+		t.Fatal("LoadMerged accepted stored content whose extends target reaches outside the file's own namespace")
+	}
+	for _, want := range []string{`remote "llm"`, `extends "provider"`, "outside this file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadMerged err = %v, want it to carry %s", err, want)
+		}
+	}
+}
+
 // Content that is on disk but unreadable must not vanish from resolution in
 // silence: its stat succeeds, so the divergence check has nothing to say about
 // it, and the load raises its own advisory instead.

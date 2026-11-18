@@ -242,6 +242,50 @@ remotes:
 	}
 }
 
+// An in-namespace target must still be spelled a profile can carry: the
+// projection strips control characters before it classifies, so a target with an
+// invalid segment would be accepted here and dangle on a name no profile can
+// have. Every /-separated segment therefore passes the record-name rule, while
+// the segment count stays the subtree rule's business, not a limit.
+func TestGateValidatesTargetSegments(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{"a control character in a declared child's rest", "claude/sub\x01p"},
+		{"an empty segment", "claude//x"},
+		{"a trailing slash", "claude/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := fmt.Appendf(nil, "profiles:\n  base:\n    env:\n      K: v\n  child:\n    extends: %q\n    env:\n      J: w\nremotes:\n  claude:\n    url: https://example.com/claude.yaml\n", tc.target)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, "segment is not a valid profile name", "child", quoteName(tc.target))
+			if strings.ContainsRune(err.Error(), '\u0001') {
+				t.Fatalf("error carries the raw control character: %q", err)
+			}
+		})
+	}
+	t.Run("a clean multi-segment subtree target is accepted", func(t *testing.T) {
+		content := []byte(`profiles:
+  child:
+    extends: claude/sub/profile
+    env:
+      J: w
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+		warnings, err := Gate(content, GateOpts{Record: "llm"})
+		if err != nil {
+			t.Fatalf("Gate refused a clean subtree target: %v", err)
+		}
+		if len(warnings) != 1 || !gateWarning(warnings, "declares a remotes: section") {
+			t.Fatalf("warnings = %q, want only the remotes-section advisory", warnings)
+		}
+	})
+}
+
 func TestGateRejectsForeignEraCiphertext(t *testing.T) {
 	current := gateSeal(t, crypto.CurrentParams)
 	cases := []struct {
@@ -337,17 +381,27 @@ remotes:
 	gateRequireWarning(t, warnings, "remotes:", "ignored")
 }
 
+// A remotes: section a fetched file declares is parsed before any scoping runs,
+// and its keys are record names: one outside the record-name rule draws the
+// load-time refusal, whatever its extends targets spell.
 func TestGateRejectsInvalidNestedRecordName(t *testing.T) {
-	content := []byte(`profiles:
-  a:
-    env:
-      K: v
-remotes:
-  a/b:
-    url: https://example.com/x.yaml
-`)
-	_, err := Gate(content, GateOpts{Record: "llm"})
-	gateRequireError(t, err, "invalid record name")
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"a slash", "a/b"},
+		{"a control character", "cl\u0001aude"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := fmt.Appendf(nil, "profiles:\n  a:\n    env:\n      K: v\nremotes:\n  %q:\n    url: https://example.com/x.yaml\n", tc.key)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, "invalid record name", quoteName(tc.key))
+			if strings.ContainsRune(err.Error(), '\u0001') {
+				t.Fatalf("error carries the raw control character: %q", err)
+			}
+		})
+	}
 }
 
 func TestGateWarnsNoPrefixCollisions(t *testing.T) {

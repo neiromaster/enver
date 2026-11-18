@@ -47,7 +47,8 @@ type GateOpts struct {
 // anchors and aliases, that the config parser or the load-time name rule
 // rejects, whose profile names break the bare upstream rule (no slash, non-empty,
 // no control characters), whose extends targets reach outside the file's own
-// namespace, that carries an extends cycle within the file, whose ciphertext is
+// namespace or carry a segment no profile can be named by, that carries an
+// extends cycle within the file, whose ciphertext is
 // foreign-era or mixes eras, whose enc:v3 parameters sit beyond the parse caps,
 // or that carries more than maxEncryptedValues enc: values.
 //
@@ -130,7 +131,10 @@ func checkAnchors(n *yaml.Node) error {
 // slash here would forge a different record's namespace. Extends targets must
 // stay inside the file's own namespace: a file resolves its own profiles and the
 // records its own remotes: section declares, and nothing else — anything it
-// named beyond that would bind whatever the pulling user happens to have.
+// named beyond that would bind whatever the pulling user happens to have. An
+// in-namespace target must also be well-formed, because the projection
+// classifies control-stripped targets and a segment it would silently clean has
+// to be refused here instead: what the gate accepts must resolve as stored.
 // Cycles are searched only among the file's own profiles.
 func checkRemoteProfiles(cfg config.Config, opts GateOpts) error {
 	label := gateLabel(opts.Record)
@@ -146,12 +150,31 @@ func checkRemoteProfiles(cfg config.Config, opts GateOpts) error {
 			if !config.InNamespace(target, defined, cfg.Remotes) {
 				return fmt.Errorf("%s: profile %s extends %s, which is outside this file: a remote file resolves only its own profiles and the records in its own remotes: section; declare the base it needs there", label, quoteName(name), quoteName(target))
 			}
+			if bad, has := invalidTargetSegment(target); has {
+				return fmt.Errorf("%s: profile %s extends %s, whose %s segment is not a valid profile name (want [A-Za-z0-9][A-Za-z0-9_-]*)", label, quoteName(name), quoteName(target), quoteName(bad))
+			}
 		}
 	}
 	if cycle := extendsCycle(cfg, defined); cycle != nil {
 		return fmt.Errorf("%s: %w within the file: %s", label, config.ErrExtendsCycle, strings.Join(cycle, " -> "))
 	}
 	return nil
+}
+
+// invalidTargetSegment returns the first /-separated segment of target that no
+// profile can be named by, and whether it found one. The flag is the answer, not
+// the segment: an empty segment is itself a fault, so the fault cannot be spelled
+// by the sentinel. The check belongs to the gate, not the projection: the
+// projection strips control characters before it classifies, so only here can a
+// target that would classify differently after cleaning be caught before it
+// lands on disk.
+func invalidTargetSegment(target string) (string, bool) {
+	for _, segment := range strings.Split(target, "/") {
+		if !config.ValidRecordName(segment) {
+			return segment, true
+		}
+	}
+	return "", false
 }
 
 // extendsCycle returns the first cycle among the file's own extends edges as a
