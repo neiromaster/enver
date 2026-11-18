@@ -41,6 +41,20 @@ func ValidRecordName(name string) bool {
 	return recordNameRe.MatchString(name)
 }
 
+// ValidRecordPath reports whether path is a legal remote record identity: a
+// non-empty slash path whose every segment is a valid record name. The path is
+// what maps a record to its files under the remotes dir, so an empty segment
+// would name no directory and a segment outside the record-name rule could
+// climb out of that directory.
+func ValidRecordPath(path string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		if !ValidRecordName(segment) {
+			return false
+		}
+	}
+	return true
+}
+
 // mergeRemotes folds the override's records over the base's by name. The name
 // is the key, not the URL: an overriding record replaces the inherited one
 // whole — URL and ref both — while a record no higher layer redeclares
@@ -75,26 +89,28 @@ var RemotesDir = func() string {
 	return filepath.Join(xdg.ConfigHome(), "enver", "remotes")
 }
 
-// RemoteContentPath is the file holding name's pristine pulled content.
+// RemoteContentPath is the file holding name's pristine pulled content. A path
+// name becomes a directory chain, so the record ollama/claude mirrors to
+// remotes/ollama/claude.yaml.
 func RemoteContentPath(name string) string {
-	return filepath.Join(RemotesDir(), name+".yaml")
+	return filepath.Join(RemotesDir(), filepath.FromSlash(name)) + ".yaml"
 }
 
 // RemoteStatePath is the sidecar recording what name's content was fetched from.
 // Callers that need to inspect or remove the file use this rather than build the
 // name themselves, so the layout stays in one place.
 func RemoteStatePath(name string) string {
-	return filepath.Join(RemotesDir(), name+".meta")
+	return filepath.Join(RemotesDir(), filepath.FromSlash(name)) + ".meta"
 }
 
 // ReadRemoteState reads the fetch provenance recorded for name. ok is false when
 // no state can be trusted: the remote was never pulled, the sidecar is
-// unreadable or records no source URL, or name falls outside the record-name
+// unreadable or records no source URL, or name falls outside the record-path
 // rule. All of those leave the content's provenance unknown, which the load-time
 // check reports as content due for a re-pull rather than as content whose source
 // is verified.
 func ReadRemoteState(name string) (RemoteState, bool) {
-	if !ValidRecordName(name) {
+	if !ValidRecordPath(name) {
 		return RemoteState{}, false
 	}
 	data, err := os.ReadFile(RemoteStatePath(name))
@@ -116,7 +132,7 @@ func ReadRemoteState(name string) (RemoteState, bool) {
 // rename, so a pull that dies mid-write leaves the old state, never a truncated
 // one.
 func WriteRemoteState(name string, st RemoteState) error {
-	if !ValidRecordName(name) {
+	if !ValidRecordPath(name) {
 		return fmt.Errorf("remote %q: not a valid record name", name)
 	}
 	data, err := yaml.Marshal(st)
@@ -134,7 +150,7 @@ func WriteRemoteState(name string, st RemoteState) error {
 // rename, so a pull that dies mid-write leaves the previous content, never a
 // truncated one.
 func WriteRemoteContent(name string, data []byte) error {
-	if !ValidRecordName(name) {
+	if !ValidRecordPath(name) {
 		return fmt.Errorf("remote %q: not a valid record name", name)
 	}
 	if err := writeFileAtomic(RemoteContentPath(name), data, 0o600); err != nil {
@@ -143,11 +159,21 @@ func WriteRemoteContent(name string, data []byte) error {
 	return nil
 }
 
-// RemoveRemoteContent deletes name's stored content. Content already absent is
-// not an error: the call reports that no content is left, which is what a pull
-// dropping a record's last declaration wants.
+// RemoveRemoteContent deletes name's stored content and, with it, the directory
+// its name maps to: a record's path created that directory for its files, and
+// for a path-shaped name it is the subtree its child records live in, so
+// dropping the record drops it whole. Content already absent is not an error:
+// the call reports that no content is left, which is what a pull dropping a
+// record's last declaration wants.
 func RemoveRemoteContent(name string) error {
-	return removeRemoteFile(name, RemoteContentPath(name), "content")
+	if err := removeRemoteFile(name, RemoteContentPath(name), "content"); err != nil {
+		return err
+	}
+	dir := filepath.Join(RemotesDir(), filepath.FromSlash(name))
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remote %q: remove content directory: %w", name, err)
+	}
+	return nil
 }
 
 // RemoveRemoteState deletes name's state sidecar, with the same absent-is-done
@@ -160,7 +186,7 @@ func RemoveRemoteState(name string) error {
 // absent file as done. kind names the file in the error, since the two callers
 // differ only in which one it is.
 func removeRemoteFile(name, path, kind string) error {
-	if !ValidRecordName(name) {
+	if !ValidRecordPath(name) {
 		return fmt.Errorf("remote %q: not a valid record name", name)
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
