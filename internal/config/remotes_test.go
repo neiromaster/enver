@@ -746,6 +746,465 @@ profiles:
 	})
 }
 
+// storeContent lands one record's content the way a pull writes it, so subtree
+// fixtures speak the real storage layout.
+func storeContent(t *testing.T, name, body string) {
+	t.Helper()
+	if err := WriteRemoteContent(name, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// diskContentOf is the reader RemoteLayers hands ComposeTree, for tests that
+// drive ComposeTree directly against stored fixtures.
+func diskContentOf() func(string) ([]byte, bool) {
+	return func(path string) ([]byte, bool) {
+		data, err := os.ReadFile(RemoteContentPath(path))
+		if err != nil {
+			return nil, false
+		}
+		return data, true
+	}
+}
+
+// layerLabels lists the provenance labels of a composition, so order tests read
+// as the fold they produce.
+func layerLabels(layers []Layer) []string {
+	out := make([]string, len(layers))
+	for i, l := range layers {
+		out[i] = l.Label
+	}
+	return out
+}
+
+// foldLayers folds composed layers the way remoteBase does, so a test asserts
+// the view resolution actually sees rather than per-layer shapes alone.
+func foldLayers(layers []Layer) Config {
+	base := layers[0].Config
+	for i := 1; i < len(layers); i++ {
+		base = Merge(base, layers[i].Config, layers[i-1].Label, layers[i].Label)
+	}
+	return base
+}
+
+// A record declares a child whose stored content lives under the record's own
+// directory: the parent composes first, the child lands on the composed path,
+// and the parent's extends target lands on the child's projection.
+func TestComposeTreeTwoLevels(t *testing.T) {
+	dir := t.TempDir()
+	defer remotesDirIn(dir)()
+
+	storeContent(t, "ollama", `profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      OLLAMA_HOST: http://localhost:11434
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+	storeContent(t, "ollama/claude", `profiles:
+  default:
+    env:
+      MODEL: claude-sonnet-4-5
+`)
+
+	layers, warnings, err := ComposeTree("ollama", false, diskContentOf())
+	if err != nil {
+		t.Fatalf("ComposeTree err = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", warnings)
+	}
+	if got, want := layerLabels(layers), []string{"remote:ollama", "remote:ollama/claude"}; !slices.Equal(got, want) {
+		t.Fatalf("layer labels = %v, want %v (parent first, then the child)", got, want)
+	}
+	if got, want := layers[0].Config.Profiles["ollama/glm-models"].Extends, (Extends{"ollama/claude/default"}); !slices.Equal(got, want) {
+		t.Fatalf("glm-models extends = %v, want %v (the child target composes)", got, want)
+	}
+	if got := layers[1].Config.Profiles["ollama/claude/default"].Env["MODEL"]; got != "claude-sonnet-4-5" {
+		t.Fatalf("child MODEL = %q, want the child's own env", got)
+	}
+	if got := layers[1].Config.ProfileLayer["ollama/claude/default"]; got != "remote:ollama/claude" {
+		t.Fatalf("child layer = %q, want the record path, not the prefix", got)
+	}
+
+	r, err := foldLayers(layers).ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("ResolveProfile err = %v", err)
+	}
+	if got, want := r.Chain, []string{"ollama/glm-models", "ollama/claude/default"}; !slices.Equal(got, want) {
+		t.Fatalf("chain = %v, want %v", got, want)
+	}
+	if r.Env["MODEL"] != "claude-sonnet-4-5" {
+		t.Fatalf("MODEL = %q, want the child's value through the composed extends", r.Env["MODEL"])
+	}
+}
+
+// The same child content stored under two parents resolves as two independent
+// namespaces: each subtree reads its own directory, and neither leaks into the
+// other.
+func TestComposeTreeSiblingIndependence(t *testing.T) {
+	load := useRemoteFixture(t, remoteRecordsYAML("ollama", "zai"), "", map[string]string{
+		"ollama": `profiles:
+  glm-models:
+    extends: claude/default
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`,
+		"ollama/claude": `profiles:
+  default:
+    env:
+      MODEL: from-ollama
+`,
+		"zai": `profiles:
+  glm4:
+    extends: claude/default
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`,
+		"zai/claude": `profiles:
+  default:
+    env:
+      MODEL: from-zai
+`,
+	})
+	cfg := load(false)
+	if len(cfg.Warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", cfg.Warnings)
+	}
+
+	r, err := cfg.ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("ResolveProfile(ollama/glm-models) err = %v", err)
+	}
+	if r.Env["MODEL"] != "from-ollama" {
+		t.Fatalf("ollama MODEL = %q, want ollama's own child content", r.Env["MODEL"])
+	}
+	if got := r.Sources["MODEL"].Layer; got != "remote:ollama/claude" {
+		t.Fatalf("MODEL source = %+v, want the ollama subtree layer", r.Sources["MODEL"])
+	}
+
+	r, err = cfg.ResolveProfile("zai/glm4")
+	if err != nil {
+		t.Fatalf("ResolveProfile(zai/glm4) err = %v", err)
+	}
+	if r.Env["MODEL"] != "from-zai" {
+		t.Fatalf("zai MODEL = %q, want zai's own child content", r.Env["MODEL"])
+	}
+	if got := r.Sources["MODEL"].Layer; got != "remote:zai/claude" {
+		t.Fatalf("MODEL source = %+v, want the zai subtree layer", r.Sources["MODEL"])
+	}
+}
+
+// A child a record declares but that was never pulled degrades to an advisory
+// naming the record and the re-pull that fetches the subtree: the parent still
+// composes, resolution stays offline, and nothing errors.
+func TestComposeTreeMissingChild(t *testing.T) {
+	t.Run("compose reports the record and the re-pull", func(t *testing.T) {
+		dir := t.TempDir()
+		defer remotesDirIn(dir)()
+		storeContent(t, "ollama", `profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      HOST: h
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+
+		layers, warnings, err := ComposeTree("ollama", false, diskContentOf())
+		if err != nil {
+			t.Fatalf("ComposeTree err = %v, want an advisory, not an error", err)
+		}
+		if got, want := layerLabels(layers), []string{"remote:ollama"}; !slices.Equal(got, want) {
+			t.Fatalf("layer labels = %v, want %v (only the parent composes)", got, want)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the missing-child advisory", warnings)
+		}
+		for _, want := range []string{"ollama/claude", "enver pull ollama"} {
+			if !strings.Contains(warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", warnings[0], want)
+			}
+		}
+	})
+
+	t.Run("load keeps the parent and surfaces the advisory", func(t *testing.T) {
+		load := useRemoteFixture(t, remoteRecordsYAML("ollama"), "", map[string]string{
+			"ollama": `profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      HOST: h
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`,
+		})
+		cfg := load(false)
+		if _, ok := cfg.Profiles["ollama/glm-models"]; !ok {
+			t.Fatalf("profiles = %v, want the parent to compose despite the missing child", cfg.ProfileNames())
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("warnings = %q, want exactly the missing-child advisory", cfg.Warnings)
+		}
+		for _, want := range []string{"ollama/claude", "enver pull ollama"} {
+			if !strings.Contains(cfg.Warnings[0], want) {
+				t.Fatalf("warning %q does not mention %q", cfg.Warnings[0], want)
+			}
+		}
+	})
+}
+
+// Prefix math across the no_prefix rule: a no-prefix child of a prefixed parent
+// lands under the parent prefix with no segment of its own, so a name the
+// parent already defines collides and the fold hands it to the child; a
+// prefixed child of a no-prefix parent composes from the bare child name.
+func TestComposeTreeNoPrefixChild(t *testing.T) {
+	dir := t.TempDir()
+	defer remotesDirIn(dir)()
+
+	storeContent(t, "ollama", `profiles:
+  shared:
+    env:
+      WHO: parent
+  base:
+    env:
+      B: parent-b
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+    no_prefix: true
+`)
+	storeContent(t, "ollama/claude", `profiles:
+  shared:
+    env:
+      WHO: child
+  extra:
+    env:
+      E: child-e
+`)
+
+	layers, warnings, err := ComposeTree("ollama", false, diskContentOf())
+	if err != nil {
+		t.Fatalf("ComposeTree err = %v", err)
+	}
+	if got, want := layerLabels(layers), []string{"remote:ollama", "remote:ollama/claude"}; !slices.Equal(got, want) {
+		t.Fatalf("layer labels = %v, want %v", got, want)
+	}
+	child := layers[1].Config
+	for _, name := range []string{"ollama/shared", "ollama/extra"} {
+		if _, ok := child.Profiles[name]; !ok {
+			t.Fatalf("child profiles = %v, want %s under the parent prefix", child.ProfileNames(), name)
+		}
+	}
+	if got := child.ProfileLayer["ollama/shared"]; got != "remote:ollama/claude" {
+		t.Fatalf("child layer = %q, want the record path despite the shared prefix", got)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly the duplicate-name warning", warnings)
+	}
+	for _, want := range []string{"ollama/claude", `"ollama/shared"`, "wins"} {
+		if !strings.Contains(warnings[0], want) {
+			t.Fatalf("warning %q does not mention %q", warnings[0], want)
+		}
+	}
+
+	cfg := foldLayers(layers)
+	if cfg.Profiles["ollama/shared"].Env["WHO"] != "child" {
+		t.Fatalf("shared WHO = %q, want the child's copy (the later layer wins)", cfg.Profiles["ollama/shared"].Env["WHO"])
+	}
+	if cfg.Profiles["ollama/base"].Env["B"] != "parent-b" {
+		t.Fatalf("base B = %q, want the parent's untouched copy", cfg.Profiles["ollama/base"].Env["B"])
+	}
+	if got := cfg.ProfileLayer["ollama/shared"]; got != "remote:ollama/claude" {
+		t.Fatalf("shared layer = %q, want the winning record", got)
+	}
+
+	t.Run("prefixed child of a no-prefix parent uses the bare child name", func(t *testing.T) {
+		storeContent(t, "alpha", `profiles:
+  bare:
+    env:
+      A: 1
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+		storeContent(t, "alpha/claude", `profiles:
+  default:
+    env:
+      M: 2
+`)
+		layers, warnings, err := ComposeTree("alpha", true, diskContentOf())
+		if err != nil {
+			t.Fatalf("ComposeTree err = %v", err)
+		}
+		if got, want := layerLabels(layers), []string{"remote:alpha", "remote:alpha/claude"}; !slices.Equal(got, want) {
+			t.Fatalf("layer labels = %v, want %v", got, want)
+		}
+		if _, ok := layers[0].Config.Profiles["bare"]; !ok {
+			t.Fatalf("parent profiles = %v, want the no-prefix root to stay bare", layers[0].Config.ProfileNames())
+		}
+		if _, ok := layers[1].Config.Profiles["claude/default"]; !ok {
+			t.Fatalf("child profiles = %v, want claude/default from the bare child name", layers[1].Config.ProfileNames())
+		}
+		if got := layers[1].Config.ProfileLayer["claude/default"]; got != "remote:alpha/claude" {
+			t.Fatalf("child layer = %q, want the record path, not the prefix", got)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %q, want none", warnings)
+		}
+	})
+}
+
+// Composition walks a contentOf, not the disk: a chain at the cap composes
+// whole, and one deeper fails loudly naming the chain and the cap.
+func TestComposeTreeDepthCap(t *testing.T) {
+	chainContent := func(depth int) map[string][]byte {
+		out := make(map[string][]byte, depth)
+		path := ""
+		for i := range depth {
+			if i > 0 {
+				path += "/"
+			}
+			path += "nest"
+			body := "profiles:\n  p:\n    env:\n      D: d\n"
+			if i < depth-1 {
+				body += "remotes:\n  nest:\n    url: https://example.com/nest.yaml\n"
+			}
+			out[path] = []byte(body)
+		}
+		return out
+	}
+	from := func(m map[string][]byte) func(string) ([]byte, bool) {
+		return func(path string) ([]byte, bool) {
+			data, ok := m[path]
+			return data, ok
+		}
+	}
+
+	layers, _, err := ComposeTree("nest", false, from(chainContent(MaxRemoteDepth)))
+	if err != nil {
+		t.Fatalf("ComposeTree err = %v, want a chain at the cap to compose", err)
+	}
+	if len(layers) != MaxRemoteDepth {
+		t.Fatalf("layers = %d, want one per record in the chain", len(layers))
+	}
+
+	deepest := strings.Repeat("nest/", MaxRemoteDepth) + "nest"
+	_, _, err = ComposeTree("nest", false, from(chainContent(MaxRemoteDepth+1)))
+	if err == nil {
+		t.Fatal("ComposeTree accepted a chain deeper than the cap")
+	}
+	for _, want := range []string{deepest, " -> ", "16"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want it to carry %q", err, want)
+		}
+	}
+}
+
+// A user patch written over one key of a nested remote profile wins that key
+// while every other key of the remote profile survives, and the parent chain
+// resolves through the patched projection.
+func TestLocalPatchOverNestedProfile(t *testing.T) {
+	load := useRemoteFixture(t, remoteRecordsYAML("ollama"), `profiles:
+  "ollama/claude/default":
+    env:
+      TOKEN: local-patch
+`, map[string]string{
+		"ollama": `profiles:
+  glm-models:
+    extends: claude/default
+    env:
+      HOST: remote-host
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`,
+		"ollama/claude": `profiles:
+  default:
+    env:
+      MODEL: remote-model
+      TOKEN: remote-token
+`,
+	})
+	cfg := load(true)
+	if len(cfg.Warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", cfg.Warnings)
+	}
+
+	r, err := cfg.ResolveProfile("ollama/claude/default")
+	if err != nil {
+		t.Fatalf("ResolveProfile err = %v", err)
+	}
+	if r.Env["TOKEN"] != "local-patch" {
+		t.Fatalf("TOKEN = %q, want the local patch to win its key", r.Env["TOKEN"])
+	}
+	if r.Env["MODEL"] != "remote-model" {
+		t.Fatalf("MODEL = %q, want the untouched remote key to survive", r.Env["MODEL"])
+	}
+	if got := r.Sources["TOKEN"].Layer; got != LayerLocal {
+		t.Fatalf("TOKEN source layer = %q, want %q", got, LayerLocal)
+	}
+	if got := r.Sources["MODEL"].Layer; got != "remote:ollama/claude" {
+		t.Fatalf("MODEL source layer = %q, want the nested record", got)
+	}
+
+	r, err = cfg.ResolveProfile("ollama/glm-models")
+	if err != nil {
+		t.Fatalf("ResolveProfile(err) = %v", err)
+	}
+	if r.Env["TOKEN"] != "local-patch" || r.Env["MODEL"] != "remote-model" || r.Env["HOST"] != "remote-host" {
+		t.Fatalf("env = %v, want the patch and the remote values through the chain", r.Env)
+	}
+}
+
+// A v0.11-era flat record keeps loading exactly as it did: composition changes
+// how subtrees are walked, nothing about a record with no declared children.
+func TestLoadMergedFlatRecordsUntouched(t *testing.T) {
+	load := useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{
+		"llm": `profiles:
+  base:
+    env:
+      K: v
+  child:
+    extends: base
+    env:
+      K2: v2
+`,
+	})
+	cfg := load(false)
+	if got, want := slices.Sorted(maps.Keys(cfg.Profiles)), []string{"llm/base", "llm/child"}; !slices.Equal(got, want) {
+		t.Fatalf("profiles = %v, want %v", got, want)
+	}
+	if got, want := cfg.Profiles["llm/child"].Extends, (Extends{"llm/base"}); !slices.Equal(got, want) {
+		t.Fatalf("llm/child extends = %v, want %v", got, want)
+	}
+	if got := cfg.ProfileLayer["llm/base"]; got != "remote:llm" {
+		t.Fatalf("llm/base layer = %q, want %q", got, "remote:llm")
+	}
+	if got := cfg.ExtendsOrigins["llm/child"]["llm/base"]; got != "remote:llm" {
+		t.Fatalf("extends origin = %q, want %q", got, "remote:llm")
+	}
+	if len(cfg.Warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", cfg.Warnings)
+	}
+	r, err := cfg.ResolveProfile("llm/child")
+	if err != nil {
+		t.Fatalf("ResolveProfile err = %v", err)
+	}
+	if got, want := r.Chain, []string{"llm/child", "llm/base"}; !slices.Equal(got, want) {
+		t.Fatalf("chain = %v, want %v", got, want)
+	}
+	if got := r.Sources["K"].Layer; got != "remote:llm" {
+		t.Fatalf("K source layer = %q, want %q", got, "remote:llm")
+	}
+}
+
 // Two bare-name remotes defining one profile name fold in sorted record order,
 // so the merged view is the same on every run and every machine. The winner is
 // never silent: the load reports the collision, since the losing record's

@@ -234,64 +234,145 @@ func RemoteLayer(name string) string {
 	return remoteLayerPrefix + name
 }
 
-// loadRemoteContent parses a record's stored content the way a pull landed it.
-// ok is false when there is nothing to project. A content path that cannot be
-// reached at all — no file, or a component that is not a directory — is no
-// content, silently: the divergence check already reports a stored file it
-// cannot inspect. A file that is present but unreadable is no content either,
-// but it must not vanish silently, so it comes back as an advisory. Content that
-// is present but unparseable or invalid is an error, exactly as it would be for
-// a user layer: resolving without the user's declared remote would hide the
-// breakage.
-func loadRemoteContent(name string) (content Config, ok bool, warning string, err error) {
-	path := RemoteContentPath(name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if _, statErr := os.Stat(path); statErr != nil {
-			return Config{}, false, "", nil
-		}
-		return Config{}, false, fmt.Sprintf("remote %q: stored content cannot be read (%v), so none of its profiles are loaded; fix its permissions or run \"enver pull %s\" to re-fetch it", name, err, name), nil
-	}
-	cfg, err := parseConfig(path, data)
-	if err != nil {
-		return Config{}, false, "", err
-	}
-	return cfg, true, "", nil
+// MaxRemoteDepth caps how many records one remote subtree may stack. Each level
+// is another file parsed and folded at every load, and composition walks a
+// contentOf that need not be finite, so the cap is what keeps a hostile or
+// hand-built tree from turning resolution unbounded. The pull side guards the
+// same cap when it walks a tree.
+const MaxRemoteDepth = 16
+
+// ComposeTree loads the stored subtree of one top-level record: the record's
+// own content first, then every child its content's remotes: section declares,
+// each recursively, so the layers fold parent-first with siblings in sorted
+// record order. contentOf supplies a record's stored bytes and reports absence,
+// which keeps composition independent of where the content lives. See
+// composeTree for the full composition contract.
+func ComposeTree(root string, rootNoPrefix bool, contentOf func(path string) ([]byte, bool)) ([]Layer, []string, error) {
+	return composeTree(root, recordPrefix(root, rootNoPrefix), contentOf, map[string]string{}, nil)
 }
 
-// RemoteLayers returns the stored content of every record that has some, one
-// layer per record, in fold order: sorted by record name, so a later record
-// folds over an earlier one and wins a profile both declare. Each content file is
-// projected through Project into its record's namespace and labelled
-// remote:<name>, so every entry carries the remote that supplied it, and a record
-// with no content contributes no layer. The warnings cover content that is on
-// disk but unreadable, which resolution had to skip, and a bare-name collision
-// between two no-prefix records, where the fold makes one record's version of a
-// profile unreachable.
-func RemoteLayers(records map[string]RemoteRecord) ([]Layer, []string, error) {
-	var layers []Layer
-	var warnings []string
-	bareOwner := map[string]string{}
-	for _, name := range slices.Sorted(maps.Keys(records)) {
-		content, ok, warning, err := loadRemoteContent(name)
+// composeTree is ComposeTree with the fold state threaded through the
+// recursion: prefix is the namespace this record's profiles land under, owner
+// maps each loaded profile name to the record that currently owns it, and chain
+// is the record path from the subtree root, for the depth cap and the re-pull
+// hint. A record with no content contributes nothing — silently for the root,
+// whose absence the divergence check already reports, and as an advisory for a
+// declared child, whose parent promised content that is not there. Content that
+// is present but unparseable or invalid is an error, exactly as it would be for
+// a user layer: resolving without the user's declared remote would hide the
+// breakage. A duplicate profile name warns, naming the record that wins it.
+func composeTree(path, prefix string, contentOf func(path string) ([]byte, bool), owner map[string]string, chain []string) ([]Layer, []string, error) {
+	chain = append(slices.Clone(chain), path)
+	if len(chain) > MaxRemoteDepth {
+		return nil, nil, fmt.Errorf("remote %q: nested remotes stack deeper than the %d record cap: %s", path, MaxRemoteDepth, strings.Join(chain, " -> "))
+	}
+	data, ok := contentOf(path)
+	if !ok {
+		if len(chain) == 1 {
+			return nil, nil, nil
+		}
+		return nil, []string{fmt.Sprintf("remote %q: declared by remote %q but no stored content was found for it, so its profiles are not loaded; run \"enver pull %s\" to fetch the subtree", path, chain[len(chain)-2], chain[0])}, nil
+	}
+	content, err := parseConfig(path, data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("remote %q: %w", path, err)
+	}
+	projected, err := Project(content, prefix, prefix == "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("remote %q: %w", path, err)
+	}
+	restampLayer(path, projected)
+	warnings := duplicateNameWarnings(path, projected, owner)
+	layers := []Layer{{Label: RemoteLayer(path), Config: projected}}
+	for _, name := range slices.Sorted(maps.Keys(content.Remotes)) {
+		childPrefix := prefix
+		if !content.Remotes[name].NoPrefix {
+			childPrefix = name
+			if prefix != "" {
+				childPrefix = prefix + "/" + name
+			}
+		}
+		sub, subWarnings, err := composeTree(path+"/"+name, childPrefix, contentOf, owner, chain)
 		if err != nil {
 			return nil, nil, err
 		}
-		if warning != "" {
-			warnings = append(warnings, warning)
+		layers = append(layers, sub...)
+		warnings = append(warnings, subWarnings...)
+	}
+	return layers, warnings, nil
+}
+
+// recordPrefix is the namespace a record's own profiles land under: its path,
+// or nothing under a no-prefix record.
+func recordPrefix(path string, noPrefix bool) string {
+	if noPrefix {
+		return ""
+	}
+	return path
+}
+
+// restampLayer relabels a projection after its record path. Project labels by
+// the name it was handed, and a composed prefix can be shorter than the record
+// — a no-prefix child under its parent, a no-prefix root — while provenance
+// must still name the record the content actually came from.
+func restampLayer(path string, projected Config) {
+	for pname := range projected.ProfileLayer {
+		projected.ProfileLayer[pname] = RemoteLayer(path)
+	}
+	for _, targets := range projected.ExtendsOrigins {
+		for target := range targets {
+			targets[target] = RemoteLayer(path)
 		}
-		if !ok {
-			continue
+	}
+}
+
+// duplicateNameWarnings reports the profile names a record lands on top of in
+// the fold, recording each name's owner as the fold passes. The fold runs
+// parent-first then in sorted record order, so the later record wins; saying so
+// is the only way a user learns that the earlier record's version of that
+// profile is now unreachable.
+func duplicateNameWarnings(path string, projected Config, owner map[string]string) []string {
+	var out []string
+	for _, pname := range projected.ProfileNames() {
+		if prev, taken := owner[pname]; taken {
+			out = append(out, fmt.Sprintf("remote %q: its profile %q collides with the same profile name already loaded from remote %q; the fold runs parent-first then in sorted record order, so %q wins", path, pname, prev, path))
 		}
-		rec := records[name]
-		projected, err := Project(content, name, rec.NoPrefix)
+		owner[pname] = path
+	}
+	return out
+}
+
+// RemoteLayers returns the stored content of every record that has some,
+// composed: each top-level record contributes its whole subtree via ComposeTree,
+// records in sorted order, so a later record wins a profile an earlier one also
+// declares. Every layer is labelled remote:<record path>, so every entry carries
+// the record that supplied it, and a record with no content contributes no
+// layer. The warnings cover content that is on disk but unreadable, which
+// resolution had to skip, children declared but never pulled, and duplicate
+// profile names, where the fold makes one record's version of a profile
+// unreachable.
+func RemoteLayers(records map[string]RemoteRecord) ([]Layer, []string, error) {
+	var layers []Layer
+	var warnings []string
+	owner := map[string]string{}
+	read := func(path string) ([]byte, bool) {
+		data, err := os.ReadFile(RemoteContentPath(path))
 		if err != nil {
-			return nil, nil, fmt.Errorf("remote %q: %w", name, err)
+			if _, statErr := os.Stat(RemoteContentPath(path)); statErr != nil {
+				return nil, false
+			}
+			warnings = append(warnings, fmt.Sprintf("remote %q: stored content cannot be read (%v), so none of its profiles are loaded; fix its permissions or run \"enver pull %s\" to re-fetch it", path, err, path))
+			return nil, false
 		}
-		if rec.NoPrefix {
-			warnings = append(warnings, bareNameWarnings(name, projected, bareOwner)...)
+		return data, true
+	}
+	for _, name := range slices.Sorted(maps.Keys(records)) {
+		sub, subWarnings, err := composeTree(name, recordPrefix(name, records[name].NoPrefix), read, owner, nil)
+		if err != nil {
+			return nil, nil, err
 		}
-		layers = append(layers, Layer{Label: RemoteLayer(name), Config: projected})
+		layers = append(layers, sub...)
+		warnings = append(warnings, subWarnings...)
 	}
 	return layers, warnings, nil
 }
@@ -313,21 +394,6 @@ func remoteBase(records map[string]RemoteRecord) (Config, string, []string, erro
 		base = Merge(base, layers[i].Config, layers[i-1].Label, layers[i].Label)
 	}
 	return base, layers[len(layers)-1].Label, warnings, nil
-}
-
-// bareNameWarnings reports the profiles a no-prefix record lands on top of, and
-// records it as their new owner. The fold runs in sorted record order, so the
-// later record wins; saying so is the only way a user learns that the earlier
-// record's version of that profile is now unreachable.
-func bareNameWarnings(name string, projected Config, bareOwner map[string]string) []string {
-	var out []string
-	for _, pname := range projected.ProfileNames() {
-		if owner, taken := bareOwner[pname]; taken {
-			out = append(out, fmt.Sprintf("remote %q: stored without a prefix, so its profile %q collides with the same bare name from remote %q; the fold runs in sorted record order, so %q wins", name, pname, owner, name))
-		}
-		bareOwner[pname] = name
-	}
-	return out
 }
 
 // orphanWarnings reports stored content no merged record declares: the file
