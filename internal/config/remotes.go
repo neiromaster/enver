@@ -284,7 +284,10 @@ func RemoteLayers(records map[string]RemoteRecord) ([]Layer, []string, error) {
 			continue
 		}
 		rec := records[name]
-		projected := Project(content, name, rec.NoPrefix)
+		projected, err := Project(content, name, rec.NoPrefix)
+		if err != nil {
+			return nil, nil, fmt.Errorf("remote %q: %w", name, err)
+		}
 		if rec.NoPrefix {
 			warnings = append(warnings, bareNameWarnings(name, projected, bareOwner)...)
 		}
@@ -355,13 +358,33 @@ func orphanWarnings(records map[string]RemoteRecord) []string {
 	return out
 }
 
+// InNamespace reports whether target resolves inside the namespace a fetched
+// remote file defines: a bare name one of the file's own profiles defines, or a
+// name whose first /-separated segment names a record in the file's own
+// remotes: section. Everything else — a user profile, another record's
+// projection, the record's own pulled name — is out of namespace. The gate
+// refuses such a target and the projection errors on it, so the rule is stated
+// once here and both sides enforce the same set. The gate passes the raw file
+// names; the projection passes its control-stripped ones, since stripping is
+// part of how it reads what the file declares.
+func InNamespace(target string, defined map[string]bool, children map[string]RemoteRecord) bool {
+	name, _, hasSlash := strings.Cut(target, "/")
+	if !hasSlash {
+		return defined[target]
+	}
+	_, ok := children[name]
+	return ok
+}
+
 // Project rewrites a remote's content into the namespace its record prefixes:
-// every profile lands under name+"/", and an extends target the same file
-// defines moves with it, while a target the file does not define keeps
-// resolving against the user's namespace. A no-prefix record names the empty
-// prefix instead: its profiles keep their bare upstream names and its own
-// extends targets need no rewriting, which is the deliberate blending the mode
-// opts into. The two top-level sections a remote author must not own are
+// every profile lands under name+"/", and every extends target inside the
+// file's own namespace moves with it — a bare target the file defines, or a
+// target under a record the file's own remotes: section declares. A target
+// outside that namespace is an error: the file resolves only what it declares,
+// never whatever the pulling user happens to have. A no-prefix record names the
+// empty prefix instead: its profiles keep their bare upstream names, so
+// in-namespace targets already carry their projected form and pass through
+// unchanged. The two top-level sections a remote author must not own are
 // dropped: default, because which profile is default is the user's decision, and
 // remotes, because a remote can never register a fetch. Control characters are
 // stripped from every string the content supplies — profile names, extends
@@ -376,7 +399,7 @@ func orphanWarnings(records map[string]RemoteRecord) []string {
 // profile is stamped with the remote:<name> layer. Only what the file declares is
 // projected — merge artifacts (Origins, UnsetOrigins, Carried) are not carried —
 // and the input is left untouched.
-func Project(c Config, name string, noPrefix bool) Config {
+func Project(c Config, name string, noPrefix bool) (Config, error) {
 	prefix := ""
 	if !noPrefix {
 		prefix = name + "/"
@@ -394,8 +417,12 @@ func Project(c Config, name string, noPrefix bool) Config {
 	for _, pname := range slices.Sorted(maps.Keys(c.Profiles)) {
 		p := c.Profiles[pname]
 		projected := prefix + stripControls(pname)
+		ext, err := projectExtends(p.Extends, defined, c.Remotes, prefix)
+		if err != nil {
+			return Config{}, fmt.Errorf("profile %s: %w", projected, err)
+		}
 		out.Profiles[projected] = Profile{
-			Extends:  projectExtends(p.Extends, defined, prefix),
+			Extends:  ext,
 			Unset:    Unsets(stripControlsAll(p.Unset)),
 			Env:      projectEnv(p.Env),
 			Comments: projectComments(p.Comments),
@@ -409,26 +436,26 @@ func Project(c Config, name string, noPrefix bool) Config {
 			out.extendsOrigin(projected, target, RemoteLayer(name))
 		}
 	}
-	return out
+	return out, nil
 }
 
-// projectExtends rewrites the targets the file itself defines to their prefixed
-// form. A target the file does not define passes through, binding whatever the
-// merged namespace defines under that name — a user profile or another remote's
-// projection, which is how cross-remote and user-provided parents compose.
-func projectExtends(list Extends, defined map[string]bool, prefix string) Extends {
+// projectExtends rewrites every target the file's namespace defines to its
+// prefixed form and refuses the rest: a remote file resolves its own profiles
+// and the records its own remotes: section declares, so a target the user or
+// another record owns has no meaning inside this file.
+func projectExtends(list Extends, defined map[string]bool, children map[string]RemoteRecord, prefix string) (Extends, error) {
 	if len(list) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(Extends, 0, len(list))
 	for _, target := range list {
 		target = stripControls(target)
-		if defined[target] {
-			target = prefix + target
+		if !InNamespace(target, defined, children) {
+			return nil, fmt.Errorf("extends %q, which is outside this file: a remote file resolves only its own profiles and the records in its own remotes: section", target)
 		}
-		out = append(out, target)
+		out = append(out, prefix+target)
 	}
-	return out
+	return out, nil
 }
 
 // stripControlsAll cleans a name list, keeping nil for an empty list so a

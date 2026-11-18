@@ -972,9 +972,11 @@ func TestPullRejectsUnusableRecordNames(t *testing.T) {
 	})
 }
 
-// The gate classifies a passthrough target through the merged view, so a remote
-// that extends a profile belonging to another remote is told exactly that.
-func TestPullGateSeesOtherRemotes(t *testing.T) {
+// The gate scopes targets to the fetched file's own namespace, so a remote
+// extending another record's projection is refused even when that record is
+// declared and pulled in the user's config: a file that wants a foreign base
+// must declare it in its own remotes section.
+func TestPullRefusesOtherRecordTarget(t *testing.T) {
 	f := newPullFixture(t)
 	f.write(t, f.globalPath, "remotes:\n  other:\n    url: https://example.com/other.yaml\n")
 	if err := config.WriteRemoteContent("other", []byte("profiles:\n  base:\n    env:\n      HOST: remote\n")); err != nil {
@@ -986,18 +988,16 @@ func TestPullGateSeesOtherRemotes(t *testing.T) {
 	opts := f.options(t, true, func(string, string) ([]byte, string, error) {
 		return []byte("profiles:\n  svc:\n    extends: other/base\n    env:\n      K: v\n"), "", nil
 	})
-	if layer := opts.Merged.ProfileLayer["other/base"]; layer != config.RemoteLayer("other") {
-		t.Fatalf("ProfileLayer[other/base] = %q, want the other remote's layer; the gate can only classify what the merged view shows", layer)
-	}
 
-	summary, err := Pull("https://example.com/svc.yaml", "svc", opts)
-	if err != nil {
-		t.Fatalf("Pull: %v", err)
+	_, err := Pull("https://example.com/svc.yaml", "svc", opts)
+	if err == nil || !strings.Contains(err.Error(), "outside this file") || !strings.Contains(err.Error(), `"other/base"`) {
+		t.Fatalf("err = %v, want a refusal naming the out-of-namespace target", err)
 	}
-	for _, want := range []string{`"other/base"`, `it binds to another remote, "other"`} {
-		if !strings.Contains(summary, want) {
-			t.Errorf("summary misses %q:\n%s", want, summary)
-		}
+	if _, ok := readOrMissing(t, config.RemoteContentPath("svc")); ok {
+		t.Fatal("a refused pull must not store content")
+	}
+	if _, ok := f.remotes(t, f.globalPath)["svc"]; ok {
+		t.Fatal("a refused pull must not register the record")
 	}
 }
 
@@ -1038,23 +1038,6 @@ func TestPullReplacesStoredContentWhole(t *testing.T) {
 	}
 	if _, ok := merged.Profiles["llm/stale"]; ok {
 		t.Fatal("the merged view still projects a profile the re-pull replaced")
-	}
-}
-
-func TestPullSummaryListsPassthroughTargets(t *testing.T) {
-	f := newPullFixture(t)
-	f.write(t, f.localPath, "profiles:\n  provider/base:\n    env:\n      HOST: local\n")
-	opts := f.options(t, true, func(string, string) ([]byte, string, error) {
-		return []byte("profiles:\n  svc:\n    extends: provider/base\n    env:\n      K: v\n"), "", nil
-	})
-	summary, err := Pull("https://example.com/svc.yaml", "svc", opts)
-	if err != nil {
-		t.Fatalf("Pull: %v", err)
-	}
-	for _, want := range []string{`"provider/base"`, "does not define", "binds to your local profile"} {
-		if !strings.Contains(summary, want) {
-			t.Errorf("summary misses the passthrough note %q:\n%s", want, summary)
-		}
 	}
 }
 

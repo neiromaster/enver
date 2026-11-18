@@ -117,11 +117,11 @@ func Validate(cfg Config) []Issue {
 // ValidateGlobal audits the global config over the remote layers it sits on
 // (File="global"), catching a global profile that extends a name only the local
 // file provides. Remote content is a lower layer, not a project-local one, so a
-// global profile extending a remote-provided profile is exactly what the
-// passthrough rule enables and must not read as dangling. Only the profiles the
-// global file itself declares are attributed to this pass; remote content's own
-// findings belong to the merged pass. A load or parse failure is returned as an
-// error, not reported as a valid file.
+// global profile extending a remote-provided profile resolves through those
+// layers and must not read as dangling. Only the profiles the global file itself
+// declares are attributed to this pass; remote content's own findings belong to
+// the merged pass. A load or parse failure is returned as an error, not reported
+// as a valid file.
 func ValidateGlobal(globalPath string) ([]Issue, error) {
 	global, err := load(GlobalPath(globalPath))
 	if err != nil {
@@ -142,44 +142,13 @@ func ValidateGlobal(globalPath string) ([]Issue, error) {
 	return issues, nil
 }
 
-// danglingIssue grades one extends parent no profile defines by the layer whose
-// copy declared the reference. The passthrough rule deliberately lets a remote
-// name a parent the user or another remote owns, which may simply not exist
-// yet: that is the remote's gap, warning-grade, and the hint names the remote
-// expecting it. The user's own declarations stay errors — including one they
-// added to a profile a remote otherwise owns, which is why the grading reads
-// the target's authorship rather than the profile's current owner. Either way a
-// target whose prefix names an unpulled record carries the pull that supplies
-// it.
+// danglingIssue grades one extends parent no profile defines as an error and
+// carries the pull that would supply it when the parent's prefix is a declared
+// but unpulled record. Strict scoping leaves no authorship to grade: a remote
+// file cannot name a parent outside its own namespace, so a reference no
+// profile defines is a concrete breakage whoever declared it.
 func (c Config) danglingIssue(profile, parent string) Issue {
-	is := Issue{Profile: profile, Kind: KindDanglingExtends, Severity: SeverityError, Target: parent}
-	layer := c.extendsLayer(profile, parent)
-	if !IsRemoteLayer(layer) {
-		is.Hint = c.pullHint(parent)
-		return is
-	}
-	remote, _ := RemoteName(layer)
-	is.Severity = SeverityWarning
-	is.Hint = fmt.Sprintf("declared by remote %q, which expects the parent from your own profiles or another remote", remote)
-	if pull := c.pullHint(parent); pull != "" {
-		is.Hint = fmt.Sprintf("declared by remote %q; %s", remote, pull)
-	}
-	return is
-}
-
-// extendsLayer reports the layer whose copy of profile declared the extends
-// target. A remote's reference stays the remote's after a user patch restamps
-// the profile name, because the patch's copy restamps only the targets it names
-// itself. Content with no recorded authorship — a config no fold built, the
-// isolated global file — falls back to the profile's declaring layer.
-func (c Config) extendsLayer(profile, target string) string {
-	if layer, ok := c.ExtendsOrigins[profile][target]; ok {
-		return layer
-	}
-	if layer, ok := c.ProfileLayer[profile]; ok {
-		return layer
-	}
-	return LayerGlobal
+	return Issue{Profile: profile, Kind: KindDanglingExtends, Severity: SeverityError, Target: parent, Hint: c.pullHint(parent)}
 }
 
 // pullHint names the pull that would supply parent when its prefix is a record
@@ -198,49 +167,4 @@ func (c Config) pullHint(parent string) string {
 		return ""
 	}
 	return fmt.Sprintf("remote %q is declared but its content is not pulled, so run \"enver pull %s\" to fetch it", name, name)
-}
-
-// RemoteDanglingIssues returns the dangling-extends findings reachable from name
-// that a remote-authored reference causes. A non-empty result means name cannot
-// resolve only because a remote expects a parent no layer defines yet, which a
-// pull or a user profile can still supply. It is empty when name resolves, when
-// its chain loops, and when the user's own references break it: none of those is
-// a remote's gap, so a caller must keep failing on them.
-func (c Config) RemoteDanglingIssues(name string) []Issue {
-	visiting := map[string]bool{}
-	done := map[string]bool{}
-	var issues []Issue
-	var walk func(string) bool
-	walk = func(current string) bool {
-		if done[current] {
-			return true
-		}
-		if visiting[current] {
-			return false
-		}
-		p, ok := c.Profiles[current]
-		if !ok {
-			return false
-		}
-		visiting[current] = true
-		for _, parent := range p.Extends {
-			if _, defined := c.Profiles[parent]; !defined {
-				if !IsRemoteLayer(c.extendsLayer(current, parent)) {
-					return false
-				}
-				issues = append(issues, c.danglingIssue(current, parent))
-				continue
-			}
-			if !walk(parent) {
-				return false
-			}
-		}
-		delete(visiting, current)
-		done[current] = true
-		return true
-	}
-	if !walk(name) {
-		return nil
-	}
-	return issues
 }
