@@ -536,6 +536,18 @@ type pullWalk struct {
 	// profile names only, but the fold wants a label for every merge.
 	freshLabel string
 	fetched    map[string][]byte
+	scopes     map[string]pullScope
+}
+
+// pullScope is what the tree check needs from one fetched file besides its
+// bytes: the namespace its extends targets were projected into, and the
+// records its remotes: section declares. A dangling target under a declared
+// record is a different fault from one the file never named — the record
+// exists, and the miss is where its profiles land — so the refusal must not
+// tell the author to declare what is already declared.
+type pullScope struct {
+	prefix   string
+	declared map[string]config.RemoteRecord
 }
 
 // pullTree fetches and gates one record's content together with every record
@@ -564,6 +576,7 @@ func pullTree(name string, rec config.RemoteRecord, opts PullOptions) (pullResul
 		base:       gateViewSubtree(opts.Merged, name),
 		freshLabel: config.LayerGlobal,
 		fetched:    map[string][]byte{},
+		scopes:     map[string]pullScope{},
 	}
 	if w.fetch == nil {
 		w.fetch = remote.Fetch
@@ -646,6 +659,7 @@ func (w *pullWalk) record(path string, rec config.RemoteRecord, prefix string, c
 	w.fresh = config.Merge(w.fresh, projected, w.freshLabel, config.RemoteLayer(path))
 	w.freshLabel = config.RemoteLayer(path)
 	w.fetched[path] = content
+	w.scopes[path] = pullScope{prefix: prefix, declared: file.Remotes}
 	out := &pulledRecord{
 		path:     path,
 		url:      url,
@@ -696,11 +710,34 @@ func (w *pullWalk) checkTree(root string, noPrefix bool) ([]string, error) {
 				if defined[target] {
 					continue
 				}
-				return nil, fmt.Errorf("remote %q: profile %q extends %q, which no profile in the pulled subtree defines; a remote file resolves only its own profiles and the records in its own remotes: section", record, name, target)
+				return nil, danglingError(record, name, target, w.scopes[record])
 			}
 		}
 	}
 	return warnings, nil
+}
+
+// danglingError refuses a projected target the composed subtree does not
+// define. The trailing clause separates the two faults a miss can be: under a
+// record the file never declared, the target is outside its namespace, but
+// under one it did declare the record exists and the miss is where its
+// profiles land — a no-prefix declaration moves them out from under the
+// record's own name, and a prefixed one simply lacks the profile.
+func danglingError(record, name, target string, scope pullScope) error {
+	miss := fmt.Sprintf("remote %q: profile %q extends %q, which no profile in the pulled subtree defines", record, name, target)
+	raw := target
+	if scope.prefix != "" {
+		raw = strings.TrimPrefix(target, scope.prefix+"/")
+	}
+	head, _, _ := strings.Cut(raw, "/")
+	child, ok := scope.declared[head]
+	if !ok {
+		return fmt.Errorf("%s; a remote file resolves only its own profiles and the records in its own remotes: section", miss)
+	}
+	if child.NoPrefix {
+		return fmt.Errorf("%s; the file declares record %q without a prefix, and a no-prefix record contributes no name segment, so its profiles never sit under the record's own name", miss, head)
+	}
+	return fmt.Errorf("%s; the file declares record %q, but no profile of it lands at that name", miss, head)
 }
 
 // commitPulled stores the fetched tree, parent first, content before sidecar

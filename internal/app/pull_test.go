@@ -1550,6 +1550,40 @@ func TestPullTreeCheckRefusesDangling(t *testing.T) {
 	}
 }
 
+// A target whose first segment names a record the file declares is not missing
+// a declaration. Here the declared child is no-prefix, so it contributes no
+// name segment and the name under it misses while the record exists — the
+// refusal must not advise declaring what the file already declares.
+func TestPullTreeCheckDanglingUnderDeclaredNoPrefixChild(t *testing.T) {
+	f := newPullFixture(t)
+	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
+		switch url {
+		case "https://example.com/ollama.yaml":
+			return []byte("profiles:\n  glm:\n    extends: [claude/default]\n    env:\n      MODEL: glm\nremotes:\n  claude:\n    url: https://example.com/claude.yaml\n    no_prefix: true\n"), "", nil
+		case "https://example.com/claude.yaml":
+			return []byte("profiles:\n  default:\n    env:\n      K: v\n"), "", nil
+		}
+		t.Errorf("unexpected fetch of %s", url)
+		return nil, "", nil
+	})
+
+	_, err := Pull("https://example.com/ollama.yaml", "ollama", opts)
+	if err == nil {
+		t.Fatal("a dangling subtree target must fail the pull")
+	}
+	for _, want := range []string{`remote "ollama"`, `"ollama/claude/default"`, "no profile in the pulled subtree defines"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want it to carry %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "resolves only its own profiles") {
+		t.Fatalf("err = %v, want no advice to declare a record the file already declares", err)
+	}
+	if entries := remoteFiles(t, f.remotesDir); len(entries) != 0 {
+		t.Fatalf("a refused tree check stored %q", entries)
+	}
+}
+
 func TestPullNestedNameNotCallable(t *testing.T) {
 	f := newPullFixture(t)
 	opts := f.options(t, true, func(url, ref string) ([]byte, string, error) {
