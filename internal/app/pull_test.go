@@ -838,6 +838,55 @@ func TestPullRemoveScopesContent(t *testing.T) {
 	})
 }
 
+// A path-shaped name to --rm is a nested record, and a nested record has no
+// declaration of its own to remove: the config sections hold top-level records
+// only. The error says so and names the top-level record whose pull owns the
+// nested one, instead of misreading the path as a malformed single name.
+func TestPullRemoveGuidesNestedPaths(t *testing.T) {
+	f := newPullFixture(t)
+	f.write(t, f.globalPath, "remotes:\n  ollama:\n    url: https://example.com/ollama.yaml\n")
+	beforeConfig, _ := readOrMissing(t, f.globalPath)
+	opts := f.options(t, true, nil)
+
+	for _, tc := range []struct {
+		name  string
+		given string
+	}{
+		{"direct child", "ollama/claude"},
+		{"deeper descendant", "ollama/claude/gpt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := PullRemove(tc.given, opts)
+			if err == nil {
+				t.Fatalf("removing %q must fail", tc.given)
+			}
+			for _, want := range []string{
+				"not a top-level record",
+				"nested records are removed with the record that declares them",
+				"enver pull --rm ollama",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to say %q", err, want)
+				}
+			}
+		})
+	}
+
+	t.Run("single name outside the rule keeps the name error", func(t *testing.T) {
+		_, err := PullRemove("bad name", opts)
+		if err == nil || !strings.Contains(err.Error(), "not a valid record name") {
+			t.Fatalf("err = %v, want the record-name rule", err)
+		}
+	})
+
+	if after, _ := readOrMissing(t, f.globalPath); string(after) != string(beforeConfig) {
+		t.Errorf("a refused removal rewrote the config:\n%s", after)
+	}
+	if _, ok := f.remotes(t, f.globalPath)["ollama"]; !ok {
+		t.Fatal("a refused removal must not touch the declaring record")
+	}
+}
+
 func TestPullUpdateHonorsRecordNoPrefix(t *testing.T) {
 	f := newPullFixture(t)
 	f.write(t, f.globalPath, "remotes:\n  team:\n    url: https://example.com/base.yaml\n    no_prefix: true\n")
