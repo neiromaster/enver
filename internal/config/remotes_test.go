@@ -536,16 +536,20 @@ func loadProjectFixture(t *testing.T, body string) Config {
 }
 
 // Projection is the whole namespace story for remote content: profiles move
-// under the record's prefix, same-file extends targets move with them while
-// targets the file does not define keep binding the user's namespace, and the
-// two sections a remote author must never own — default and remotes — are
+// under the record's prefix, and every extends target inside the file's own
+// namespace — the file's own profiles and the records its own remotes: section
+// declares — moves with them. A target outside that namespace is an error: the
+// file may not bind the pulling user's profiles or another record's projection.
+// The two sections a remote author must never own — default and remotes — are
 // dropped.
 func TestProject(t *testing.T) {
-	t.Run("rename, rewrite, passthrough and drops", func(t *testing.T) {
+	t.Run("rename, rewrite and drops", func(t *testing.T) {
 		cfg := loadProjectFixture(t, `default: ollama
 remotes:
   injected:
     url: https://attacker.example/evil.yaml
+  claude:
+    url: https://example.com/claude.yaml
 profiles:
   ollama:
     unset: [LEGACY_HOST]
@@ -556,23 +560,25 @@ profiles:
     extends: ollama
     env:
       MODEL: qwen2.5-coder:32b
-  mine:
-    extends: [provider/base, team/other]
+  opus:
+    extends: claude/default
     env:
-      OWN: x
+      ROLE: opus
 `)
-		proj := Project(cfg, "llm", false)
+		proj, err := Project(cfg, "llm", false)
+		if err != nil {
+			t.Fatalf("Project err = %v, want a projection", err)
+		}
 
-		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"llm/mine", "llm/ollama", "llm/qwen"}; !slices.Equal(got, want) {
+		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"llm/ollama", "llm/opus", "llm/qwen"}; !slices.Equal(got, want) {
 			t.Fatalf("projected profiles = %v, want %v", got, want)
 		}
 		wantExtends := Extends{"llm/ollama"}
 		if got := proj.Profiles["llm/qwen"].Extends; !slices.Equal(got, wantExtends) {
 			t.Fatalf("llm/qwen extends = %v, want %v (same-file target rewritten)", got, wantExtends)
 		}
-		wantPassthrough := Extends{"provider/base", "team/other"}
-		if got := proj.Profiles["llm/mine"].Extends; !slices.Equal(got, wantPassthrough) {
-			t.Fatalf("llm/mine extends = %v, want %v (foreign targets unchanged)", got, wantPassthrough)
+		if got, want := proj.Profiles["llm/opus"].Extends, (Extends{"llm/claude/default"}); !slices.Equal(got, want) {
+			t.Fatalf("llm/opus extends = %v, want %v (declared child rewritten)", got, want)
 		}
 
 		ollama := proj.Profiles["llm/ollama"]
@@ -609,18 +615,46 @@ profiles:
 		}
 	})
 
+	t.Run("out-of-namespace targets are an error", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			target string
+		}{
+			{"a user profile", "provider"},
+			{"another record's projection", "other/base"},
+			{"the pulled record's own name", "llm/base"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg := Config{Profiles: map[string]Profile{
+					"child": {Extends: Extends{tc.target}, Env: map[string]string{"J": "w"}},
+				}}
+				proj, err := Project(cfg, "llam", false)
+				if err == nil || !strings.Contains(err.Error(), "outside this file") || !strings.Contains(err.Error(), tc.target) {
+					t.Fatalf("Project = %+v, %v; want an error naming the out-of-namespace target %q", proj, err, tc.target)
+				}
+			})
+		}
+	})
+
 	t.Run("control characters", func(t *testing.T) {
-		content := Config{Profiles: map[string]Profile{
-			"ol\x1blama\n": {
-				Extends:  Extends{"ol\x1blama2\r\n", "provider\x07/base\n"},
-				Unset:    Unsets{"LEG\x07ACY"},
-				Env:      map[string]string{"HOST\x1b": "http://x\x07y", "TLS\x1b": "line1\nline2"},
-				Comments: map[string]string{"HOST\x1b": "hi\x1b[31mred\x07\n# second line"},
-				Marked:   map[string]bool{"HOST\x1b": true},
+		content := Config{
+			Remotes: map[string]RemoteRecord{"claude": {URL: "https://example.com/claude.yaml"}},
+			Profiles: map[string]Profile{
+				"ol\x1blama\n": {
+					Extends:  Extends{"ol\x1blama2\r\n", "cl\x01aude/def\rault"},
+					Unset:    Unsets{"LEG\x07ACY"},
+					Env:      map[string]string{"HOST\x1b": "http://x\x07y", "TLS\x1b": "line1\nline2"},
+					Comments: map[string]string{"HOST\x1b": "hi\x1b[31mred\x07\n# second line"},
+					Marked:   map[string]bool{"HOST\x1b": true},
+				},
+				"ol\x1blama2": {Env: map[string]string{"K": "v"}},
 			},
-			"ol\x1blama2": {Env: map[string]string{"K": "v"}},
-		}}
-		proj := Project(content, "llm", false)
+		}
+		proj, err := Project(content, "llm", false)
+		if err != nil {
+			t.Fatalf("Project err = %v, want a projection", err)
+		}
 
 		p, ok := proj.Profiles["llm/ollama"]
 		if !ok {
@@ -628,7 +662,7 @@ profiles:
 		}
 		// A name never carries a line break: it reaches list rendering,
 		// completions and the TUI, where an embedded newline is line injection.
-		wantExtends := Extends{"llm/ollama2", "provider/base"}
+		wantExtends := Extends{"llm/ollama2", "llm/claude/default"}
 		if !slices.Equal(p.Extends, wantExtends) {
 			t.Fatalf("extends = %v, want %v", p.Extends, wantExtends)
 		}
@@ -652,6 +686,9 @@ profiles:
 
 	t.Run("no prefix keeps upstream names bare", func(t *testing.T) {
 		cfg := loadProjectFixture(t, `default: ollama
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
 profiles:
   ollama:
     env:
@@ -660,21 +697,24 @@ profiles:
     extends: ollama
     env:
       MODEL: qwen2.5-coder:32b
-  mine:
-    extends: [provider/base, team/other]
+  opus:
+    extends: claude/default
     env:
-      OWN: x
+      ROLE: opus
 `)
-		proj := Project(cfg, "llm", true)
+		proj, err := Project(cfg, "llm", true)
+		if err != nil {
+			t.Fatalf("Project err = %v, want a projection", err)
+		}
 
-		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"mine", "ollama", "qwen"}; !slices.Equal(got, want) {
+		if got, want := slices.Sorted(maps.Keys(proj.Profiles)), []string{"ollama", "opus", "qwen"}; !slices.Equal(got, want) {
 			t.Fatalf("projected profiles = %v, want bare upstream names %v", got, want)
 		}
 		if got, want := proj.Profiles["qwen"].Extends, (Extends{"ollama"}); !slices.Equal(got, want) {
-			t.Fatalf("qwen extends = %v, want %v", got, want)
+			t.Fatalf("qwen extends = %v, want %v (bare target passes through)", got, want)
 		}
-		if got, want := proj.Profiles["mine"].Extends, (Extends{"provider/base", "team/other"}); !slices.Equal(got, want) {
-			t.Fatalf("mine extends = %v, want %v", got, want)
+		if got, want := proj.Profiles["opus"].Extends, (Extends{"claude/default"}); !slices.Equal(got, want) {
+			t.Fatalf("opus extends = %v, want %v (child-prefixed target passes through)", got, want)
 		}
 		// Provenance is the record either way: a bare-name pull still came from
 		// remote llm, and masking/fence rules key off the layer.
@@ -695,7 +735,10 @@ profiles:
 			"shared":     {Env: map[string]string{"K": "honest"}},
 		}}
 		for range 16 {
-			proj := Project(content, "llm", false)
+			proj, err := Project(content, "llm", false)
+			if err != nil {
+				t.Fatalf("Project err = %v", err)
+			}
 			if got, want := proj.Profiles["llm/shared"].Env["K"], "honest"; got != want {
 				t.Fatalf("llm/shared K = %q, want %q (the later sorted name must win every run)", got, want)
 			}

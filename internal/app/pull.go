@@ -599,14 +599,19 @@ func gateView(merged config.Config, name string) config.Config {
 
 // projectedNames is what the fetched content will land as: the profile names the
 // merged view gains once the record's pull mode is applied. The gate has already
-// accepted the content, so a parse failure here can only mean the gate and this
-// report disagree, which is reported as no names rather than as a failed pull.
+// accepted the content, so a parse or projection failure here can only mean the
+// gate and this report disagree, which is reported as no names rather than as a
+// failed pull.
 func projectedNames(content []byte, name string, noPrefix bool) []string {
 	var cfg config.Config
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
 		return nil
 	}
-	return config.Project(cfg, name, noPrefix).ProfileNames()
+	projected, err := config.Project(cfg, name, noPrefix)
+	if err != nil {
+		return nil
+	}
+	return projected.ProfileNames()
 }
 
 // recordSource names a record's source in a summary or warning: the spelling the

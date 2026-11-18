@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -109,12 +108,8 @@ func ownVars(p config.Profile) int {
 }
 
 // listJSON is the machine-readable shape of `enver list --format json`.
-// Skipped records the profiles the document leaves out and why, so a consumer
-// can tell an absent profile — including one the default names — from a config
-// that has none.
 type listJSON struct {
-	Profiles []listJSONEntry   `json:"profiles"`
-	Skipped  []listJSONSkipped `json:"skipped,omitempty"`
+	Profiles []listJSONEntry `json:"profiles"`
 }
 
 type listJSONEntry struct {
@@ -124,16 +119,6 @@ type listJSONEntry struct {
 	Vars     int      `json:"vars"`
 	Resolved int      `json:"resolved"`
 }
-
-type listJSONSkipped struct {
-	Name   string `json:"name"`
-	Reason string `json:"reason"`
-}
-
-// listNotesOut is where the JSON listing reports the profiles it leaves out:
-// stderr, so stdout stays the machine-readable document it promises. A var so
-// tests can capture the stream.
-var listNotesOut io.Writer = os.Stderr
 
 func doListJSON(w io.Writer) error {
 	cfg, err := app.Load(appOpts())
@@ -146,16 +131,7 @@ func doListJSON(w io.Writer) error {
 		p := cfg.Profiles[n]
 		r, err := cfg.ResolveProfile(n)
 		if err != nil {
-			// A remote that expects a parent nobody provides has not broken the
-			// user's config, so its profiles are left out with a note instead of
-			// failing the listing. Every other break — the user's own dangling
-			// extends, a cycle — still fails it.
-			dangling := cfg.RemoteDanglingIssues(n)
-			if len(dangling) == 0 {
-				return err
-			}
-			out.Skipped = append(out.Skipped, listJSONSkipped{Name: n, Reason: skipReason(n, dangling)})
-			continue
+			return err
 		}
 		out.Profiles = append(out.Profiles, listJSONEntry{
 			Name:     n,
@@ -165,25 +141,7 @@ func doListJSON(w io.Writer) error {
 			Resolved: len(r.Env),
 		})
 	}
-	for _, s := range out.Skipped {
-		_, _ = fmt.Fprintf(listNotesOut, "note: skipping profile %q: %s\n", s.Name, s.Reason)
-	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
-}
-
-// skipReason renders why one profile is left out: it names its own reason when
-// it is the one that dangles, and each broken link when the gap sits deeper in
-// its chain.
-func skipReason(skipped string, issues []config.Issue) string {
-	reasons := make([]string, 0, len(issues))
-	for _, is := range issues {
-		if is.Profile == skipped {
-			reasons = append(reasons, is.Reason())
-			continue
-		}
-		reasons = append(reasons, is.String())
-	}
-	return strings.Join(reasons, "; ")
 }

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -197,13 +196,13 @@ func hasIssue(issues []Issue, kind IssueKind) bool {
 	return false
 }
 
-// TestValidateRemoteDanglingWarns pins the grading a remote's passthrough
-// extends gets: the passthrough rule deliberately lets a remote name a parent
-// the user or another remote provides, so a parent no layer defines yet is the
-// remote's gap — a warning that says which remote expects it — never an error
-// that fails the user's validate before the parent exists.
-func TestValidateRemoteDanglingWarns(t *testing.T) {
-	t.Run("remote-declared profile warns and names its remote", func(t *testing.T) {
+// TestValidateRemoteDanglingErrors pins the grading every dangling extends gets:
+// strict scoping leaves no authorship to grade, because a remote file cannot
+// name a parent outside its own namespace, so a reference no profile defines is
+// always an error — whoever declared it. The pull hint survives: a parent whose
+// prefix is a declared but unpulled record still names the pull that supplies it.
+func TestValidateRemoteDanglingErrors(t *testing.T) {
+	t.Run("remote-declared profile is an error", func(t *testing.T) {
 		cfg := Config{
 			Profiles: map[string]Profile{
 				"llm/qwen": {Extends: Extends{"base"}, Env: map[string]string{"MODEL": "qwen"}},
@@ -218,11 +217,11 @@ func TestValidateRemoteDanglingWarns(t *testing.T) {
 		if got.Kind != KindDanglingExtends || got.Target != "base" {
 			t.Fatalf("issue = %+v, want dangling-extends on base", got)
 		}
-		if got.Severity != SeverityWarning {
-			t.Fatalf("severity = %q, want warning: a remote's gap must not fail the user's validate", got.Severity)
+		if got.Severity != SeverityError {
+			t.Fatalf("severity = %q, want error: no layer can legitimately declare a parent nobody defines", got.Severity)
 		}
-		if !strings.Contains(got.String(), `remote "llm"`) {
-			t.Errorf("issue text %q does not name the remote expecting the parent", got.String())
+		if want := `llm/qwen: extends "base" which does not exist`; got.String() != want {
+			t.Errorf("issue text = %q, want %q", got.String(), want)
 		}
 	})
 
@@ -237,10 +236,12 @@ func TestValidateRemoteDanglingWarns(t *testing.T) {
 		}
 		issues := Validate(cfg)
 		if len(issues) != 1 {
-			t.Fatalf("issues = %+v, want one dangling warning", issues)
+			t.Fatalf("issues = %+v, want one dangling error", issues)
 		}
-		if got := issues[0].String(); !strings.Contains(got, `enver pull other`) {
-			t.Errorf("issue text %q lacks the pull that would supply the parent", got)
+		if got := issues[0]; got.Severity != SeverityError {
+			t.Errorf("severity = %q, want error", got.Severity)
+		} else if !strings.Contains(got.String(), `enver pull other`) {
+			t.Errorf("issue text %q lacks the pull that would supply the parent", got.String())
 		}
 	})
 
@@ -258,7 +259,7 @@ func TestValidateRemoteDanglingWarns(t *testing.T) {
 		}
 		issues := Validate(cfg)
 		if len(issues) != 1 {
-			t.Fatalf("issues = %+v, want one dangling warning", issues)
+			t.Fatalf("issues = %+v, want one dangling error", issues)
 		}
 		if got := issues[0].String(); strings.Contains(got, "enver pull") {
 			t.Errorf("issue text %q promises a pull that cannot supply a missing upstream profile", got)
@@ -285,59 +286,12 @@ func TestValidateRemoteDanglingWarns(t *testing.T) {
 	})
 }
 
-// TestValidatePatchedRemoteDanglingStaysWarning pins the authorship rule: a
-// user patch takes over a remote profile's name but not the references the
-// remote wrote, so a missing parent the remote named stays warning-grade and
-// keeps the remote's hint, while a reference the patch writes itself is the
-// user's own error.
-func TestValidatePatchedRemoteDanglingStaysWarning(t *testing.T) {
-	remote := Project(Config{Profiles: map[string]Profile{
-		"qwen": {Extends: Extends{"base"}, Env: map[string]string{"MODEL": "qwen"}},
-	}}, "llm", false)
-	patch := Config{Profiles: map[string]Profile{
-		"llm/qwen": {Env: map[string]string{"MODEL": "mine"}},
-	}}
-	merged := Merge(remote, patch, RemoteLayer("llm"), LayerGlobal)
-	if got := merged.ProfileLayer["llm/qwen"]; got != LayerGlobal {
-		t.Fatalf("fixture premise: ProfileLayer = %q, want the patch to own the name", got)
-	}
-
-	severity := map[string]Severity{}
-	text := map[string]string{}
-	for _, is := range Validate(merged) {
-		if is.Kind != KindDanglingExtends {
-			continue
-		}
-		severity[is.Target] = is.Severity
-		text[is.Target] = is.String()
-	}
-	if len(severity) != 1 || severity["base"] != SeverityWarning {
-		t.Fatalf("severity = %v, want only the remote's base reference as a warning", severity)
-	}
-	if !strings.Contains(text["base"], `remote "llm"`) {
-		t.Errorf("issue text %q lost the remote's hint when the user patched the profile", text["base"])
-	}
-
-	ownPatch := Config{Profiles: map[string]Profile{
-		"llm/qwen": {Extends: Extends{"ghost"}, Env: map[string]string{"MODEL": "mine"}},
-	}}
-	own := map[string]Severity{}
-	for _, is := range Validate(Merge(remote, ownPatch, RemoteLayer("llm"), LayerGlobal)) {
-		if is.Kind == KindDanglingExtends {
-			own[is.Target] = is.Severity
-		}
-	}
-	if want := (map[string]Severity{"base": SeverityWarning, "ghost": SeverityError}); !maps.Equal(own, want) {
-		t.Fatalf("severity = %v, want %v: the patch's own reference is the user's error", own, want)
-	}
-}
-
 // TestValidateGlobalOverRemotes pins what the isolated-global pass audits: the
 // global file over the remote layers it sits on, never the local file. A global
-// profile extending a remote-provided profile is the passthrough feature and
-// must resolve; a global profile naming a local-only or nonexistent parent
-// stays this pass's error; remote content's own findings stay with the merged
-// pass.
+// profile extending a remote-provided profile resolves through the layers and
+// must not read as dangling; a global profile naming a local-only or nonexistent
+// parent stays this pass's error; remote content's own findings stay with the
+// merged pass.
 func TestValidateGlobalOverRemotes(t *testing.T) {
 	defer remotesDirIn(t.TempDir())()
 	if err := WriteRemoteContent("llm", []byte("profiles:\n  base:\n    env:\n      K: v\n")); err != nil {
@@ -411,86 +365,6 @@ func TestProfileNotFoundPullHint(t *testing.T) {
 
 	if _, err := cfg.ResolveProfile("nosuch/base"); err == nil || strings.Contains(err.Error(), "enver pull") {
 		t.Fatalf("err = %v, want no pull hint for an undeclared prefix", err)
-	}
-}
-
-// TestRemoteDanglingIssues pins what counts as a remote's gap for a caller that
-// must keep failing on everything else: a break the user's own profiles cause,
-// a cycle, and a healthy chain are not the remote's to answer for.
-func TestRemoteDanglingIssues(t *testing.T) {
-	cases := []struct {
-		name    string
-		cfg     Config
-		profile string
-		want    []string
-	}{
-		{
-			name: "a remote-declared profile with a missing parent",
-			cfg: Config{
-				Profiles:     map[string]Profile{"llm/qwen": {Extends: Extends{"base"}}},
-				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
-			},
-			profile: "llm/qwen",
-			want:    []string{"base"},
-		},
-		{
-			name: "a user profile reaching a remote gap",
-			cfg: Config{
-				Profiles: map[string]Profile{
-					"llm/qwen": {Extends: Extends{"base"}},
-					"wrapper":  {Extends: Extends{"llm/qwen"}},
-				},
-				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
-			},
-			profile: "wrapper",
-			want:    []string{"base"},
-		},
-		{
-			name:    "the user's own missing parent",
-			cfg:     Config{Profiles: map[string]Profile{"mine": {Extends: Extends{"ghost"}}}},
-			profile: "mine",
-		},
-		{
-			name: "a user-caused break under a remote profile",
-			cfg: Config{
-				Profiles: map[string]Profile{
-					"llm/qwen": {Extends: Extends{"mine", "base"}},
-					"mine":     {Extends: Extends{"ghost"}},
-				},
-				ProfileLayer: map[string]string{"llm/qwen": RemoteLayer("llm")},
-			},
-			profile: "llm/qwen",
-		},
-		{
-			name: "a cycle among remote profiles",
-			cfg: Config{
-				Profiles: map[string]Profile{
-					"llm/a": {Extends: Extends{"llm/b"}},
-					"llm/b": {Extends: Extends{"llm/a"}},
-				},
-				ProfileLayer: map[string]string{
-					"llm/a": RemoteLayer("llm"),
-					"llm/b": RemoteLayer("llm"),
-				},
-			},
-			profile: "llm/a",
-		},
-		{
-			name:    "a healthy profile",
-			cfg:     Config{Profiles: map[string]Profile{"ok": {Env: map[string]string{"K": "v"}}}},
-			profile: "ok",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var got []string
-			for _, is := range tc.cfg.RemoteDanglingIssues(tc.profile) {
-				got = append(got, is.Target)
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("dangling targets = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }
 
