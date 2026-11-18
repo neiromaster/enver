@@ -52,16 +52,16 @@ type GateOpts struct {
 // foreign-era or mixes eras, whose enc:v3 parameters sit beyond the parse caps,
 // or that carries more than maxEncryptedValues enc: values.
 //
-// It admits with a warning content that declares its own remotes: section (which
-// projection drops), a no-prefix pull whose bare names collide with profiles the
-// merged view already defines, and current-era ciphertext the gate cannot
-// decrypt - including the mixed-salt guidance a consumer patching those keys
-// needs.
+// It admits with a warning a no-prefix pull whose bare names collide with
+// profiles the merged view already defines, and admits in silence content that
+// declares its own remotes: section, which nested composition loads from. It
+// also admits current-era ciphertext the gate cannot decrypt - including the
+// mixed-salt guidance a consumer patching those keys needs.
 //
 // Extends cycles that span files are out of scope here: the gate resolves only
 // the file's own graph, and the load backstop catches the rest.
 func Gate(content []byte, opts GateOpts) (warnings []string, err error) {
-	root, cfg, err := parseRemote(content, opts.Record)
+	cfg, err := parseRemote(content, opts.Record)
 	if err != nil {
 		return nil, err
 	}
@@ -72,31 +72,32 @@ func Gate(content []byte, opts GateOpts) (warnings []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(gateWarnings(root, cfg, opts), cryptoWarnings...), nil
+	return append(gateWarnings(cfg, opts), cryptoWarnings...), nil
 }
 
-// parseRemote builds both views the checks need: the node tree, so the anchor
-// and alias count is taken before the decoder expands a single alias, and the
-// decoded config, which carries the load-time parse and name validation.
-func parseRemote(content []byte, record string) (*yaml.Node, config.Config, error) {
+// parseRemote decodes the fetched file the way the checks read it: the node
+// tree first, so the anchor and alias count is taken before the decoder expands
+// a single alias, then the config view, which carries the load-time parse and
+// name validation.
+func parseRemote(content []byte, record string) (config.Config, error) {
 	label := gateLabel(record)
 	var root yaml.Node
 	if err := yaml.Unmarshal(content, &root); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: not valid YAML: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: not valid YAML: %w", label, err)
 	}
 	if err := checkAnchors(&root); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: %w", label, err)
 	}
 	var cfg config.Config
 	if root.Kind != 0 {
 		if err := root.Decode(&cfg); err != nil {
-			return nil, config.Config{}, fmt.Errorf("%s: not a valid config: %w", label, err)
+			return config.Config{}, fmt.Errorf("%s: not a valid config: %w", label, err)
 		}
 	}
 	if err := config.CheckEnvNames(cfg); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: %w", label, err)
 	}
-	return &root, cfg, nil
+	return cfg, nil
 }
 
 // checkAnchors walks the parsed tree counting anchors and aliases. Alias nodes
@@ -357,37 +358,16 @@ func joinRefs(refs []encRef, all bool) string {
 	return strings.Join(parts, ", ") + suffix
 }
 
-// gateWarnings collects the advisories that admit the content: a section a
-// remote must not own, and the namespace collisions a bare-name pull would
-// cause.
-func gateWarnings(root *yaml.Node, cfg config.Config, opts GateOpts) []string {
+// gateWarnings collects the advisories that admit the content: the namespace
+// collisions a bare-name pull would cause. A declared remotes: section is
+// admitted in silence - it is the shape nested composition loads from, and its
+// record names and gated targets are validated outright.
+func gateWarnings(cfg config.Config, opts GateOpts) []string {
 	var warnings []string
-	if topLevelHasKey(root, "remotes") {
-		warnings = append(warnings, fmt.Sprintf("%s: declares a remotes: section; a remote cannot register fetches, so the section is ignored", gateLabel(opts.Record)))
-	}
 	if collision := collisionWarning(cfg, opts); collision != "" {
 		warnings = append(warnings, collision)
 	}
 	return warnings
-}
-
-// topLevelHasKey reports whether the document's top-level mapping declares key.
-// It answers presence, not content: an empty remotes: section still tells the
-// user the author expected nested remotes to work.
-func topLevelHasKey(root *yaml.Node, key string) bool {
-	doc := root
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-		doc = doc.Content[0]
-	}
-	if doc.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value == key {
-			return true
-		}
-	}
-	return false
 }
 
 // collisionWarning reports every bare name a no-prefix pull would land on top of

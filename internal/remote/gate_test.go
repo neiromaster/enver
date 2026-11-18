@@ -220,9 +220,8 @@ func TestGateRejectsInFileExtendsCycles(t *testing.T) {
 
 // A declared child is inside the file's namespace: extending record/profile
 // while the file's own remotes: section declares that record is the composition
-// the namespace rule admits, and it draws no refusal. The remotes: section still
-// draws its advisory until nesting makes the section real, so that notice is the
-// only warning a declared-child pull may carry.
+// the namespace rule admits, and it draws no refusal nor any other notice —
+// the section is what nested composition loads from.
 func TestGateAcceptsDeclaredChildExtends(t *testing.T) {
 	content := []byte(`profiles:
   qwen:
@@ -237,8 +236,8 @@ remotes:
 	if err != nil {
 		t.Fatalf("Gate refused a declared child target: %v", err)
 	}
-	if len(warnings) != 1 || !gateWarning(warnings, "declares a remotes: section") {
-		t.Fatalf("warnings = %q, want only the remotes-section advisory", warnings)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want a declared-child pull admitted in silence", warnings)
 	}
 }
 
@@ -280,8 +279,8 @@ remotes:
 		if err != nil {
 			t.Fatalf("Gate refused a clean subtree target: %v", err)
 		}
-		if len(warnings) != 1 || !gateWarning(warnings, "declares a remotes: section") {
-			t.Fatalf("warnings = %q, want only the remotes-section advisory", warnings)
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %q, want a clean subtree target admitted in silence", warnings)
 		}
 	})
 }
@@ -365,7 +364,10 @@ func TestGateChecksKDFParams(t *testing.T) {
 	}
 }
 
-func TestGateWarnsNestedRemotes(t *testing.T) {
+// A declared remotes: section is the shape nested composition loads from, so
+// it is no longer an advisory: the gate admits it in silence, and only a key
+// outside the record-name rule still draws a refusal.
+func TestGateAdmitsNestedRemotesSection(t *testing.T) {
 	content := []byte(`profiles:
   a:
     env:
@@ -378,7 +380,9 @@ remotes:
 	if err != nil {
 		t.Fatalf("Gate refused content with a nested remotes section: %v", err)
 	}
-	gateRequireWarning(t, warnings, "remotes:", "ignored")
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want the remotes: section admitted in silence", warnings)
+	}
 }
 
 // A remotes: section a fetched file declares is parsed before any scoping runs,
