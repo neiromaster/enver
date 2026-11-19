@@ -254,132 +254,28 @@ func TestDoListJSONBrokenResolve(t *testing.T) {
 	}
 }
 
-// TestListJSONSkipsRemoteDangling pins the machine-output tolerance the
-// passthrough rule needs: a profile a remote's dangling extends leaves
-// unresolvable is left out with a note on stderr — exit 0, the resolvable
-// profiles still in the document — while a break the user's own profiles cause
-// still fails the listing.
-func TestListJSONSkipsRemoteDangling(t *testing.T) {
-	t.Run("the remote gap skips, the resolvable profile still lists", func(t *testing.T) {
+// TestListJSONRemoteDanglingFails pins the machine-readable contract under
+// strict scoping: a profile whose extends chain cannot resolve fails the
+// listing, and a remote-authored gap is no exception. The only dangling
+// reference a pulled file can declare names a record inside its own remotes:
+// section, so that is the gap the listing refuses on.
+func TestListJSONRemoteDanglingFails(t *testing.T) {
+	t.Run("a declared-child gap fails the listing", func(t *testing.T) {
 		f := newPullCmdFixture(t)
 		writePullFile(t, f.globalPath,
 			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
-				"profiles:\n  good:\n    env:\n      K: v\n  wrapper:\n    extends: llm/qwen\n")
-		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
+				"profiles:\n  good:\n    env:\n      K: v\n")
+		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: claude/default\n    env:\n      MODEL: qwen\nremotes:\n  claude:\n    url: https://example.com/claude.yaml\n")); err != nil {
 			t.Fatal(err)
 		}
 		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
 			t.Fatal(err)
 		}
-		notes := captureListNotes(t)
 
 		var out bytes.Buffer
-		if err := runListJSON(t, &out); err != nil {
-			t.Fatalf("list --format json must skip the remote gap, got: %v\n%s", err, out.String())
-		}
-		var got listJSON
-		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-			t.Fatalf("invalid JSON: %v\n%s", err, out.String())
-		}
-		var names []string
-		for _, p := range got.Profiles {
-			names = append(names, p.Name)
-		}
-		if want := []string{"good"}; !reflect.DeepEqual(names, want) {
-			t.Fatalf("profiles = %v, want %v", names, want)
-		}
-		var skipped []string
-		for _, s := range got.Skipped {
-			skipped = append(skipped, s.Name)
-			if !strings.Contains(s.Reason, `"base"`) {
-				t.Errorf("skipped %q carries no dangling target in its reason: %s", s.Name, s.Reason)
-			}
-		}
-		if want := []string{"llm/qwen", "wrapper"}; !reflect.DeepEqual(skipped, want) {
-			t.Fatalf("skipped = %v, want %v", skipped, want)
-		}
-		for _, want := range []string{
-			`skipping profile "llm/qwen"`,
-			`skipping profile "wrapper"`,
-			`remote "llm"`,
-			`"base"`,
-		} {
-			if !strings.Contains(notes.String(), want) {
-				t.Errorf("stderr note misses %q:\n%s", want, notes.String())
-			}
-		}
-		if strings.Contains(out.String(), "note:") {
-			t.Fatalf("the skip note leaked onto stdout:\n%s", out.String())
-		}
-	})
-
-	t.Run("a user-authored break still fails", func(t *testing.T) {
-		f := newPullCmdFixture(t)
-		writePullFile(t, f.globalPath,
-			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
-				"profiles:\n  good:\n    env:\n      K: v\n  broken:\n    extends: ghost\n")
-		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
-			t.Fatal(err)
-		}
-		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
-			t.Fatal(err)
-		}
-		captureListNotes(t)
-
-		var out bytes.Buffer
-		if err := runListJSON(t, &out); err == nil {
-			t.Fatalf("a user-authored dangling extends must fail the JSON listing:\n%s", out.String())
-		}
-	})
-
-	t.Run("patching a remote profile does not adopt its dangling extends", func(t *testing.T) {
-		f := newPullCmdFixture(t)
-		writePullFile(t, f.globalPath,
-			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
-				"profiles:\n  good:\n    env:\n      K: v\n  llm/qwen:\n    env:\n      MODEL: patch\n")
-		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
-			t.Fatal(err)
-		}
-		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
-			t.Fatal(err)
-		}
-		notes := captureListNotes(t)
-
-		var out bytes.Buffer
-		if err := runListJSON(t, &out); err != nil {
-			t.Fatalf("the patch did not write the extends, so the gap stays the remote's: %v\n%s", err, out.String())
-		}
-		var got listJSON
-		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-			t.Fatalf("invalid JSON: %v\n%s", err, out.String())
-		}
-		if len(got.Skipped) != 1 || got.Skipped[0].Name != "llm/qwen" {
-			t.Fatalf("skipped = %+v, want llm/qwen", got.Skipped)
-		}
-		if !strings.Contains(got.Skipped[0].Reason, `remote "llm"`) {
-			t.Errorf("skip reason must name the remote that expects the parent: %s", got.Skipped[0].Reason)
-		}
-		if !strings.Contains(notes.String(), `remote "llm"`) {
-			t.Errorf("stderr note must name the remote:\n%s", notes.String())
-		}
-	})
-
-	t.Run("a bad extends the patch itself declares still fails", func(t *testing.T) {
-		f := newPullCmdFixture(t)
-		writePullFile(t, f.globalPath,
-			"remotes:\n  llm:\n    url: https://example.com/llm.yaml\n"+
-				"profiles:\n  good:\n    env:\n      K: v\n  llm/qwen:\n    extends: ghost\n    env:\n      MODEL: patch\n")
-		if err := config.WriteRemoteContent("llm", []byte("profiles:\n  qwen:\n    extends: base\n    env:\n      MODEL: qwen\n")); err != nil {
-			t.Fatal(err)
-		}
-		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
-			t.Fatal(err)
-		}
-		captureListNotes(t)
-
-		var out bytes.Buffer
-		if err := runListJSON(t, &out); err == nil {
-			t.Fatalf("the patch authored its own dangling extends, so the listing must fail:\n%s", out.String())
+		err := runListJSON(t, &out)
+		if err == nil || !strings.Contains(err.Error(), `profile "llm/claude/default" not found`) {
+			t.Fatalf("a dangling child target must fail the JSON listing, got: %v\n%s", err, out.String())
 		}
 	})
 
@@ -394,7 +290,6 @@ func TestListJSONSkipsRemoteDangling(t *testing.T) {
 		if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/llm.yaml"}); err != nil {
 			t.Fatal(err)
 		}
-		captureListNotes(t)
 
 		var out bytes.Buffer
 		err := runListJSON(t, &out)
@@ -414,16 +309,6 @@ func runListJSON(t *testing.T, out io.Writer) error {
 	cmd := &cobra.Command{}
 	cmd.SetOut(out)
 	return listCmd.RunE(cmd, nil)
-}
-
-// captureListNotes swaps the JSON listing's note stream for a buffer.
-func captureListNotes(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	prev := listNotesOut
-	listNotesOut = &buf
-	t.Cleanup(func() { listNotesOut = prev })
-	return &buf
 }
 
 func findListLine(out, profile string) string {

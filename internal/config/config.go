@@ -245,14 +245,16 @@ func load(path string) (Config, error) {
 // parseConfig decodes one config document and applies the load-time name
 // validation every enver config file gets. Remote content goes through it too:
 // a remote is just a config file, so invalid names a pull somehow landed are
-// refused at load rather than resolved.
-func parseConfig(path string, data []byte) (Config, error) {
+// refused at load rather than resolved. label names the document in parse
+// errors — a file path for user files, a role for content a caller already
+// identifies in its own wrap.
+func parseConfig(label string, data []byte) (Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
-		return c, fmt.Errorf("parse %s: %w", path, err)
+		return c, fmt.Errorf("parse %s: %w", label, err)
 	}
 	if err := CheckEnvNames(c); err != nil {
-		return c, fmt.Errorf("parse %s: %w", path, err)
+		return c, fmt.Errorf("parse %s: %w", label, err)
 	}
 	return c, nil
 }

@@ -1132,13 +1132,19 @@ func TestMergeProfileLayerStamping(t *testing.T) {
 // inheriting authorship of references it did not write, and a target the patch
 // writes itself is the patch's.
 func TestMergeExtendsOriginsStamping(t *testing.T) {
-	remote := Project(Config{Profiles: map[string]Profile{
-		"ollama": {Env: map[string]string{"OLLAMA_HOST": "localhost"}},
-		"qwen":   {Extends: Extends{"ollama", "base"}},
-	}}, "llm", false)
+	remote, err := Project(Config{
+		Remotes: map[string]RemoteRecord{"claude": {URL: "https://example.com/claude.yaml"}},
+		Profiles: map[string]Profile{
+			"ollama": {Env: map[string]string{"OLLAMA_HOST": "localhost"}},
+			"qwen":   {Extends: Extends{"ollama", "claude/default"}},
+		},
+	}, "llm", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantRemote := map[string]string{
-		"llm/ollama": RemoteLayer("llm"),
-		"base":       RemoteLayer("llm"),
+		"llm/ollama":         RemoteLayer("llm"),
+		"llm/claude/default": RemoteLayer("llm"),
 	}
 	if got := remote.ExtendsOrigins["llm/qwen"]; !maps.Equal(got, wantRemote) {
 		t.Fatalf("projected ExtendsOrigins = %v, want %v", got, wantRemote)
@@ -1149,9 +1155,9 @@ func TestMergeExtendsOriginsStamping(t *testing.T) {
 	}}
 	merged := Merge(remote, patch, RemoteLayer("llm"), LayerGlobal)
 	want := map[string]string{
-		"llm/ollama": RemoteLayer("llm"),
-		"base":       RemoteLayer("llm"),
-		"mine":       LayerGlobal,
+		"llm/ollama":         RemoteLayer("llm"),
+		"llm/claude/default": RemoteLayer("llm"),
+		"mine":               LayerGlobal,
 	}
 	if got := merged.ExtendsOrigins["llm/qwen"]; !maps.Equal(got, want) {
 		t.Fatalf("patched ExtendsOrigins = %v, want %v", got, want)
@@ -1891,10 +1897,10 @@ func TestLoadMergedEmptyContentFile(t *testing.T) {
 // lands.
 func TestLoadMergedMultipleRemotes(t *testing.T) {
 	content := map[string]string{
-		"a": "profiles:\n  app:\n    extends: b/foo\n    env:\n      A_KEY: from-a\n",
+		"a": "profiles:\n  app:\n    env:\n      A_KEY: from-a\n",
 		"b": "profiles:\n  foo:\n    env:\n      B_KEY: from-b\n",
 	}
-	global := remoteRecordsYAML("a") + "profiles:\n  user:\n    env:\n      K: global\n"
+	global := remoteRecordsYAML("a") + "profiles:\n  user:\n    env:\n      K: global\n  combo:\n    extends: [a/app, b/foo]\n"
 	local := remoteRecordsYAML("b")
 	load := useRemoteFixture(t, global, local, content)
 
@@ -1908,21 +1914,16 @@ func TestLoadMergedMultipleRemotes(t *testing.T) {
 	if got, want := prefixed(cfg, "b"), []string{"b/foo"}; !slices.Equal(got, want) {
 		t.Fatalf("b's profiles = %v, want %v", got, want)
 	}
-	// The target already names the projected form, so it is not rewritten — it
-	// binds remote b's profile and nothing else.
-	wantExtends := Extends{"b/foo"}
-	if !slices.Equal(cfg.Profiles["a/app"].Extends, wantExtends) {
-		t.Fatalf("a/app extends = %v, want %v", cfg.Profiles["a/app"].Extends, wantExtends)
-	}
-
-	r, err := cfg.ResolveProfile("a/app")
+	// A user profile is what composes across records: a remote file cannot name
+	// another record's projection, but the layer above both can.
+	r, err := cfg.ResolveProfile("combo")
 	if err != nil {
-		t.Fatalf("ResolveProfile(a/app) err = %v", err)
+		t.Fatalf("ResolveProfile(combo) err = %v", err)
 	}
 	if want := map[string]string{"A_KEY": "from-a", "B_KEY": "from-b"}; !maps.Equal(r.Env, want) {
-		t.Fatalf("a/app env = %v, want %v", r.Env, want)
+		t.Fatalf("combo env = %v, want %v", r.Env, want)
 	}
-	if want := []string{"a/app", "b/foo"}; !slices.Equal(r.Chain, want) {
+	if want := []string{"combo", "a/app", "b/foo"}; !slices.Equal(r.Chain, want) {
 		t.Fatalf("chain = %v, want %v", r.Chain, want)
 	}
 	// Each remote keeps its own label through the multi-remote fold.
@@ -1945,6 +1946,29 @@ func TestLoadMergedMultipleRemotes(t *testing.T) {
 	}
 	if len(globalOnly.Warnings) != 1 || !strings.Contains(globalOnly.Warnings[0], `"b"`) {
 		t.Fatalf("warnings = %q, want exactly one advisory about b's unclaimed content", globalOnly.Warnings)
+	}
+}
+
+// Content a pre-scoping pull stored, or a hand-edited file left behind, can name
+// a target outside its own namespace: stored state predating the rule never
+// passed the gate, so the load must refuse it just as loudly, never resolve
+// around it.
+func TestLoadMergedRefusesOutOfNamespaceStoredContent(t *testing.T) {
+	const legacy = `profiles:
+  qwen:
+    extends: provider
+    env:
+      MODEL: qwen
+`
+	useRemoteFixture(t, remoteRecordsYAML("llm"), "", map[string]string{"llm": legacy})
+	_, err := LoadMerged("", false)
+	if err == nil {
+		t.Fatal("LoadMerged accepted stored content whose extends target reaches outside the file's own namespace")
+	}
+	for _, want := range []string{`remote "llm"`, `extends "provider"`, "outside this file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadMerged err = %v, want it to carry %s", err, want)
+		}
 	}
 }
 

@@ -32,8 +32,8 @@ type GateOpts struct {
 	// namespace, so only it raises the collision warning.
 	NoPrefix bool
 	// Merged is the view the remote's profiles are about to join. The gate reads
-	// only its profile names and layers, to detect no-prefix collisions and to
-	// classify an extends target the fetched file does not define.
+	// only its profile names, to detect the collisions a no-prefix pull would
+	// cause.
 	Merged config.Config
 }
 
@@ -46,56 +46,65 @@ type GateOpts struct {
 // It refuses content that is not YAML, that carries more than maxAnchors
 // anchors and aliases, that the config parser or the load-time name rule
 // rejects, whose profile names break the bare upstream rule (no slash, non-empty,
-// no control characters), whose extends targets are not shaped names, that
-// carries an extends cycle within the file, whose ciphertext is foreign-era or
-// mixes eras, whose enc:v3 parameters sit beyond the parse caps, or that carries
-// more than maxEncryptedValues enc: values.
+// no control characters), whose extends targets reach outside the file's own
+// namespace or carry a segment no profile can be named by, that carries an
+// extends cycle within the file, whose nested declarations a pull could not
+// act on (no URL, an unresolvable source, a name no filesystem can carry, a
+// case-fold sibling), whose ciphertext is
+// foreign-era or mixes eras, whose enc:v3 parameters sit beyond the parse caps,
+// or that carries more than maxEncryptedValues enc: values.
 //
-// It admits with a warning content that declares its own remotes: section (which
-// projection drops), a no-prefix pull whose bare names collide with profiles the
-// merged view already defines, extends targets that pass through to the merged
-// namespace, and current-era ciphertext the gate cannot decrypt - including the
-// mixed-salt guidance a consumer patching those keys needs.
+// It admits with a warning a no-prefix pull whose bare names collide with
+// profiles the merged view already defines, and a file that declares a record
+// named like one of its own profiles, which coexists with it but seldom means
+// to. It admits in silence content that declares its own remotes: section,
+// which nested composition loads from. It also admits current-era ciphertext
+// the gate cannot decrypt - including the mixed-salt guidance a consumer
+// patching those keys needs.
 //
-// Cross-remote extends cycles are out of scope here: the gate resolves only the
-// file's own graph, and the load backstop catches the cycles that span files.
+// Extends cycles that span files are out of scope here: the gate resolves only
+// the file's own graph, and the load backstop catches the rest.
 func Gate(content []byte, opts GateOpts) (warnings []string, err error) {
-	root, cfg, err := parseRemote(content, opts.Record)
+	cfg, err := parseRemote(content, opts.Record)
 	if err != nil {
 		return nil, err
 	}
 	if err := checkRemoteProfiles(cfg, opts); err != nil {
 		return nil, err
 	}
+	if err := checkNestedDeclarations(cfg, opts.Record); err != nil {
+		return nil, err
+	}
 	cryptoWarnings, err := checkRemoteCiphertext(cfg, opts.Record)
 	if err != nil {
 		return nil, err
 	}
-	return append(gateWarnings(root, cfg, opts), cryptoWarnings...), nil
+	return append(gateWarnings(cfg, opts), cryptoWarnings...), nil
 }
 
-// parseRemote builds both views the checks need: the node tree, so the anchor
-// and alias count is taken before the decoder expands a single alias, and the
-// decoded config, which carries the load-time parse and name validation.
-func parseRemote(content []byte, record string) (*yaml.Node, config.Config, error) {
+// parseRemote decodes the fetched file the way the checks read it: the node
+// tree first, so the anchor and alias count is taken before the decoder expands
+// a single alias, then the config view, which carries the load-time parse and
+// name validation.
+func parseRemote(content []byte, record string) (config.Config, error) {
 	label := gateLabel(record)
 	var root yaml.Node
 	if err := yaml.Unmarshal(content, &root); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: not valid YAML: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: not valid YAML: %w", label, err)
 	}
 	if err := checkAnchors(&root); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: %w", label, err)
 	}
 	var cfg config.Config
 	if root.Kind != 0 {
 		if err := root.Decode(&cfg); err != nil {
-			return nil, config.Config{}, fmt.Errorf("%s: not a valid config: %w", label, err)
+			return config.Config{}, fmt.Errorf("%s: not a valid config: %w", label, err)
 		}
 	}
 	if err := config.CheckEnvNames(cfg); err != nil {
-		return nil, config.Config{}, fmt.Errorf("%s: %w", label, err)
+		return config.Config{}, fmt.Errorf("%s: %w", label, err)
 	}
-	return &root, cfg, nil
+	return cfg, nil
 }
 
 // checkAnchors walks the parsed tree counting anchors and aliases. Alias nodes
@@ -127,50 +136,60 @@ func checkAnchors(n *yaml.Node) error {
 // checkRemoteProfiles validates the names an upstream authored, which the load
 // path never had to defend against because only the user wrote them before.
 // Profile names must be bare: the record prefix supplies the namespace, so a
-// slash here would forge a different record's namespace. Extends targets may
-// pass through to the merged namespace and so may carry one slash, but a target
-// no profile can be named by is refused before it reaches an error message or a
-// completion candidate. Cycles are searched only among the file's own profiles,
-// which includes a target spelled under the pulled record's own prefix.
+// slash here would forge a different record's namespace. Extends targets must
+// stay inside the file's own namespace: a file resolves its own profiles and the
+// records its own remotes: section declares, and nothing else — anything it
+// named beyond that would bind whatever the pulling user happens to have. An
+// in-namespace target must also be well-formed, because the projection
+// classifies control-stripped targets and a segment it would silently clean has
+// to be refused here instead: what the gate accepts must resolve as stored.
+// Cycles are searched only among the file's own profiles.
 func checkRemoteProfiles(cfg config.Config, opts GateOpts) error {
 	label := gateLabel(opts.Record)
-	defined := make(map[string]struct{}, len(cfg.Profiles))
+	defined := make(map[string]bool, len(cfg.Profiles))
 	for name := range cfg.Profiles {
-		defined[name] = struct{}{}
+		defined[name] = true
 	}
 	for _, name := range cfg.ProfileNames() {
 		if !config.ValidRecordName(name) {
 			return fmt.Errorf("%s: profile %s is not a bare upstream profile name (want [A-Za-z0-9][A-Za-z0-9_-]*; the record prefix supplies the namespace)", label, quoteName(name))
 		}
 		for _, target := range cfg.Profiles[name].Extends {
-			if !shapedTarget(target) {
-				return fmt.Errorf("%s: profile %s extends %s, which is not a shaped profile name", label, quoteName(name), quoteName(target))
+			if !config.InNamespace(target, defined, cfg.Remotes) {
+				return fmt.Errorf("%s: profile %s extends %s, which is outside this file: a remote file resolves only its own profiles and the records in its own remotes: section; declare the base it needs there", label, quoteName(name), quoteName(target))
+			}
+			if bad, has := invalidTargetSegment(target); has {
+				return fmt.Errorf("%s: profile %s extends %s, whose %s segment is not a valid profile name (want [A-Za-z0-9][A-Za-z0-9_-]*)", label, quoteName(name), quoteName(target), quoteName(bad))
 			}
 		}
 	}
-	if cycle := extendsCycle(cfg, opts, defined); cycle != nil {
+	if cycle := extendsCycle(cfg, defined); cycle != nil {
 		return fmt.Errorf("%s: %w within the file: %s", label, config.ErrExtendsCycle, strings.Join(cycle, " -> "))
 	}
 	return nil
 }
 
-// shapedTarget reports whether target can name a profile in the merged
-// namespace: a bare name, or a record name and a bare name for an extends that
-// passes through to that record's projected profiles. A profile carries at most
-// one slash on the user side and none upstream, so any other shape is
-// unaddressable.
-func shapedTarget(target string) bool {
-	prefix, name, ok := strings.Cut(target, "/")
-	if !ok {
-		return config.ValidRecordName(target)
+// invalidTargetSegment returns the first /-separated segment of target that no
+// profile can be named by, and whether it found one. The flag is the answer, not
+// the segment: an empty segment is itself a fault, so the fault cannot be spelled
+// by the sentinel. The check belongs to the gate, not the projection: the
+// projection strips control characters before it classifies, so only here can a
+// target that would classify differently after cleaning be caught before it
+// lands on disk.
+func invalidTargetSegment(target string) (string, bool) {
+	for _, segment := range strings.Split(target, "/") {
+		if !config.ValidRecordName(segment) {
+			return segment, true
+		}
 	}
-	return config.ValidRecordName(prefix) && config.ValidRecordName(name)
+	return "", false
 }
 
 // extendsCycle returns the first cycle among the file's own extends edges as a
-// closed path, or nil. Edges leaving the file are passthroughs to the merged
-// namespace and are not followed: resolving them is the load path's job.
-func extendsCycle(cfg config.Config, opts GateOpts, defined map[string]struct{}) []string {
+// closed path, or nil. A bare target naming one of the file's own profiles is
+// the only in-file edge: a target under a declared record names another file's
+// graph, and every other shape the gate has already refused.
+func extendsCycle(cfg config.Config, defined map[string]bool) []string {
 	visiting := map[string]bool{}
 	done := map[string]bool{}
 	var path []string
@@ -183,7 +202,7 @@ func extendsCycle(cfg config.Config, opts GateOpts, defined map[string]struct{})
 			delete(visiting, name)
 		}()
 		for _, target := range cfg.Profiles[name].Extends {
-			edge, ok := inFileEdge(target, opts.Record, defined, opts.NoPrefix)
+			edge, ok := inFileEdge(target, defined)
 			if !ok {
 				continue
 			}
@@ -213,36 +232,31 @@ func extendsCycle(cfg config.Config, opts GateOpts, defined map[string]struct{})
 
 // inFileEdge resolves an extends target to the profile of the fetched file it
 // names once projection has run, and reports whether it names one at all. A bare
-// target names the file's own profile, and so does a target spelled under the
-// pulled record's own prefix: projection renames the profile to that prefixed
-// form and leaves the target as written, so the two mentions denote one profile.
-// Under --no-prefix projection leaves names bare, and a prefixed spelling then
-// names whatever the merged namespace holds instead of a file profile.
-func inFileEdge(target, record string, defined map[string]struct{}, noPrefix bool) (string, bool) {
-	if _, ok := defined[target]; ok {
+// target naming a defined profile is the only in-file edge: the file may not
+// spell its own profiles under the pulled record's name, so no prefixed target
+// denotes one of its own.
+func inFileEdge(target string, defined map[string]bool) (string, bool) {
+	if defined[target] {
 		return target, true
-	}
-	if noPrefix || record == "" {
-		return "", false
-	}
-	prefix, name, ok := strings.Cut(target, "/")
-	if !ok || prefix != record {
-		return "", false
-	}
-	if _, ok := defined[name]; ok {
-		return name, true
 	}
 	return "", false
 }
 
-// ownRecordTarget reports whether target is spelled under the pulled record's
-// own prefix, the namespace projection materializes that record in.
-func ownRecordTarget(target, record string, noPrefix bool) bool {
-	if noPrefix || record == "" {
-		return false
+// checkNestedDeclarations applies the record usability rule to the records a
+// fetched file declares: the pull is about to fetch each of them and store
+// content under its name, so a declaration no pull could act on — a missing or
+// unresolvable source, a name no filesystem can carry, two names the
+// filesystem may not tell apart — must refuse the file now rather than fail
+// the walk after the parent has landed. One rule serves both authors: this is
+// the same validation a user's own remotes: section passes on write.
+func checkNestedDeclarations(cfg config.Config, record string) error {
+	if len(cfg.Remotes) == 0 {
+		return nil
 	}
-	prefix, _, ok := strings.Cut(target, "/")
-	return ok && prefix == record
+	if err := config.ValidateRemotes(cfg.Remotes); err != nil {
+		return fmt.Errorf("%s: declares remotes a pull cannot use: %w", gateLabel(record), err)
+	}
+	return nil
 }
 
 // encRef is one env value the gate inspects at rest, labelled the way the
@@ -368,95 +382,34 @@ func joinRefs(refs []encRef, all bool) string {
 	return strings.Join(parts, ", ") + suffix
 }
 
-// gateWarnings collects the advisories that admit the content: a section a
-// remote must not own, the namespace collisions a bare-name pull would cause,
-// and every extends target that leaves the file, classified by what it binds.
-func gateWarnings(root *yaml.Node, cfg config.Config, opts GateOpts) []string {
+// gateWarnings collects the advisories that admit the content: the namespace
+// collisions a bare-name pull would cause, and the records declared under a
+// name the file also gives one of its own profiles. A declared remotes:
+// section is otherwise admitted in silence - it is the shape nested
+// composition loads from, and its record names and gated targets are validated
+// outright.
+func gateWarnings(cfg config.Config, opts GateOpts) []string {
 	var warnings []string
-	if topLevelHasKey(root, "remotes") {
-		warnings = append(warnings, fmt.Sprintf("%s: declares a remotes: section; a remote cannot register fetches, so the section is ignored", gateLabel(opts.Record)))
-	}
-	warnings = append(warnings, passthroughWarnings(cfg, opts)...)
 	if collision := collisionWarning(cfg, opts); collision != "" {
 		warnings = append(warnings, collision)
 	}
-	return warnings
+	return append(warnings, childNameWarnings(cfg, opts)...)
 }
 
-// topLevelHasKey reports whether the document's top-level mapping declares key.
-// It answers presence, not content: an empty remotes: section still tells the
-// user the author expected nested remotes to work.
-func topLevelHasKey(root *yaml.Node, key string) bool {
-	doc := root
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-		doc = doc.Content[0]
-	}
-	if doc.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value == key {
-			return true
+// childNameWarnings reports each declared record whose name equals one of the
+// file's own profile names. The two coexist — the record's profiles land under
+// <name>/ while the profile keeps the bare name — so the declaration is
+// allowed, but a reader can easily have meant one thing where the config now
+// holds two, and the pull output is where they find out.
+func childNameWarnings(cfg config.Config, opts GateOpts) []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
+		if _, ok := cfg.Profiles[name]; !ok {
+			continue
 		}
+		out = append(out, fmt.Sprintf("%s: declares a record %q beside its own profile of the same name; the record's profiles land under %s/ while the profile keeps the bare name, so both load — check that is intended", gateLabel(opts.Record), quoteName(name), quoteName(name)))
 	}
-	return false
-}
-
-// passthroughWarnings lists every extends target the file does not define,
-// once per target, with what it binds in the merged view. A remote extending the
-// user's own profiles is the designed composition, but it must never happen
-// silently: the target decides hosts and endpoints the user's secrets attach to.
-// A target spelled under the pulled record's own prefix carries the own-record
-// note only when the merged view binds nothing, since the file cannot be the
-// source of that namespace.
-func passthroughWarnings(cfg config.Config, opts GateOpts) []string {
-	label := gateLabel(opts.Record)
-	defined := make(map[string]struct{}, len(cfg.Profiles))
-	for name := range cfg.Profiles {
-		defined[name] = struct{}{}
-	}
-	seen := map[string]struct{}{}
-	var warnings []string
-	for _, name := range cfg.ProfileNames() {
-		for _, target := range cfg.Profiles[name].Extends {
-			if _, ok := inFileEdge(target, opts.Record, defined, opts.NoPrefix); ok {
-				continue
-			}
-			if _, ok := seen[target]; ok {
-				continue
-			}
-			seen[target] = struct{}{}
-			binding, bound := bindDescription(target, opts.Merged)
-			if !bound && ownRecordTarget(target, opts.Record, opts.NoPrefix) {
-				binding = "it is currently unresolvable: the remote's own prefix names no profile the file defines"
-			}
-			warnings = append(warnings, fmt.Sprintf("%s: profile %s extends %s, which the remote does not define; %s", label, quoteName(name), quoteName(target), binding))
-		}
-	}
-	return warnings
-}
-
-// bindDescription says what a passthrough target resolves against right now: a
-// user profile, another remote's projection, or nothing yet. A user profile may
-// legally carry one slash, so a target spelled under a record prefix binds a real
-// profile whenever the merged view defines it; reported tells the caller whether
-// the description names a binding.
-func bindDescription(target string, merged config.Config) (description string, reported bool) {
-	if layer, ok := merged.ProfileLayer[target]; ok {
-		if name, isRemote := strings.CutPrefix(layer, "remote:"); isRemote {
-			return fmt.Sprintf("it binds to another remote, %q", name), true
-		}
-		switch layer {
-		case config.LayerLocal:
-			return "it binds to your local profile of that name", true
-		case config.LayerGlobal:
-			return "it binds to your global profile of that name", true
-		}
-	}
-	if _, ok := merged.Profiles[target]; ok {
-		return "it binds to your profile of that name", true
-	}
-	return "it is currently unresolvable: no profile of that name exists in your merged config", false
+	return out
 }
 
 // collisionWarning reports every bare name a no-prefix pull would land on top of

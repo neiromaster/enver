@@ -787,3 +787,27 @@ func TestPrintRemoteStatusesColor(t *testing.T) {
 		}
 	}
 }
+
+// A tree listing indents each child row under its parent and keeps the exact
+// columns a flat listing renders, so nested records read as the tree a pull
+// stores.
+func TestPrintRemoteStatusesIndentsTree(t *testing.T) {
+	rows := []app.RemoteStatus{
+		{Name: "tree", Source: "https://example.com/tree.yaml", Depth: 1},
+		{Name: "tree/alpha", Source: "https://example.com/alpha.yaml", Depth: 2},
+		{Name: "tree/alpha/deep", Source: "https://example.com/deep.yaml", Depth: 3},
+	}
+
+	var plain bytes.Buffer
+	if err := printRemoteStatuses(&plain, rows); err != nil {
+		t.Fatalf("printRemoteStatuses: %v", err)
+	}
+	want := `# remotes: 3
+tree  https://example.com/tree.yaml  # unpinned · never pulled
+  tree/alpha  https://example.com/alpha.yaml  # unpinned · never pulled
+    tree/alpha/deep  https://example.com/deep.yaml  # unpinned · never pulled
+`
+	if plain.String() != want {
+		t.Fatalf("listing =\n%q\nwant\n%q", plain.String(), want)
+	}
+}

@@ -197,9 +197,12 @@ func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 // stay visible.
 func TestMenuOptionsMasksInheritedRemoteCiphertext(t *testing.T) {
 	sealed := sealedValue(t, "author-secret")
-	remote := config.Project(config.Config{Profiles: map[string]config.Profile{
+	remote, err := config.Project(config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"REMOTE_DATA": sealed, "REMOTE_PLAIN": "visible"}},
 	}}, "llm", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Merge(remote, config.Config{}, "remote:llm", "global")
 	pr, err := cfg.ResolveProfile("llm/base")
 	if err != nil {
@@ -1034,9 +1037,12 @@ func TestEditOverrideResealsInheritedCiphertext(t *testing.T) {
 		t.Fatalf("ReadProfile: ok=%v err=%v", ok, err)
 	}
 
-	remote := config.Project(config.Config{Profiles: map[string]config.Profile{
+	remote, err := config.Project(config.Config{Profiles: map[string]config.Profile{
 		"base": {Env: map[string]string{"REMOTE_DATA": sealedValue(t, "author-secret")}},
 	}}, "llm", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Merge(remote, config.Config{Profiles: map[string]config.Profile{"llm/local": prof}}, "remote:llm", "global")
 	pr, err := cfg.ResolveProfile("llm/local")
 	if err != nil {

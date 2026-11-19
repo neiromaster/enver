@@ -48,23 +48,6 @@ func gateWarning(warnings []string, parts ...string) bool {
 	return false
 }
 
-func gateCountWarnings(warnings []string, parts ...string) int {
-	count := 0
-	for _, w := range warnings {
-		matches := true
-		for _, p := range parts {
-			if !strings.Contains(w, p) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			count++
-		}
-	}
-	return count
-}
-
 func gateRequireWarning(t *testing.T, warnings []string, parts ...string) {
 	t.Helper()
 	if !gateWarning(warnings, parts...) {
@@ -155,30 +138,31 @@ func TestGateRejectsUpstreamProfileNames(t *testing.T) {
 	})
 }
 
-func TestGateRejectsUnshapedExtends(t *testing.T) {
+// Strict scoping: a fetched file resolves only what its own namespace defines —
+// its own profiles and the records its own remotes: section declares. Everything
+// else is refused before it can bind whatever the pulling user happens to have:
+// a user profile, another record's projection, the record's own pulled name, or
+// a name nothing in the file can denote.
+func TestGateRejectsOutOfNamespaceExtends(t *testing.T) {
 	cases := []struct {
 		name   string
 		target string
-		wantOK bool
 	}{
-		{"bare parent", "base", true},
-		{"cross-remote parent", "other/base", true},
-		{"two slashes", "a/b/c", false},
-		{"leading slash", "/base", false},
-		{"space", "my profile", false},
-		{"control character", "a\u0001b", false},
+		{"a bare name the file does not define", "nowhere"},
+		{"a user profile", "provider"},
+		{"another record's projection", "other/base"},
+		{"the pulled record's own name", "llm/base"},
+		{"an undeclared own-record spelling", "llm/missing"},
+		{"a deeper path under no record", "a/b/c"},
+		{"a leading slash", "/base"},
+		{"a space", "my profile"},
+		{"a control character", "a\u0001b"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			content := fmt.Appendf(nil, "profiles:\n  base:\n    env:\n      K: v\n  child:\n    extends: %q\n    env:\n      J: w\n", tc.target)
 			_, err := Gate(content, GateOpts{Record: "llm"})
-			if tc.wantOK {
-				if err != nil {
-					t.Fatalf("Gate refused shaped target %q: %v", tc.target, err)
-				}
-				return
-			}
-			gateRequireError(t, err, "shaped profile name")
+			gateRequireError(t, err, "outside this file", "child", quoteName(tc.target))
 			if strings.ContainsRune(err.Error(), '\u0001') {
 				t.Fatalf("error carries the raw control character: %q", err)
 			}
@@ -188,6 +172,11 @@ func TestGateRejectsUnshapedExtends(t *testing.T) {
 		content := []byte("profiles:\n  child:\n    extends:\n      parent: reason\n    env:\n      J: w\n")
 		_, err := Gate(content, GateOpts{Record: "llm"})
 		gateRequireError(t, err, "not a valid config")
+	})
+	t.Run("no-prefix does not widen the namespace", func(t *testing.T) {
+		content := []byte("profiles:\n  a:\n    extends: llm/b\n    env:\n      K: v\n  b:\n    env:\n      J: w\n")
+		_, err := Gate(content, GateOpts{Record: "llm", NoPrefix: true})
+		gateRequireError(t, err, "outside this file", quoteName("llm/b"))
 	})
 }
 
@@ -229,109 +218,69 @@ func TestGateRejectsInFileExtendsCycles(t *testing.T) {
 	}
 }
 
-// A target spelled under the pulled record's own prefix denotes the file's own
-// profile: projection renames the profile to that form and leaves the target as
-// written, so the pre-projection file holds an in-file edge the bare-name set
-// alone does not reveal.
-func TestGateTreatsOwnRecordPrefixedExtendsAsInFile(t *testing.T) {
-	t.Run("self cycle through the record prefix", func(t *testing.T) {
-		content := []byte("profiles:\n  base:\n    extends: llm/base\n    env:\n      K: v\n")
-		_, err := Gate(content, GateOpts{Record: "llm"})
-		if !errors.Is(err, config.ErrExtendsCycle) {
-			t.Fatalf("Gate error = %v, want config.ErrExtendsCycle", err)
-		}
-	})
-	t.Run("two profiles cycle through the record prefix", func(t *testing.T) {
-		content := []byte(`profiles:
-  a:
-    extends: llm/b
+// A declared child is inside the file's namespace: extending record/profile
+// while the file's own remotes: section declares that record is the composition
+// the namespace rule admits, and it draws no refusal nor any other notice —
+// the section is what nested composition loads from.
+func TestGateAcceptsDeclaredChildExtends(t *testing.T) {
+	content := []byte(`profiles:
+  qwen:
+    extends: claude/default
     env:
-      K: v
-  b:
-    extends: a
-    env:
-      J: w
+      MODEL: qwen
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
 `)
-		_, err := Gate(content, GateOpts{Record: "llm"})
-		if !errors.Is(err, config.ErrExtendsCycle) {
-			t.Fatalf("Gate error = %v, want config.ErrExtendsCycle", err)
-		}
-	})
-	t.Run("prefixed sibling is a same-file edge", func(t *testing.T) {
-		content := []byte(`profiles:
-  a:
-    extends: llm/b
-    env:
-      K: v
-  b:
-    env:
-      J: w
-`)
-		warnings, err := Gate(content, GateOpts{Record: "llm"})
-		if err != nil {
-			t.Fatalf("Gate refused a same-file edge: %v", err)
-		}
-		if len(warnings) != 0 {
-			t.Fatalf("a same-file edge was classified as passthrough: %q", warnings)
-		}
-	})
-	t.Run("no-prefix keeps the prefixed target a passthrough", func(t *testing.T) {
-		content := []byte(`profiles:
-  a:
-    extends: llm/b
-    env:
-      K: v
-  b:
-    env:
-      J: w
-`)
-		warnings, err := Gate(content, GateOpts{Record: "llm", NoPrefix: true})
-		if err != nil {
-			t.Fatalf("Gate refused a no-prefix passthrough: %v", err)
-		}
-		gateRequireWarning(t, warnings, `"llm/b"`, "unresolvable")
-	})
+	warnings, err := Gate(content, GateOpts{Record: "llm"})
+	if err != nil {
+		t.Fatalf("Gate refused a declared child target: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want a declared-child pull admitted in silence", warnings)
+	}
 }
 
-// An own-record spelling the file does not define is still a passthrough, so it
-// classifies through the merged view like any other: a user profile may legally
-// carry one slash, and a record prefix may be another record's namespace. The
-// own-record note is the fallback for what nothing in the merged view binds.
-func TestGateClassifiesUndeclaredOwnRecordTarget(t *testing.T) {
-	content := []byte("profiles:\n  a:\n    extends: llm/missing\n    env:\n      K: v\n")
-	t.Run("no binding in the merged view", func(t *testing.T) {
+// An in-namespace target must still be spelled a profile can carry: the
+// projection strips control characters before it classifies, so a target with an
+// invalid segment would be accepted here and dangle on a name no profile can
+// have. Every /-separated segment therefore passes the record-name rule, while
+// the segment count stays the subtree rule's business, not a limit.
+func TestGateValidatesTargetSegments(t *testing.T) {
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{"a control character in a declared child's rest", "claude/sub\x01p"},
+		{"an empty segment", "claude//x"},
+		{"a trailing slash", "claude/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := fmt.Appendf(nil, "profiles:\n  base:\n    env:\n      K: v\n  child:\n    extends: %q\n    env:\n      J: w\nremotes:\n  claude:\n    url: https://example.com/claude.yaml\n", tc.target)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, "segment is not a valid profile name", "child", quoteName(tc.target))
+			if strings.ContainsRune(err.Error(), '\u0001') {
+				t.Fatalf("error carries the raw control character: %q", err)
+			}
+		})
+	}
+	t.Run("a clean multi-segment subtree target is accepted", func(t *testing.T) {
+		content := []byte(`profiles:
+  child:
+    extends: claude/sub/profile
+    env:
+      J: w
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
 		warnings, err := Gate(content, GateOpts{Record: "llm"})
 		if err != nil {
-			t.Fatalf("Gate refused an own-record passthrough: %v", err)
+			t.Fatalf("Gate refused a clean subtree target: %v", err)
 		}
-		gateRequireWarning(t, warnings, `"llm/missing"`, "the remote's own prefix names no profile the file defines")
-	})
-	t.Run("a user profile may carry the slash", func(t *testing.T) {
-		merged := config.Config{
-			Profiles:     map[string]config.Profile{"llm/missing": {Env: map[string]string{"M": "1"}}},
-			ProfileLayer: map[string]string{"llm/missing": config.LayerLocal},
-		}
-		warnings, err := Gate(content, GateOpts{Record: "llm", Merged: merged})
-		if err != nil {
-			t.Fatalf("Gate refused a user-profile passthrough: %v", err)
-		}
-		gateRequireWarning(t, warnings, `"llm/missing"`, "your local profile of that name")
-		if gateWarning(warnings, "the remote's own prefix names no profile") {
-			t.Fatalf("a bound user profile was reported as unresolvable: %q", warnings)
-		}
-	})
-	t.Run("another record's namespace binds it", func(t *testing.T) {
-		merged := config.Config{
-			Profiles:     map[string]config.Profile{"llm/missing": {Env: map[string]string{"M": "1"}}},
-			ProfileLayer: map[string]string{"llm/missing": "remote:other"},
-		}
-		warnings, err := Gate(content, GateOpts{Record: "llm", Merged: merged})
-		if err != nil {
-			t.Fatalf("Gate refused a cross-remote passthrough: %v", err)
-		}
-		gateRequireWarning(t, warnings, `"llm/missing"`, `another remote, "other"`)
-		if gateWarning(warnings, "the remote's own prefix names no profile") {
-			t.Fatalf("a bound remote profile was reported as unresolvable: %q", warnings)
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %q, want a clean subtree target admitted in silence", warnings)
 		}
 	})
 }
@@ -415,7 +364,10 @@ func TestGateChecksKDFParams(t *testing.T) {
 	}
 }
 
-func TestGateWarnsNestedRemotes(t *testing.T) {
+// A declared remotes: section is the shape nested composition loads from, so
+// it is no longer an advisory: the gate admits it in silence, and only a key
+// outside the record-name rule still draws a refusal.
+func TestGateAdmitsNestedRemotesSection(t *testing.T) {
 	content := []byte(`profiles:
   a:
     env:
@@ -428,20 +380,32 @@ remotes:
 	if err != nil {
 		t.Fatalf("Gate refused content with a nested remotes section: %v", err)
 	}
-	gateRequireWarning(t, warnings, "remotes:", "ignored")
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want the remotes: section admitted in silence", warnings)
+	}
 }
 
+// A remotes: section a fetched file declares is parsed before any scoping runs,
+// and its keys are record names: one outside the record-name rule draws the
+// load-time refusal, whatever its extends targets spell.
 func TestGateRejectsInvalidNestedRecordName(t *testing.T) {
-	content := []byte(`profiles:
-  a:
-    env:
-      K: v
-remotes:
-  a/b:
-    url: https://example.com/x.yaml
-`)
-	_, err := Gate(content, GateOpts{Record: "llm"})
-	gateRequireError(t, err, "invalid record name")
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"a slash", "a/b"},
+		{"a control character", "cl\u0001aude"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := fmt.Appendf(nil, "profiles:\n  a:\n    env:\n      K: v\nremotes:\n  %q:\n    url: https://example.com/x.yaml\n", tc.key)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, "invalid record name", quoteName(tc.key))
+			if strings.ContainsRune(err.Error(), '\u0001') {
+				t.Fatalf("error carries the raw control character: %q", err)
+			}
+		})
+	}
 }
 
 func TestGateWarnsNoPrefixCollisions(t *testing.T) {
@@ -479,61 +443,6 @@ func TestGateWarnsNoPrefixCollisions(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("a prefixed pull warned about collisions: %q", warnings)
-	}
-}
-
-func TestGateWarnsPassthroughExtends(t *testing.T) {
-	content := []byte(`profiles:
-  qwen:
-    extends: provider
-    env:
-      MODEL: qwen
-  twin:
-    extends: provider
-    env:
-      MODEL: twin
-  worker:
-    extends: mine
-    env:
-      ROLE: worker
-  relay:
-    extends: other/base
-    env:
-      HOST: relay
-  orphan:
-    extends: nowhere
-    env:
-      X: "1"
-  child:
-    extends: qwen
-    env:
-      Y: "2"
-`)
-	merged := config.Config{
-		Profiles: map[string]config.Profile{
-			"provider":   {Env: map[string]string{"P": "1"}},
-			"mine":       {Env: map[string]string{"M": "1"}},
-			"other/base": {Env: map[string]string{"B": "1"}},
-		},
-		ProfileLayer: map[string]string{
-			"provider":   config.LayerGlobal,
-			"mine":       config.LayerLocal,
-			"other/base": "remote:other",
-		},
-	}
-	warnings, err := Gate(content, GateOpts{Record: "llm", Merged: merged})
-	if err != nil {
-		t.Fatalf("Gate refused passthrough extends: %v", err)
-	}
-	gateRequireWarning(t, warnings, `"provider"`, "your global profile")
-	gateRequireWarning(t, warnings, `"mine"`, "your local profile")
-	gateRequireWarning(t, warnings, `"other/base"`, "another remote", `"other"`)
-	gateRequireWarning(t, warnings, `"nowhere"`, "unresolvable")
-	if got := gateCountWarnings(warnings, "does not define"); got != 4 {
-		t.Fatalf("%d passthrough warnings, want 4 (in-file parents and duplicate targets report once): %q", got, warnings)
-	}
-	if got := gateCountWarnings(warnings, `extends "provider"`); got != 1 {
-		t.Fatalf("%d warnings for one duplicated target, want 1: %q", got, warnings)
 	}
 }
 
@@ -577,4 +486,52 @@ func TestGateRejectsAliasFlood(t *testing.T) {
 	if _, err := Gate(flood(999), GateOpts{Record: "llm"}); err != nil {
 		t.Fatalf("Gate refused exactly 1000 anchors and aliases: %v", err)
 	}
+}
+
+// The records a fetched file declares are about to be fetched and stored under
+// their names, so they pass the same usability rule a user's own remotes:
+// section passes on write: a declaration the pull could never act on must
+// refuse the file before any of it lands.
+func TestGateRejectsUnusableNestedDeclarations(t *testing.T) {
+	cases := []struct {
+		name    string
+		remotes string
+		want    []string
+	}{
+		{"plain http url", "  claude:\n    url: http://example.com/c.yaml\n", []string{"https only", "http://example.com/c.yaml"}},
+		{"a source with no scheme", "  claude:\n    url: not-a-source\n", []string{"no scheme", "not-a-source"}},
+		{"missing url", "  claude:\n    ref: v1\n", []string{"url is required", "claude"}},
+		{"case-fold siblings", "  Claude:\n    url: https://example.com/c.yaml\n  claude:\n    url: https://example.com/c.yaml\n", []string{"differ only in case", "Claude", "claude"}},
+		{"reserved device name", "  con:\n    url: https://example.com/c.yaml\n", []string{"reserved Windows device name", "con"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("profiles:\n  a:\n    env:\n      K: v\nremotes:\n" + tc.remotes)
+			_, err := Gate(content, GateOpts{Record: "llm"})
+			gateRequireError(t, err, tc.want...)
+		})
+	}
+}
+
+// A record whose name equals one of the file's own profile names is no
+// technical collision — the record's profiles land under <name>/ while the
+// profile keeps the bare name — so it is admitted, with one warning for the
+// human reading the file.
+func TestGateWarnsChildNameEqualsProfile(t *testing.T) {
+	content := []byte(`profiles:
+  claude:
+    env:
+      K: v
+remotes:
+  claude:
+    url: https://example.com/claude.yaml
+`)
+	warnings, err := Gate(content, GateOpts{Record: "llm"})
+	if err != nil {
+		t.Fatalf("Gate refused a record named like a profile: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one name-shared-with-a-profile warning", warnings)
+	}
+	gateRequireWarning(t, warnings, `"claude"`)
 }
