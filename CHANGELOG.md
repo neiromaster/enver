@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.12.0 - 2026-11-24
+
 - **New:** a fetched remote config can declare its own `remotes:` records, and
   one pull brings the whole tree: the provider config and the base it extends
   are fetched, gated and stored together, nested under the record's path
