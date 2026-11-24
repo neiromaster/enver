@@ -734,25 +734,7 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		if err != nil {
 			return envFold{}, err
 		}
-		// The mark fold is dense like the value fold: every key this parent
-		// defines takes its mark from this parent alone, so a later unmarked
-		// entry clears the mark an earlier sibling put there.
-		for k, v := range pf.env {
-			envname.Set(out.env, k, v)
-			envname.Delete(out.marked, k)
-		}
-		for k, v := range pf.comments {
-			envname.Set(out.comments, k, v)
-		}
-		for k, v := range pf.sources {
-			envname.Set(out.sources, k, v)
-		}
-		for k, v := range pf.marked {
-			envname.Set(out.marked, k, v)
-		}
-		for k, v := range pf.unsets {
-			envname.Set(out.unsets, k, v)
-		}
+		mergeFold(&out, pf)
 	}
 	delete(visiting, name)
 	// Carried earlier-era fences act between the inherited contributions and
@@ -816,6 +798,81 @@ func (c Config) resolveEnv(name string, visiting map[string]bool) (envFold, erro
 		envname.Delete(out.marked, k)
 	}
 	return out, nil
+}
+
+// mergeFold folds a fully resolved fold (src) into the accumulating fold
+// (out): the values, comments, sources, and marks src carries take their keys
+// over wholesale. The mark fold is dense like the value fold: every key src
+// defines takes its mark from src alone, so a later unmarked entry clears the
+// mark an earlier sibling put there. A tombstone in src never deletes a live
+// key here — the sweep owns that invariant at each fold's end.
+func mergeFold(out *envFold, src envFold) {
+	for k, v := range src.env {
+		envname.Set(out.env, k, v)
+		envname.Delete(out.marked, k)
+	}
+	for k, v := range src.comments {
+		envname.Set(out.comments, k, v)
+	}
+	for k, v := range src.sources {
+		envname.Set(out.sources, k, v)
+	}
+	for k, v := range src.marked {
+		envname.Set(out.marked, k, v)
+	}
+	for k, v := range src.unsets {
+		envname.Set(out.unsets, k, v)
+	}
+}
+
+// ResolveProfiles resolves an ordered composition of profiles: the anonymous
+// run-line equivalent of a profile whose extends lists the same names. Each
+// listed profile resolves with its own full extends chain first; the sibling
+// folds then merge left-to-right, so a later profile overrides an earlier one
+// on a shared env key. The seam behaves exactly like the parent seam inside
+// one profile: a sibling's unset cannot strip another sibling's define (the
+// sweep drops the stale tombstone in either list order), marks move with their
+// values, comments follow the winning value, and Sources name the winning
+// profile per key. Chain lists the lineages in list order, deduplicated. A
+// cycle inside a member's own chain, an unknown name, or a mixed-era salt set
+// errors exactly as a single-profile resolve of the same content would.
+func (c Config) ResolveProfiles(names []string) (Resolved, error) {
+	var out envFold
+	out.env = map[string]string{}
+	out.comments = map[string]string{}
+	out.sources = map[string]Source{}
+	out.marked = map[string]bool{}
+	out.unsets = map[string]Source{}
+	for _, name := range names {
+		f, err := c.resolveEnv(name, map[string]bool{})
+		if err != nil {
+			return Resolved{}, err
+		}
+		mergeFold(&out, f)
+	}
+	// The sweep is the invariant's single enforcement point at the seam: a
+	// tombstone landing next to a live key — the unsetting sibling folded
+	// before the defining one — must not survive the composition.
+	for k := range out.unsets {
+		if envname.Has(out.env, k) {
+			envname.Delete(out.unsets, k)
+			continue
+		}
+		envname.Delete(out.marked, k)
+	}
+	seen := map[string]bool{}
+	var chain []string
+	for _, name := range names {
+		chain = append(chain, c.chainOf(name, seen)...)
+	}
+	return Resolved{
+		Env:      out.env,
+		Comments: out.comments,
+		Sources:  out.sources,
+		Marked:   markedOrNil(out.marked),
+		Unsets:   out.unsets,
+		Chain:    chain,
+	}, nil
 }
 
 // MarksForWrite answers the secret-mark question for a caller writing keys into

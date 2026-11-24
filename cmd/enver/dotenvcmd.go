@@ -22,18 +22,14 @@ var (
 type confirmFunc func(string, bool) (bool, error)
 
 var dotenvCmd = &cobra.Command{
-	Use:               "dotenv [profile]",
+	Use:               "dotenv [profiles...]",
 	Short:             "Export a profile to a .env file (with comments)",
-	Args:              cobra.MaximumNArgs(1),
+	Args:              cobra.ArbitraryArgs,
 	SilenceUsage:      true,
 	SilenceErrors:     true,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profile := ""
-		if len(args) > 0 {
-			profile = args[0]
-		}
-		return runDotenv(cmd.OutOrStdout(), profile, dotenvOut, dotenvNoHeader, dotenvForce, ui.Confirm)
+		return runDotenv(cmd.OutOrStdout(), args, dotenvOut, dotenvNoHeader, dotenvForce, ui.Confirm)
 	},
 }
 
@@ -43,14 +39,14 @@ func init() {
 	dotenvCmd.Flags().BoolVar(&dotenvForce, "force", false, "overwrite --out target without prompting")
 }
 
-// runDotenv resolves the profile, formats it as a .env document, and writes the
-// result to stdout (outPath == "") or to outPath. confirm is consulted only when
-// outPath exists and force is false. A comment-resolution error is non-fatal:
-// the file is still produced, with fewer or no comments.
-func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, confirm confirmFunc) error {
+// runDotenv resolves the profile composition, formats it as a .env document,
+// and writes the result to stdout (outPath == "") or to outPath. confirm is
+// consulted only when outPath exists and force is false. A comment-resolution
+// error is non-fatal: the file is still produced, with fewer or no comments.
+func runDotenv(stdout io.Writer, profiles []string, outPath string, noHeader, force bool, confirm confirmFunc) error {
 	resolveOpts := appOpts()
 	resolveOpts.NoExpand = true // dotenv emits raw templates, not expanded values
-	profile, r, err := app.ResolveDefault(resolveOpts, profile)
+	label, r, err := app.ResolveProfiles(resolveOpts, profiles)
 	if err != nil {
 		return err
 	}
@@ -59,7 +55,7 @@ func runDotenv(stdout io.Writer, profile, outPath string, noHeader, force bool, 
 	for k, s := range r.Unsets {
 		attribution[k] = s.Profile
 	}
-	out := dotenv.Format(r.Env, r.Comments, attribution, dotenv.Options{Header: !noHeader, Profile: profile, Chain: r.Chain})
+	out := dotenv.Format(r.Env, r.Comments, attribution, dotenv.Options{Header: !noHeader, Profile: label, Chain: r.Chain})
 
 	if outPath == "" {
 		_, err = stdout.Write(out)

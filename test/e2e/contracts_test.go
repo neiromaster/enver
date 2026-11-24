@@ -49,16 +49,55 @@ func TestCompleteListsProfiles(t *testing.T) {
 	if r.ExitCode != 0 {
 		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
+	tokens := completionTokens(r.Stdout)
+	if !slices.Contains(tokens, "p") || !slices.Contains(tokens, "q") {
+		t.Fatalf("completion must offer the profile tokens, got: %q", r.Stdout)
+	}
+}
+
+// completionTokens extracts the candidate tokens from a __complete stdout,
+// dropping cobra's ":<directive>" tail line.
+func completionTokens(out string) []string {
 	var tokens []string
-	for _, line := range strings.Split(strings.TrimRight(r.Stdout, "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		token, _, _ := strings.Cut(line, "\t")
 		if token == "" || strings.HasPrefix(token, ":") {
 			continue // the ":<directive>" tail line is cobra plumbing, not a candidate
 		}
 		tokens = append(tokens, token)
 	}
-	if !slices.Contains(tokens, "p") || !slices.Contains(tokens, "q") {
-		t.Fatalf("completion must offer the profile tokens, got: %q", r.Stdout)
+	return tokens
+}
+
+func TestCompleteXSecondProfilePosition(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n  q:\n    env:\n      A: \"2\"\n")
+	r := s.run("__complete", "x", "p", "")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	tokens := completionTokens(r.Stdout)
+	if !slices.Contains(tokens, "q") {
+		t.Fatalf("the second position must still offer profiles, got: %q", r.Stdout)
+	}
+	if slices.Contains(tokens, "p") {
+		t.Fatalf("an already typed profile must leave the candidates, got: %q", r.Stdout)
+	}
+	if last := strings.Split(strings.TrimRight(r.Stdout, "\n"), "\n"); last[len(last)-1] != ":4" {
+		t.Fatalf("directive = %q, want :4 (NoFileComp)", last[len(last)-1])
+	}
+}
+
+func TestCompleteXAfterDashIsFileCompletion(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      A: \"1\"\n")
+	r := s.run("__complete", "x", "p", "--", "")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	lines := strings.Split(strings.TrimRight(r.Stdout, "\n"), "\n")
+	if lines[len(lines)-1] != ":0" {
+		t.Fatalf("directive = %q, want :0 (file completion after --)", lines[len(lines)-1])
 	}
 }
 

@@ -17,15 +17,11 @@ import (
 )
 
 var showCmd = &cobra.Command{
-	Use:               "show [profile]",
+	Use:               "show [profiles...]",
 	Short:             "Preview a profile's resolved environment (masked)",
-	Args:              cobra.MaximumNArgs(1),
+	Args:              cobra.ArbitraryArgs,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profile := ""
-		if len(args) > 0 {
-			profile = args[0]
-		}
 		switch showFormat {
 		case "text", "json":
 		default:
@@ -39,7 +35,7 @@ var showCmd = &cobra.Command{
 		// env entirely.
 		opts.TolerateMissingKey = showFormat == "text"
 		opts.TolerateRemoteWrongKey = true
-		p, r, err := app.ResolveDefault(opts, profile)
+		p, r, err := app.ResolveProfiles(opts, args)
 		if err != nil {
 			return err
 		}
@@ -58,16 +54,12 @@ var showCmd = &cobra.Command{
 }
 
 var exportCmd = &cobra.Command{
-	Use:               "export [profile]",
+	Use:               "export [profiles...]",
 	Short:             "Print `export K=V` for a profile (unmasked, for eval)",
-	Args:              cobra.MaximumNArgs(1),
+	Args:              cobra.ArbitraryArgs,
 	ValidArgsFunction: completeProfile,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profile := ""
-		if len(args) > 0 {
-			profile = args[0]
-		}
-		_, r, err := app.ResolveDefault(appOpts(), profile)
+		_, r, err := app.ResolveProfiles(appOpts(), args)
 		if err != nil {
 			return err
 		}

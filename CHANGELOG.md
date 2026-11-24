@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **New:** read commands compose profiles at launch. `enver x base slotA --
+  claude` (and the same profile list in `show`, `export`, `dotenv`) resolves
+  each member with its own `extends` chain and folds the members left to
+  right — an anonymous `extends`: later members win shared keys, sibling
+  unsets never hide sibling values (only a member's own chain fences), and
+  the config `default` applies only when the list is empty. The composed
+  label `base+slotA` names the run in the tab title, JSON `profile` field
+  and dotenv header; completion offers profiles at every position before
+  `--` — already-typed members excluded — and falls back to the child
+  command's file completion after `--`.
+
 ## v0.12.0 - 2026-11-24
 
 - **New:** a fetched remote config can declare its own `remotes:` records, and

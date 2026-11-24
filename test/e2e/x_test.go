@@ -95,6 +95,53 @@ func TestXFenceHidesUnsetFromChild(t *testing.T) {
 	}
 }
 
+func TestXComposesProfilesLeftToRight(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n" +
+		"  base:\n    env:\n      ENDPOINT: from-base\n" +
+		"  slotA:\n    env:\n      ENDPOINT: from-a\n      ONLY_A: a\n")
+	r := s.run(append([]string{"x", "base", "slotA", "--"}, childPrinter("ENDPOINT")...)...)
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if got := strings.TrimSpace(r.Stdout); got != "from-a" {
+		t.Fatalf("the later profile must override the earlier one, got %q (stderr: %s)", got, r.Stderr)
+	}
+	probe := s.run(append([]string{"x", "base", "slotA", "--"}, childPrinter("ONLY_A")...)...)
+	if probe.ExitCode != 0 || strings.TrimSpace(probe.Stdout) != "a" {
+		t.Fatalf("the union of members' keys must reach the child, got %q (stderr: %s)", probe.Stdout, probe.Stderr)
+	}
+}
+
+func TestXCompositionIgnoresDefault(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n" +
+		"  base:\n    env:\n      ENDPOINT: from-base\n" +
+		"  slotA:\n    env:\n      ONLY_A: a\n")
+	if r := s.run("default", "base"); r.ExitCode != 0 {
+		t.Fatalf("default set failed: %s", r.Stderr)
+	}
+	r := s.run(append([]string{"x", "slotA", "--"}, childAbsentProbe("ENDPOINT")...)...)
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if got := strings.TrimSpace(r.Stdout); got != "absent" {
+		t.Fatalf("an explicit list must replace the default, got ENDPOINT=%q, want absent", got)
+	}
+}
+
+func TestXMultiProfileNoDashErrors(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: \"1\"\n")
+	r := s.run("x", "base", "slotA", "sh")
+	if r.ExitCode == 0 {
+		t.Fatal("a run line without -- must fail loudly")
+	}
+	if !strings.Contains(r.Stderr, "no `--` before the command") {
+		t.Fatalf("stderr must explain the missing --, got: %s", r.Stderr)
+	}
+}
+
 func TestXInheritedUnsetStillFences(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  leaf:\n    extends: [base]\n    unset: [A]\n")
