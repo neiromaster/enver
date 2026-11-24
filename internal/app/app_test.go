@@ -18,28 +18,62 @@ import (
 	"github.com/neiromaster/enver/internal/runner"
 )
 
-func TestParseProfileAndCmd(t *testing.T) {
+func TestParseProfilesAndCmd(t *testing.T) {
 	cases := []struct {
-		name     string
-		args     []string
-		dashAt   int
-		wantProf string
-		wantCmd  []string
+		name      string
+		args      []string
+		dashAt    int
+		wantProfs []string
+		wantCmd   []string
 	}{
-		{"profile then command", []string{"anth", "claude"}, 1, "anth", []string{"claude"}},
-		{"default profile via dash", []string{"claude"}, 0, "", []string{"claude"}},
-		{"command keeps its own flags", []string{"anth", "claude", "--model", "x"}, 1, "anth", []string{"claude", "--model", "x"}},
-		{"no dash: profile only", []string{"anth"}, -1, "anth", nil},
-		{"no dash: empty", nil, -1, "", nil},
+		{"profile then command", []string{"anth", "claude"}, 1, []string{"anth"}, []string{"claude"}},
+		{"two profiles then command", []string{"a", "b", "cmd"}, 2, []string{"a", "b"}, []string{"cmd"}},
+		{"three profiles then command", []string{"a", "b", "c", "cmd"}, 3, []string{"a", "b", "c"}, []string{"cmd"}},
+		{"default profile via dash", []string{"claude"}, 0, nil, []string{"claude"}},
+		{"command keeps its own flags", []string{"anth", "cobra", "claude", "--model", "x"}, 1, []string{"anth"}, []string{"cobra", "claude", "--model", "x"}},
+		{"no dash: nothing is interpretable", []string{"anth"}, -1, nil, nil},
+		{"no dash: empty", nil, -1, nil, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			prof, cmd := ParseProfileAndCmd(c.args, c.dashAt)
-			if prof != c.wantProf {
-				t.Errorf("profile = %q, want %q", prof, c.wantProf)
+			profs, cmd := ParseProfilesAndCmd(c.args, c.dashAt)
+			if !slices.Equal(profs, c.wantProfs) {
+				t.Errorf("profiles = %v, want %v", profs, c.wantProfs)
 			}
 			if !slices.Equal(cmd, c.wantCmd) {
 				t.Errorf("cmdArgs = %v, want %v", cmd, c.wantCmd)
+			}
+		})
+	}
+}
+
+func TestProfilesOrDefault(t *testing.T) {
+	cases := []struct {
+		name      string
+		profiles  []string
+		def       string
+		want      []string
+		wantError bool
+	}{
+		{"default applied to an empty list", nil, "dev", []string{"dev"}, false},
+		{"no list and no default errors", nil, "", nil, true},
+		{"explicit list ignores the default", []string{"a", "b"}, "dev", []string{"a", "b"}, false},
+		{"explicit single keeps default ignored", []string{"solo"}, "dev", []string{"solo"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := profilesOrDefault(c.profiles, c.def)
+			if c.wantError {
+				if err == nil || !strings.Contains(err.Error(), "no default set in config") {
+					t.Fatalf("err = %v, want the no-default error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("profilesOrDefault: %v", err)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Fatalf("profiles = %v, want %v", got, c.want)
 			}
 		})
 	}
@@ -89,7 +123,7 @@ func TestResolveLazyKey(t *testing.T) {
 		"p": {Env: map[string]string{"MODEL": "claude-sonnet-5"}},
 	}}
 	t.Setenv("ENVER_KEY", "")
-	r, err := resolve(cfg, "p", Options{})
+	r, err := resolve(cfg, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatalf("plaintext resolve: %v", err)
 	}
@@ -118,12 +152,12 @@ func TestResolveLazyKey(t *testing.T) {
 	encCfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"API_KEY": enc}},
 	}}
-	if _, err := resolve(encCfg, "e", Options{KeyPath: "/nonexistent/key"}); err == nil {
+	if _, err := resolve(encCfg, []string{"e"}, Options{KeyPath: "/nonexistent/key"}); err == nil {
 		t.Fatal("encrypted profile without key should error")
 	}
 
 	// Same profile with the right key file → decrypts.
-	r2, err := resolve(encCfg, "e", Options{KeyPath: kpath})
+	r2, err := resolve(encCfg, []string{"e"}, Options{KeyPath: kpath})
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
@@ -153,7 +187,7 @@ func TestResolveRecordsEncrypted(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"p": {Env: map[string]string{"API_KEY": enc, "MODEL": "claude-sonnet-5"}},
 	}}
-	r, err := resolve(cfg, "p", Options{KeyPath: kpath})
+	r, err := resolve(cfg, []string{"p"}, Options{KeyPath: kpath})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -170,7 +204,7 @@ func TestResolveRecordsEncrypted(t *testing.T) {
 	plain := config.Config{Profiles: map[string]config.Profile{
 		"p": {Env: map[string]string{"MODEL": "claude-sonnet-5"}},
 	}}
-	pr, err := resolve(plain, "p", Options{})
+	pr, err := resolve(plain, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatalf("plaintext resolve: %v", err)
 	}
@@ -224,7 +258,7 @@ func noKeyFixture(t *testing.T) string {
 func TestResolveToleratesMissingKey(t *testing.T) {
 	cfgPath := noKeyFixture(t)
 	t.Setenv("TOKEN", "from-shell")
-	_, r, err := ResolveDefault(Options{ConfigPath: cfgPath, NoLocal: true, TolerateMissingKey: true}, "work")
+	_, r, err := ResolveProfiles(Options{ConfigPath: cfgPath, NoLocal: true, TolerateMissingKey: true}, []string{"work"})
 	if err != nil {
 		t.Fatalf("tolerant resolve must not fail: %v", err)
 	}
@@ -255,7 +289,7 @@ func TestResolveToleranceDoesNotSwallowForeignEra(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	opts := Options{ConfigPath: path, NoLocal: true, TolerateMissingKey: true}
-	if _, _, err := ResolveDefault(opts, "work"); err == nil || errors.Is(err, ErrNoKey) {
+	if _, _, err := ResolveProfiles(opts, []string{"work"}); err == nil || errors.Is(err, ErrNoKey) {
 		t.Fatalf("a foreign era must stay a hard error, got %v", err)
 	} else if !strings.Contains(err.Error(), "unsupported encrypted value") {
 		t.Fatalf("err = %v, want unsupported encrypted value", err)
@@ -267,7 +301,7 @@ func TestResolveToleranceDoesNotSwallowForeignEra(t *testing.T) {
 // encrypted keys that blocked the run.
 func TestResolveFailsWithoutKeyByDefault(t *testing.T) {
 	cfgPath := noKeyFixture(t)
-	_, _, err := ResolveDefault(Options{ConfigPath: cfgPath, NoLocal: true}, "work")
+	_, _, err := ResolveProfiles(Options{ConfigPath: cfgPath, NoLocal: true}, []string{"work"})
 	if !errors.Is(err, ErrNoKey) {
 		t.Fatalf("want ErrNoKey, got %v", err)
 	}
@@ -291,7 +325,7 @@ func TestResolveToleranceDoesNotSwallowWrongKey(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	opts := Options{ConfigPath: cfgPath, NoLocal: true, KeyPath: otherKey, TolerateMissingKey: true}
-	if _, _, err := ResolveDefault(opts, "work"); err == nil {
+	if _, _, err := ResolveProfiles(opts, []string{"work"}); err == nil {
 		t.Fatal("a wrong key must fail even when a missing key is tolerated")
 	} else if errors.Is(err, ErrNoKey) {
 		t.Fatalf("a wrong key is not a missing key: %v", err)
@@ -351,7 +385,7 @@ func TestRemoteWrongKeyDegrades(t *testing.T) {
 		TolerateMissingKey:     true,
 		TolerateRemoteWrongKey: true,
 	}
-	_, r, err := ResolveDefault(displayOpts, profile)
+	_, r, err := ResolveProfiles(displayOpts, []string{profile})
 	if err != nil {
 		t.Fatalf("a wrong key on remote content must degrade, not fail: %v", err)
 	}
@@ -372,7 +406,7 @@ func TestRemoteWrongKeyDegrades(t *testing.T) {
 	}
 
 	execOpts := Options{ConfigPath: cfgPath, NoLocal: true, KeyPath: keyPath, Name: "enver x"}
-	_, _, err = ResolveDefault(execOpts, profile)
+	_, _, err = ResolveProfiles(execOpts, []string{profile})
 	if err == nil {
 		t.Fatal("the exec path must refuse rather than run a child with a secret missing")
 	}
@@ -430,7 +464,7 @@ func TestOwnWrongKeyOverRemoteBaseHardFails(t *testing.T) {
 		TolerateMissingKey:     true,
 		TolerateRemoteWrongKey: true,
 	}
-	_, _, err = ResolveDefault(opts, "dev")
+	_, _, err = ResolveProfiles(opts, []string{"dev"})
 	if err == nil {
 		t.Fatal("the user's own unreadable ciphertext must fail the resolve despite the readable remote copy beneath it")
 	}
@@ -454,7 +488,7 @@ func TestOwnWrongKeyStillHardFails(t *testing.T) {
 		TolerateMissingKey:     true,
 		TolerateRemoteWrongKey: true,
 	}
-	_, _, err := ResolveDefault(opts, "work")
+	_, _, err := ResolveProfiles(opts, []string{"work"})
 	if err == nil {
 		t.Fatal("user-layer ciphertext a wrong key cannot read must stay a hard error")
 	}
@@ -473,7 +507,7 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 	t.Setenv("S", "sec")
 
 	// default: expanded.
-	got, err := resolve(cfg, "p", Options{})
+	got, err := resolve(cfg, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +515,7 @@ func TestResolveExpandsAndNoExpand(t *testing.T) {
 		t.Errorf("Resolve did not expand: %+v", got.Env)
 	}
 	// NoExpand: raw templates preserved.
-	got, err = resolve(cfg, "p", Options{NoExpand: true})
+	got, err = resolve(cfg, []string{"p"}, Options{NoExpand: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +532,7 @@ func TestResolveExpansionSeesShellThroughUnset(t *testing.T) {
 	fenced := config.Config{Profiles: map[string]config.Profile{
 		"p": {Env: map[string]string{"DERIVED": "${ENVER_TEST_TOKEN_SRC}"}, Unset: config.Unsets{"ENVER_TEST_TOKEN_SRC"}},
 	}}
-	got, err := resolve(fenced, "p", Options{})
+	got, err := resolve(fenced, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,20 +561,6 @@ func TestRunNoProfileNoDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "enver default") {
 		t.Fatalf("error should hint the fix, got: %v", err)
-	}
-}
-
-func TestProfileOrDefault(t *testing.T) {
-	if p, err := profileOrDefault("", ""); err == nil {
-		t.Fatal("empty profile and empty default should error")
-	} else if p != "" {
-		t.Fatalf("got profile %q on error, want empty", p)
-	}
-	if p, err := profileOrDefault("", "dev"); err != nil || p != "dev" {
-		t.Fatalf("empty profile should fall back to default: p=%q err=%v", p, err)
-	}
-	if p, err := profileOrDefault("prod", "dev"); err != nil || p != "prod" {
-		t.Fatalf("explicit profile should win over default: p=%q err=%v", p, err)
 	}
 }
 
@@ -663,7 +683,7 @@ func TestResolveRecovery(t *testing.T) {
 		Interactive = oldInteractive
 	})
 
-	r, err := resolve(cfg, "e", Options{})
+	r, err := resolve(cfg, []string{"e"}, Options{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -697,7 +717,7 @@ func TestResolveRecoveryWrongPassphrase(t *testing.T) {
 		Interactive = oldInteractive
 	})
 
-	if _, err := resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
+	if _, err := resolve(cfg, []string{"e"}, Options{}); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
 		t.Fatalf("expected wrong-passphrase error, got: %v", err)
 	}
 }
@@ -719,7 +739,7 @@ func TestResolveRecoveryNonInteractive(t *testing.T) {
 	Interactive = func() bool { return false }
 	t.Cleanup(func() { Interactive = oldInteractive })
 
-	if _, err := resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
+	if _, err := resolve(cfg, []string{"e"}, Options{}); err == nil || !strings.Contains(err.Error(), "no key found") {
 		t.Fatalf("expected no-key-found error, got: %v", err)
 	}
 }
@@ -735,7 +755,7 @@ func TestResolveForeignEncFailsLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolve(cfg, "p", Options{}); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
+	if _, err := resolve(cfg, []string{"p"}, Options{}); err == nil || !strings.Contains(err.Error(), "unsupported encrypted value") {
 		t.Fatalf("err = %v, want unsupported encrypted value", err)
 	}
 }
@@ -769,7 +789,7 @@ func TestResolveRecoveryUsesEmbeddedParams(t *testing.T) {
 		Interactive = oldInteractive
 	})
 
-	r, err := resolve(cfg, "p", Options{})
+	r, err := resolve(cfg, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatalf("recovery must derive with embedded params: %v", err)
 	}
@@ -797,7 +817,7 @@ profiles:
 
 	// Empty profile name should resolve to the default profile.
 	opts := Options{ConfigPath: cfgPath, NoLocal: true, Name: "enver x"}
-	name, r, err := ResolveDefault(opts, "")
+	name, r, err := ResolveProfiles(opts, nil)
 	if err != nil {
 		t.Fatalf("ResolveDefault with empty profile: %v", err)
 	}
@@ -809,7 +829,7 @@ profiles:
 	}
 
 	// Named profile should resolve directly.
-	name, r, err = ResolveDefault(opts, "prod")
+	name, r, err = ResolveProfiles(opts, []string{"prod"})
 	if err != nil {
 		t.Fatalf("ResolveDefault with named profile: %v", err)
 	}
@@ -821,7 +841,7 @@ profiles:
 	}
 
 	// Unknown profile must error.
-	if _, _, err := ResolveDefault(opts, "missing"); err == nil {
+	if _, _, err := ResolveProfiles(opts, []string{"missing"}); err == nil {
 		t.Fatal("ResolveDefault on unknown profile must error")
 	}
 }
@@ -854,7 +874,7 @@ func TestResolveRecoveryConflictingEras(t *testing.T) {
 	cfg := config.Config{Profiles: map[string]config.Profile{
 		"e": {Env: map[string]string{"A": encA, "B": encB}},
 	}}
-	if _, err := resolve(cfg, "e", Options{}); err == nil || !strings.Contains(err.Error(), "disagree") {
+	if _, err := resolve(cfg, []string{"e"}, Options{}); err == nil || !strings.Contains(err.Error(), "disagree") {
 		t.Fatalf("expected era-conflict error, got: %v", err)
 	}
 }
@@ -869,7 +889,7 @@ func TestChildSeesShellValueThroughUnset(t *testing.T) {
 		Env:   map[string]string{"OTHER": "x"},
 		Unset: config.Unsets{k},
 	}}}
-	r, err := resolve(cfg, "p", Options{})
+	r, err := resolve(cfg, []string{"p"}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

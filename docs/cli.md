@@ -7,10 +7,10 @@ All commands and global flags. Behavior details: [`config.md`](./config.md),
 ## Commands
 
 ```
-enver x [profile] -- <command> [args...]  Run command with the profile's env
-enver show [profile] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
-enver export [profile] [--format bash|fish|powershell] Print `export K=V` (unmasked, for eval)
-enver dotenv [profile] [-o file] [--no-header] [--force]  Write a profile to a .env file (with comments)
+enver x [profiles...] -- <command> [args...]  Run command with the composed profiles' env
+enver show [profiles...] [--no-mask] [--format text|json]  Preview resolved env (masked by default)
+enver export [profiles...] [--format bash|fish|powershell] Print `export K=V` (unmasked, for eval)
+enver dotenv [profiles...] [-o file] [--no-header] [--force]  Write the composed profiles to a .env file (with comments)
 enver import <file> [profile] [--replace]              Import a .env file into a profile (--extends, --force)
 enver list [--format text|json]          List profiles
 enver add [name]                          Interactively add a profile
@@ -28,7 +28,22 @@ enver update [--check]                    Update the enver binary; --check repor
 ```
 
 On an interactive terminal, `enver x` primes the tab title with the profile
-name before exec, so the child's own title replaces it as soon as it sets one.
+label — the composed `base+slotA` when several profiles are given — before
+exec, so the child's own title replaces it as soon as it sets one.
+
+## Composing profiles
+
+Read commands take several profiles: `enver x base slotA -- claude` composes
+them as an anonymous `extends` — each member resolves with its own full
+`extends` chain, members fold left to right, and a later member wins a shared
+key. Sibling members never fence each other: an `unset` in one member does not
+hide a key another member defines, while an `unset` inside a member's own
+chain fences as usual. The config `default` applies only when the list is
+empty; an explicit list replaces it. `show` renders the composed chain
+(`# profile: base → slotA`), and the composed label `base+slotA` is what the
+tab title, the JSON `profile` field, and the dotenv header carry. Completion
+offers profiles at every position before `--` — already-typed members are
+excluded — and after `--` the child command owns the completion.
 
 `enver update` applies the latest release, dispatching to the package
 manager that owns the install (npm, brew, go install) or replacing a
@@ -50,7 +65,7 @@ enver --version / -h, --help
 
 ## Preview and masking
 
-With no profile, the config's `default` is used. `enver show <profile>`
+With no profile arguments, the config's `default` is used. `enver show`
 previews the resolved env (masked by default); `enver list` lists profiles.
 Every `show` line is annotated with the defining profile and layer
 (`ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)`), so with multi-parent

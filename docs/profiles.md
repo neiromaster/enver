@@ -50,7 +50,9 @@ remote-provided parent shows up there as a dimmed `(external)` row.
 Profile completion follows the same split: read commands (`show`, `export`,
 `dotenv`, `x`) complete against the merged view — both user layers plus every
 remote-projected name — while mutating commands complete only the profiles the
-write target declares.
+write target declares. On a read command every position before `--` offers
+profiles (already-typed members drop out of the candidates), so completion
+keeps working at every step of a composed run line.
 
 ## Editing profiles
 

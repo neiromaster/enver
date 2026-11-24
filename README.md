@@ -21,6 +21,7 @@ ANTHROPIC_MODEL=claude-opus-5  # from opus-models (global)
 ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5-20251001  # from dev (local)
 
 $ enver x dev -- claude          # all of it injected into this child only
+$ enver x dev offline -- claude  # compose profiles: later one wins shared keys
 
 $ enver export offline           # fencing drops keys instead of redefining them
 export ANTHROPIC_BASE_URL='https://api.anthropic.com'
@@ -104,6 +105,7 @@ store, inherits like code, and hands the result to a single child process.
 | Layered configs: remote content ⊕ global store ⊕ project file, per-key overlay, no walk-up | [`config.md`](docs/config.md#layers) |
 | Remote configs: `enver pull` a shared YAML, patch its profiles in place, keep working offline | [`config.md`](docs/config.md#remotes) |
 | Multi-parent `extends`: mixins composed left-to-right, transitive inheritance | [`config.md`](docs/config.md#multiple-parents) |
+| Run-line composition: `enver x base slot -- cmd` is an anonymous `extends` at launch | [`cli.md`](docs/cli.md#composing-profiles) |
 | `unset` fences: keys enver must never set; shell values pass through untouched | [`config.md`](docs/config.md#suppressing-variables-unset) |
 | Provenance: every value annotated `# from <profile> (<layer>)` in `show` | [`cli.md`](docs/cli.md#preview-and-masking) |
 | Secrets encrypted at rest (argon2id + AES-256-GCM), transparent decrypt | [`secrets.md`](docs/secrets.md) |
@@ -114,10 +116,10 @@ store, inherits like code, and hands the result to a single child process.
 
 1. Load every pulled remote's stored content, overlay the global config, then
    the local `./.enver.yaml`.
-2. Resolve the selected profile walking `extends` with cycle detection — root
-   first, child overrides parent.
-3. For `enver x`: child env = current environment ⊕ profile env, then exec
-   with stdio connected and the exit code propagated.
+2. Resolve the selected profiles — one, or several composed left to right —
+   walking `extends` with cycle detection: root first, child overrides parent.
+3. For `enver x`: child env = current environment ⊕ the composed profile env,
+   then exec with stdio connected and the exit code propagated.
 
 ## Full manual
 

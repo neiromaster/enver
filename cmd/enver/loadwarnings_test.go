@@ -105,7 +105,7 @@ func TestLoadWarningsReachEveryLoadPath(t *testing.T) {
 	t.Run("app.ResolveDefault before the exec path", func(t *testing.T) {
 		divergentConfig(t)
 		warnings := captureLoadWarnings(t)
-		if _, _, err := app.ResolveDefault(appOpts(), "dev"); err != nil {
+		if _, _, err := app.ResolveProfiles(appOpts(), []string{"dev"}); err != nil {
 			t.Fatalf("ResolveDefault: %v", err)
 		}
 		if !strings.Contains(warnings.String(), `remote "llm"`) {

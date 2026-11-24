@@ -43,6 +43,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/neiromaster/enver/internal/app"
@@ -69,10 +70,10 @@ var rootCmd = &cobra.Command{
 Manage named, layered YAML profiles and run commands with a profile's
 environment injected, without mutating any tool's own config.
 
-  enver x <profile> -- <command>        run a command with a profile
-  enver show <profile>                  preview resolved env (masked)
-  enver export <profile>                print ` + "`export K=V`" + ` for eval
-  enver dotenv <profile>                export a profile to a .env file (with comments)
+  enver x [profiles...] -- <command>    run a command with composed profiles
+  enver show [profiles...]              preview resolved env (masked)
+  enver export [profiles...]            print ` + "`export K=V`" + ` for eval
+  enver dotenv [profiles...]            export profiles to a .env file (with comments)
   enver import <file> [profile]         import a .env file into a profile
   enver list                            list profiles
   enver add [name]                      interactively add a profile
@@ -87,7 +88,9 @@ environment injected, without mutating any tool's own config.
   enver keygen | encrypt | decrypt      manage encrypted secrets
 
 Profile names may collide with subcommand verbs; enver x <name> -- <command>
-addresses such a profile directly.
+addresses such a profile directly. Read commands accept several profiles:
+enver x base slot -- cmd composes them left to right (later wins), as an
+anonymous extends.
 
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
 plus a local .enver.yaml in the current directory. Mutating commands write to
@@ -324,17 +327,54 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 	return out
 }
 
-// completeProfile backs read commands: merged-config completion.
+// osArgs is the seam completion tests use to fake the raw __complete line.
+var osArgs = os.Args
+
+// rawCompleteWords returns the raw words the shell passed to the __complete
+// invocation (everything after the __complete/__completeNoDesc token,
+// including the word being completed), or nil when this process is not a
+// completion request. ValidArgsFunction sees cobra's post-parse argument
+// view, where a typed `--` is invisible: the probe parse that runs before
+// the real one leaves ArgsLenAtDash pointing past the typed line either way.
+// The raw line is the only honest source for whether the cursor sits after
+// the dash.
+func rawCompleteWords() []string {
+	for i, arg := range osArgs {
+		if arg == "__complete" || arg == "__completeNoDesc" {
+			return osArgs[i+1:]
+		}
+	}
+	return nil
+}
+
+// completeProfile backs read commands: merged-config completion. Every
+// positional before `--` is a member of the run-line composition, so each
+// such position offers the merged profile names minus those already typed;
+// tokens after `--` belong to the child command (enver x) and fall back to
+// file completion. Completion is a silent read: the candidates are the whole
+// output, so a load warning would be injected into the shell's own stream.
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if err := applyChdir(); err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveDefault
+	raw := rawCompleteWords()
+	if raw != nil {
+		for _, w := range raw[:len(raw)-1] {
+			if w == "--" {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+		}
 	}
 	cfgPath, _ := cmd.Flags().GetString("config")
 	noLocal, _ := cmd.Flags().GetBool("no-local")
-	return app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete), cobra.ShellCompDirectiveNoFileComp
+	names := app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete)
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if !slices.Contains(args, n) {
+			out = append(out, n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeProfileInTarget backs mutators: write-target-scoped completion.

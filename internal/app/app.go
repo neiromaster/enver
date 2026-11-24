@@ -92,21 +92,22 @@ func loadMerged(opts Options, report bool) (config.Config, error) {
 	return cfg, err
 }
 
-// ResolveDefault is the read-side trio: load the merged config, apply the
-// default to an empty profile name, resolve. Every consuming command shares
-// this sequence. The returned profile is the post-default name; JSON output
-// and the exec label still need it.
-func ResolveDefault(opts Options, profile string) (string, config.Resolved, error) {
+// ResolveProfiles is the read-side trio: load the merged config, apply the
+// default to an empty profile list, resolve the composition. Every consuming
+// command shares this sequence. The returned label is the post-default list
+// joined with "+" ("a+b"; a lone profile stays a bare name), which JSON
+// output and the exec title still need.
+func ResolveProfiles(opts Options, profiles []string) (string, config.Resolved, error) {
 	cfg, err := Load(opts)
 	if err != nil {
 		return "", config.Resolved{}, err
 	}
-	profile, err = profileOrDefault(profile, cfg.Default)
+	profiles, err = profilesOrDefault(profiles, cfg.Default)
 	if err != nil {
 		return "", config.Resolved{}, err
 	}
-	r, err := resolve(cfg, profile, opts)
-	return profile, r, err
+	r, err := resolve(cfg, profiles, opts)
+	return strings.Join(profiles, "+"), r, err
 }
 
 // Chdir changes to dir when non-empty. Wired into PersistentPreRunE and the
@@ -126,8 +127,8 @@ func Chdir(dir string) error {
 // read a value a remote supplied degrades the same way under
 // opts.TolerateRemoteWrongKey and refuses the profile otherwise; one that cannot
 // read a user-layer value is always an error. Comments ride through untouched.
-func resolve(cfg config.Config, profile string, opts Options) (config.Resolved, error) {
-	r, err := cfg.ResolveProfile(profile)
+func resolve(cfg config.Config, profiles []string, opts Options) (config.Resolved, error) {
+	r, err := cfg.ResolveProfiles(profiles)
 	if err != nil {
 		return config.Resolved{}, err
 	}
@@ -235,15 +236,15 @@ func wrongRemoteKeyError(keys []string) error {
 // exec the child command with the merged environment. The child's non-zero exit
 // code is propagated via os.Exit (cobra's RunE only signals 0/1).
 func Run(args []string, dashAt int, opts Options) error {
-	profile, cmdArgs := ParseProfileAndCmd(args, dashAt)
+	profiles, cmdArgs := ParseProfilesAndCmd(args, dashAt)
 	if len(cmdArgs) == 0 {
 		if dashAt < 0 && len(args) > 1 {
 			rest := strings.Join(args[1:], " ")
-			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s %s -- %s`", opts.Name, profile, rest, opts.Name, profile, rest)
+			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s %s -- %s`", opts.Name, args[0], rest, opts.Name, args[0], rest)
 		}
 		return fmt.Errorf("%s requires a command after `--`", opts.Name)
 	}
-	profile, r, err := ResolveDefault(opts, profile)
+	label, r, err := ResolveProfiles(opts, profiles)
 	if err != nil {
 		return err
 	}
@@ -254,41 +255,35 @@ func Run(args []string, dashAt int, opts Options) error {
 	if notice != "" {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", opts.Name, notice)
 	}
-	if code := runner.Run(cmdArgs, env, opts.Name, profile); code != 0 {
+	if code := runner.Run(cmdArgs, env, opts.Name, label); code != 0 {
 		os.Exit(code)
 	}
 	return nil
 }
 
-// profileOrDefault applies the config default to an empty profile name and
-// errors when no profile is selectable. Centralizes the guard shared by Run,
+// profilesOrDefault applies the config default to an empty profile list and
+// errors when nothing is selectable. Centralizes the guard shared by Run,
 // show, export, and dotenv so the fallback and message stay consistent.
-func profileOrDefault(profile, def string) (string, error) {
-	if profile == "" {
-		profile = def
+func profilesOrDefault(profiles []string, def string) ([]string, error) {
+	if len(profiles) > 0 {
+		return profiles, nil
 	}
-	if profile == "" {
-		return "", fmt.Errorf("no profile specified and no default set in config; set one with `enver default <profile>`")
+	if def == "" {
+		return nil, fmt.Errorf("no profile specified and no default set in config; set one with `enver default <profile>`")
 	}
-	return profile, nil
+	return []string{def}, nil
 }
 
-// ParseProfileAndCmd splits args at the `--` separator (cobra's ArgsLenAtDash).
-// The first token before the dash is the profile; everything after is the child
-// command and its own args.
-func ParseProfileAndCmd(args []string, dashAt int) (profile string, cmdArgs []string) {
+// ParseProfilesAndCmd splits args at the `--` separator (cobra's ArgsLenAtDash).
+// Every token before the dash is a profile, composed left-to-right; everything
+// after is the child command and its own args. Without a dash nothing is
+// interpretable — there is no command position to anchor the split — so both
+// halves come back empty and Run raises the loud usage errors.
+func ParseProfilesAndCmd(args []string, dashAt int) (profiles []string, cmdArgs []string) {
 	if dashAt >= 0 {
-		before := args[:dashAt]
-		cmdArgs = args[dashAt:]
-		if len(before) > 0 {
-			profile = before[0]
-		}
-		return profile, cmdArgs
+		return args[:dashAt], args[dashAt:]
 	}
-	if len(args) > 0 {
-		profile = args[0]
-	}
-	return profile, nil
+	return nil, nil
 }
 
 // SaltSource locates the salt, KDF parameters, and a full sample value of

@@ -6,7 +6,7 @@ import (
 )
 
 var xCmd = &cobra.Command{
-	Use:               "x [profile] -- <command> [args...]",
+	Use:               "x [profiles...] -- <command> [args...]",
 	Short:             "Run a command with a profile's environment injected",
 	Args:              cobra.ArbitraryArgs,
 	SilenceUsage:      true,
