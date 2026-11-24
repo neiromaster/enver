@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.13.0 - 2026-11-25
+
 - **New:** read commands compose profiles at launch. `enver x base slotA --
   claude` (and the same profile list in `show`, `export`, `dotenv`) resolves
   each member with its own `extends` chain and folds the members left to
