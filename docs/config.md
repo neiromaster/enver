@@ -63,7 +63,9 @@ a shared key.
 `enver <command> --file team.yaml …` (short `-f`) works on that file as if it
 were the whole config. Nothing else is read: not the global config, not
 `./.enver.yaml`. Reads resolve the file and the content pulled for it; mutators
-write the file; completion offers its profiles.
+write the file; completion offers its profiles. A relative `--file` resolves
+against the current directory, or against the `--chdir` directory when
+`--chdir` is given.
 
 The layer flags are errors together with `--file`: `--config`, `--no-local`,
 `-g`/`--global`, and `pull --local`. There is one layer, so the flags that
@@ -296,15 +298,15 @@ the record travels with the repository. Under `--file` registration writes
 the file itself (see [Working on one file](#working-on-one-file)). Registering
 globally a name the local file already declares is refused with that same
 `--local` hint: the local record would override the global one anyway.
-Re-registering a name prints the old and
-new source; when user-layer patch profiles sit under that prefix, a changed
-source or pull mode is a **takeover** — it changes what your credentials
-compose with, so pull asks first (`--force` accepts without asking, and is the
-only non-interactive way through). The same gate covers a re-fetch that replaces
-stored content the sidecar says came from another source, which is how a cloned
-project that re-declares one of your records is caught. Registering under
-`--no-local` does not read the project file, so that takeover check never sees
-the patch profiles a hidden local layer holds.
+Re-registering a name prints the old and new source; when user-layer patch
+profiles sit under that prefix, a changed source or pull mode is a **takeover**
+— it changes what your credentials compose with, so pull asks first (`--force`
+accepts without asking, and is the only non-interactive way through). The same
+gate covers a re-fetch that replaces stored content the sidecar says came from
+another source, which is how a cloned project that re-declares one of your
+records is caught. Registering under `--no-local` does not read the project
+file, so that takeover check never sees the patch profiles a hidden local
+layer holds.
 
 `--list` is read-only: it renders every declared record with its source, whether
 it is pinned, and the commit and time of its last pull, saying so when a record

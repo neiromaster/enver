@@ -59,7 +59,7 @@ enver --config <path>                     Override the global config file (read 
 enver --key <path>                        Key file (or ENVER_KEY env)
 enver --no-local                          Ignore the ./.enver.yaml layer when reading
 enver --no-expand                         Do not expand $VAR references
-enver --chdir <dir>                       Run as if started from <dir> (.enver.yaml and relative --config resolve against it)
+enver --chdir <dir>                       Run as if started from <dir> (.enver.yaml, relative --config and relative --file resolve against it)
 enver --file / -f <path>                  Work on <path> as the whole config (no global or ./.enver.yaml layer); content pulled for it is stored in .enver/<file>/ beside it
 enver --version / -h, --help
 ```

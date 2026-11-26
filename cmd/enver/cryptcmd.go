@@ -39,7 +39,7 @@ var keygenCmd = &cobra.Command{
 		if keygenRandom {
 			fmt.Println("Keep this file private. Commit encrypted configs, never the key.")
 		} else {
-			fmt.Println("Recovery: on a new machine, run `enver x <profile> -- <command>` and enter your passphrase when prompted.")
+			fmt.Printf("Recovery: on a new machine, run `%s` and enter your passphrase when prompted.\n", config.HintCommand("x", "<profile>", "--", "<command>"))
 		}
 		return nil
 	},

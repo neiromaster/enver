@@ -17,7 +17,7 @@ func resetFile(t *testing.T, file string) string {
 	t.Helper()
 	old := globalFlags
 	oldDir := config.RemotesDir
-	t.Cleanup(func() { globalFlags = old; config.RemotesDir = oldDir; config.PullHintFlags = "" })
+	t.Cleanup(func() { globalFlags = old; config.RemotesDir = oldDir; config.HintFlags = "" })
 	globalFlags = globalOptions{}
 	if file != "" {
 		globalFlags.file = file

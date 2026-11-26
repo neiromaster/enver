@@ -243,7 +243,7 @@ func addSummary(name, cfgPath, patchRemote string, setDefault bool) string {
 	if setDefault {
 		b.WriteString("✓ set as default\n")
 	}
-	fmt.Fprintf(&b, "\nUse it: enver x %s -- <command>\n", name)
+	fmt.Fprintf(&b, "\nUse it: %s -- <command>\n", config.HintCommand("x", name))
 	return b.String()
 }
 
@@ -273,8 +273,8 @@ func ciphertextClobberError(cfgPath, name string, entries []ui.EnvEntry) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	return fmt.Errorf("refusing to overwrite the encrypted value of %s: no key is available (`enver decrypt`, or set --key/ENVER_KEY)",
-		strings.Join(keys, ", "))
+	return fmt.Errorf("refusing to overwrite the encrypted value of %s: no key is available (`%s`, or set --key/ENVER_KEY)",
+		strings.Join(keys, ", "), config.HintCommand("decrypt"))
 }
 
 // upsertEntry appends entry, or replaces the existing entry with the same key.

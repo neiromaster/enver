@@ -2136,9 +2136,9 @@ remotes:
 }
 
 func TestPullHintsCarryFileFlags(t *testing.T) {
-	old := config.PullHintFlags
-	config.PullHintFlags = "--file x.yaml"
-	t.Cleanup(func() { config.PullHintFlags = old })
+	old := config.HintFlags
+	config.HintFlags = "--file x.yaml"
+	t.Cleanup(func() { config.HintFlags = old })
 	_, err := PullUpdate("nope", PullOptions{})
 	if err == nil || !strings.Contains(err.Error(), "enver pull --file x.yaml <source> --as nope") {
 		t.Fatalf("hint without --file: %v", err)

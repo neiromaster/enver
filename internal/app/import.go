@@ -282,7 +282,7 @@ func formatImportSummary(name string, n int, mode string, d importDiff, extendsT
 	if !slices.Equal(extendsToWrite, oldExtends) {
 		fmt.Fprintf(&b, "  extends: %s → %s\n", extLabel(oldExtends), extLabel(extendsToWrite))
 	}
-	fmt.Fprintf(&b, "Imported values are stored in plaintext: mark the keys to protect with ~ (`enver edit %s` Secrets menu, or `~KEY` in the config file), or seal the whole profile with `enver encrypt %s --all`.\n", name, name)
+	fmt.Fprintf(&b, "Imported values are stored in plaintext: mark the keys to protect with ~ (`%s` Secrets menu, or `~KEY` in the config file), or seal the whole profile with `%s`.\n", config.HintCommand("edit", name), config.HintCommand("encrypt", name, "--all"))
 	return b.String()
 }
 

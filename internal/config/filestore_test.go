@@ -60,12 +60,32 @@ func TestLoadStandalone(t *testing.T) {
 	}
 }
 
+func TestHintCommand(t *testing.T) {
+	t.Cleanup(func() { HintFlags = "" })
+	if got := HintCommand("default", "<profile>"); got != "enver default <profile>" {
+		t.Fatalf("HintCommand with one arg = %q", got)
+	}
+	if got := HintCommand("decrypt"); got != "enver decrypt" {
+		t.Fatalf("HintCommand with no args = %q", got)
+	}
+	if got := HintCommand("x", "p", "--", "cmd sub"); got != "enver x p -- cmd sub" {
+		t.Fatalf("HintCommand with several args = %q", got)
+	}
+	HintFlags = "--file team.yaml"
+	if got := HintCommand("default", "<profile>"); got != "enver default --file team.yaml <profile>" {
+		t.Fatalf("HintCommand with flags = %q", got)
+	}
+	if got := HintCommand("encrypt", "p", "--all"); got != "enver encrypt --file team.yaml p --all" {
+		t.Fatalf("HintCommand with flags and several args = %q", got)
+	}
+}
+
 func TestPullCommand(t *testing.T) {
-	t.Cleanup(func() { PullHintFlags = "" })
+	t.Cleanup(func() { HintFlags = "" })
 	if got := PullCommand("claude"); got != "enver pull claude" {
 		t.Fatalf("PullCommand = %q", got)
 	}
-	PullHintFlags = "--file team.yaml"
+	HintFlags = "--file team.yaml"
 	if got := PullCommand("--rm", "base"); got != "enver pull --file team.yaml --rm base" {
 		t.Fatalf("PullCommand with flags = %q", got)
 	}
