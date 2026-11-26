@@ -213,8 +213,8 @@ func TestBuildSummary(t *testing.T) {
 	if got[1].Key != "API_TOKEN" || got[1].Kind != ui.EntryOverride {
 		t.Fatalf("got[1] = %+v, want API_TOKEN/Override", got[1])
 	}
-	if got[1].Value == "sk-abcdefghijklmnopqrstuvwxyz" {
-		t.Fatal("override value must be masked")
+	if got[1].Value != "sk-abcdefghijklmnopqrstuvwxyz" {
+		t.Fatal("a bare name must mask nothing: the override value shows in clear")
 	}
 	if got[2].Key != "LOG_LEVEL" || got[2].Kind != ui.EntryInherited {
 		t.Fatalf("got[2] = %+v, want LOG_LEVEL/Inherited (API_TOKEN is shadowed)", got[2])
@@ -225,11 +225,18 @@ func TestBuildSummary(t *testing.T) {
 	if entries[1].Value != "sk-abcdefghijklmnopqrstuvwxyz" {
 		t.Fatal("buildSummary must not mutate its input entries")
 	}
+
+	marked := buildSummary(
+		[]ui.EnvEntry{{Key: "API_TOKEN", Value: "sk-abcdefghijklmnopqrstuvwxyz", Secret: true}},
+		map[string]string{"API_TOKEN": "sk-old"}, nil, nil)
+	if marked[0].Key != "~API_TOKEN" || marked[0].Value == "sk-abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("the mark, not the name, must mask the same key: %+v", marked[0])
+	}
 }
 
 // TestBuildSummaryMasksByMark pins the summary's display rule: a marked row is
 // spelled ~KEY and masked, an inherited mark does the same for the inherited row,
-// and neither value trips the name/value heuristic, so only the mark can be doing
+// and neither value embeds URL credentials, so only the mark can be doing
 // either. The override lookup and the own-key set keep the runtime name.
 func TestBuildSummaryMasksByMark(t *testing.T) {
 	const ownValue, inheritedValue = "plain-own-value", "plain-inherited-value"
@@ -299,7 +306,7 @@ func TestBuildSummaryMasksCiphertext(t *testing.T) {
 // retype with a plain name can neither unmark a stored secret nor show a mark the
 // write drops.
 func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
-	// PROJECT_PATH trips neither half of the name/value heuristic, so only the
+	// PROJECT_PATH embeds no URL credentials, so only the
 	// mark can mask it.
 	const key, typed = "PROJECT_PATH", "plain-typed-value"
 	entries := []ui.EnvEntry{{Key: key, Value: typed}}

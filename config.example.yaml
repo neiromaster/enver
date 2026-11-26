@@ -4,7 +4,7 @@
 #
 # To store secrets encrypted here, run:
 #   enver keygen        # creates ~/.config/enver/key  (NEVER commit the key)
-#   enver encrypt       # encrypts secret-looking values (enc:v3:argon2id:...) in this file
+#   enver encrypt       # encrypts ~marked values (enc:v3:argon2id:...) in this file
 # Decryption at runtime is transparent: `enver x <profile> -- <cmd>` just works.
 
 # Remote configs: a config someone else publishes, fetched on demand and read
@@ -26,7 +26,7 @@ profiles:
   # Official Anthropic API.
   anth:
     env:
-      ANTHROPIC_API_KEY: sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
+      ~ANTHROPIC_API_KEY: sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
       ANTHROPIC_BASE_URL: https://api.anthropic.com
       ANTHROPIC_MODEL: claude-sonnet-5
       ANTHROPIC_SMALL_FAST_MODEL: claude-haiku-4-5-20251001
@@ -38,7 +38,7 @@ profiles:
   openrouter:
     env:
       ANTHROPIC_BASE_URL: https://openrouter.ai/api/v1
-      ANTHROPIC_API_KEY: sk-or-xxxxxxxxxxxxxxxxxxxxxxxx
+      ~ANTHROPIC_API_KEY: sk-or-xxxxxxxxxxxxxxxxxxxxxxxx
       ANTHROPIC_MODEL: anthropic/claude-sonnet-5
       ANTHROPIC_SMALL_FAST_MODEL: anthropic/claude-haiku-4-5-20251001
 

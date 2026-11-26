@@ -176,7 +176,8 @@ func sameSaltEra(pm *yaml.Node, salt []byte) (crypto.Argon2Params, bool, error) 
 	return p, true, nil
 }
 
-// EncryptFile encrypts secret-looking values (or all values when all is true)
+// EncryptFile encrypts the values ShouldEncrypt selects — ~marked keys and
+// values embedding URL credentials — or every value when all is true,
 // in the config at path, preserving structure and comments. profile filters
 // to a single profile; empty means all. salt is shared by every value
 // encrypted in this run: passphrase recovery derives the key from the first

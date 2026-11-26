@@ -153,25 +153,33 @@ func TestMenuOptionsContainsVarsInheritedAndActions(t *testing.T) {
 }
 
 // TestMenuOptionsMaskSecretValues pins the masking policy: the edit menu is a
-// display-only listing, so secret values mask there exactly as they do in
-// show. Selecting a row still opens the full-value card.
+// display-only listing, so marked values mask there exactly as they do in
+// show, and a bare name masks nothing. Selecting a row still opens the
+// full-value card.
 func TestMenuOptionsMaskSecretValues(t *testing.T) {
-	s := plainState(t, "p", config.Profile{Env: map[string]string{
-		"API_SECRET": "hunter2", "PLAIN": "visible",
-	}}, nil, false)
-	labels := optionLabels(s.menuOptions(nil, nil))
+	marked := plainState(t, "p", config.Profile{
+		Env:    map[string]string{"API_SECRET": "hunter2", "PLAIN": "visible"},
+		Marked: map[string]bool{"API_SECRET": true},
+	}, nil, false)
+	labels := optionLabels(marked.menuOptions(nil, nil))
 	if strings.Contains(labels, "hunter2") {
-		t.Fatalf("menu leaked a secret: %s", labels)
+		t.Fatalf("menu leaked a marked secret: %s", labels)
 	}
 	if !strings.Contains(labels, "visible") {
 		t.Fatalf("non-secret value missing: %s", labels)
 	}
+
+	bare := plainState(t, "p", config.Profile{Env: map[string]string{"API_SECRET": "hunter2"}}, nil, false)
+	bareLabels := optionLabels(bare.menuOptions(nil, nil))
+	if !strings.Contains(bareLabels, "hunter2") {
+		t.Fatalf("a bare name must mask nothing: %s", bareLabels)
+	}
 }
 
 // TestMenuOptionsMasksMarkedValue pins the mark's display half: a value whose
-// key carries the secret mark masks even when neither the name nor the value
-// trips the sensitivity heuristic, on own and inherited rows alike — and the
-// same value stays visible without the mark.
+// key carries the secret mark masks whatever its name or value looks like,
+// on own and inherited rows alike — and the same value stays visible without
+// the mark.
 func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 	marked := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"K": "hunter2"},
@@ -1368,7 +1376,7 @@ func TestSecretsMenuListsInheritedKeys(t *testing.T) {
 	}, nil, false)
 	inherited := []ui.EnvEntry{
 		{Key: "ZZZ", Value: "z"},
-		{Key: "GH_TOKEN", Value: "from-base"},
+		{Key: "GH_TOKEN", Value: "from-base", Secret: true},
 		{Key: "REGION", Value: "eu-west-1"},
 		{Key: "OWN", Value: "shadowed"},
 	}

@@ -69,7 +69,7 @@ func scanCryptForApp() (app.CryptScan, error) {
 
 var encryptCmd = &cobra.Command{
 	Use:               "encrypt [profile]",
-	Short:             "Encrypt secret values in the config",
+	Short:             "Encrypt ~marked values in the config",
 	Args:              cobra.MaximumNArgs(1),
 	SilenceUsage:      true,
 	SilenceErrors:     true,
@@ -173,5 +173,5 @@ func encryptedKeys(path, profile string) []string {
 func init() {
 	keygenCmd.Flags().BoolP("force", "f", false, "overwrite an existing key")
 	keygenCmd.Flags().BoolVar(&keygenRandom, "random", false, "generate a random key instead of deriving from a passphrase")
-	encryptCmd.Flags().Bool("all", false, "encrypt every value, not just secret-looking keys")
+	encryptCmd.Flags().Bool("all", false, "encrypt every value, not just ~marked ones")
 }

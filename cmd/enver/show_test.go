@@ -24,9 +24,22 @@ func TestPrintEnvMasking(t *testing.T) {
 	}
 	chain := []string{"anth"}
 
-	// masked: API_KEY redacted, MODEL shown.
+	// a bare name masks nothing: API_KEY prints in clear beside MODEL.
+	var unmarked bytes.Buffer
+	if err := printEnv(&unmarked, env, chain, nil, nil, envRender{}); err != nil {
+		t.Fatalf("printEnv: %v", err)
+	}
+	if !strings.Contains(unmarked.String(), "API_KEY=sk-ant-secret-1234567890") {
+		t.Errorf("unmarked output must print the value in clear:\n%s", unmarked.String())
+	}
+	if !strings.Contains(unmarked.String(), "ANTHROPIC_MODEL=claude-sonnet-5") {
+		t.Errorf("unmarked output missing plaintext model:\n%s", unmarked.String())
+	}
+
+	// the same key marked masks, MODEL stays readable.
+	marked := map[string]bool{"API_KEY": true}
 	var masked bytes.Buffer
-	if err := printEnv(&masked, env, chain, nil, nil, envRender{}); err != nil {
+	if err := printEnv(&masked, env, chain, nil, nil, envRender{marked: marked}); err != nil {
 		t.Fatalf("printEnv: %v", err)
 	}
 	if !strings.Contains(masked.String(), "len=24") {
