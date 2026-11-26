@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** a key's name no longer makes it a secret. `enver encrypt`
+  seals `~`-marked values (and values with credentials in a URL) and leaves
+  the rest plaintext; `show` masks the same set and prints every other value
+  in clear. Mark the keys to protect with `~`, or use `enver encrypt --all`.
+
 ## v0.13.0 - 2026-11-25
 
 - **New:** read commands compose profiles at launch. `enver x base slotA --
