@@ -65,4 +65,4 @@ profiles:
   # those keys while the remote's content stays the base.
   # llm/ollama:
   #   env:
-  #     OLLAMA_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxx
+  #     ~OLLAMA_API_KEY: sk-xxxxxxxxxxxxxxxxxxxxxxxx

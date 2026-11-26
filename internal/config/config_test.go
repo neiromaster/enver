@@ -140,41 +140,39 @@ func TestResolveProfileNotFound(t *testing.T) {
 }
 
 func TestMaskValue(t *testing.T) {
-	plain := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{
+	plain := map[string]string{
 		"MAX_TOKENS": "8192", "ANTHROPIC_MODEL": "claude-sonnet-5", "AUTHOR": "me", "KEY_PATH": "/keys/id",
-	}}}}
-	for k, v := range plain.Profiles["p"].Env {
-		if got := MaskValue(v, ShouldMask(k, v, false, false)); got != v {
+	}
+	for k, v := range plain {
+		if got := MaskValue(v, ShouldMask(v, false, false)); got != v {
 			t.Errorf("unmarked %s = %q, want it shown", k, got)
 		}
 	}
-	marked := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{
+	marked := map[string]string{
 		"ANTHROPIC_API_KEY": "sk-ant-xxxxxxxxxxxxxx", "DB_PASSWORD": "supersecret123",
 		"AUTH_TOKEN": "tok-xxxx", "CREDENTIAL": "cred-xxxx",
-	}, Marked: map[string]bool{
-		"ANTHROPIC_API_KEY": true, "DB_PASSWORD": true, "AUTH_TOKEN": true, "CREDENTIAL": true,
-	}}}}
-	for k, v := range marked.Profiles["p"].Env {
-		if got := MaskValue(v, ShouldMask(k, v, true, false)); got == v {
+	}
+	for k, v := range marked {
+		if got := MaskValue(v, ShouldMask(v, true, false)); got == v {
 			t.Errorf("marked %s shown in clear", k)
 		}
 	}
 }
 
 func TestShouldMask(t *testing.T) {
-	if !ShouldMask("PROJECT_PATH", "/home/anna", true, false) {
+	if !ShouldMask("/home/anna", true, false) {
 		t.Fatal("marked masks")
 	}
-	if !ShouldMask("X", "enc:v3:abc", false, true) {
+	if !ShouldMask("enc:v3:abc", false, true) {
 		t.Fatal("encrypted at rest masks")
 	}
-	if ShouldMask("GITHUB_TOKEN", "ghp_x", false, false) {
+	if ShouldMask("ghp_x", false, false) {
 		t.Fatal("a key's name must not mask")
 	}
-	if !ShouldMask("API", "https://user:pw@api.example.com", false, false) {
+	if !ShouldMask("https://user:pw@api.example.com", false, false) {
 		t.Fatal("URL credentials mask")
 	}
-	if ShouldMask("MAX_TOKENS", "8192", false, false) {
+	if ShouldMask("8192", false, false) {
 		t.Fatal("a number is not a secret")
 	}
 }
@@ -213,7 +211,7 @@ func TestMaskValueURLSecrets(t *testing.T) {
 		{"GITHUB_URL", "https://ghp_xxx@github.com/org/repo"},
 	}
 	for _, c := range cases {
-		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got == c.v {
+		if got := MaskValue(c.v, ShouldMask(c.v, false, false)); got == c.v {
 			t.Fatalf("MaskValue(%q) should redact URL credentials", c.k)
 		}
 	}
@@ -224,7 +222,7 @@ func TestMaskValueURLSecrets(t *testing.T) {
 		{"POSTGRES_URL", "postgres://db:5432/app"},
 	}
 	for _, c := range plain {
-		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got != c.v {
+		if got := MaskValue(c.v, ShouldMask(c.v, false, false)); got != c.v {
 			t.Fatalf("MaskValue(%q) must not redact a URL without credentials, got %q", c.k, got)
 		}
 	}

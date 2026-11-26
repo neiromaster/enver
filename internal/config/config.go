@@ -998,8 +998,9 @@ func ShouldEncrypt(key, value string) bool {
 }
 
 // ShouldMask reports whether a resolved value must be masked in text output:
-// the mark is the only name signal, the URL rule the only value signal.
-func ShouldMask(key, value string, marked, encrypted bool) bool {
+// the winning entry carries the ~ mark, the value is ciphertext at rest, or
+// the value embeds credentials in a URL authority.
+func ShouldMask(value string, marked, encrypted bool) bool {
 	return marked || encrypted || IsSensitive(value)
 }
 

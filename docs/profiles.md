@@ -33,7 +33,7 @@ profiles:
   glm:
     env:
       # get this token from https://vault.example/anth
-      ANTHROPIC_API_KEY: enc:v3:argon2id:...
+      ~ANTHROPIC_API_KEY: enc:v3:argon2id:...
 ```
 
 Env keys merge additively into an existing profile of the same name.

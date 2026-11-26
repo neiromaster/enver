@@ -178,8 +178,7 @@ func TestMenuOptionsMaskSecretValues(t *testing.T) {
 
 // TestMenuOptionsMasksMarkedValue pins the mark's display half: a value whose
 // key carries the secret mark masks whatever its name or value looks like,
-// on own and inherited rows alike — and the same value stays visible without
-// the mark.
+// on own and inherited rows alike — and it stays visible without the mark.
 func TestMenuOptionsMasksMarkedValue(t *testing.T) {
 	marked := plainState(t, "p", config.Profile{
 		Env:    map[string]string{"K": "hunter2"},

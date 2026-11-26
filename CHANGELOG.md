@@ -3,9 +3,11 @@
 ## Unreleased
 
 - **Breaking:** a key's name no longer makes it a secret. `enver encrypt`
-  seals `~`-marked values (and values with credentials in a URL) and leaves
-  the rest plaintext; `show` masks the same set and prints every other value
-  in clear. Mark the keys to protect with `~`, or use `enver encrypt --all`.
+  seals `~`-marked values and values with credentials in a URL; other
+  plaintext stays plaintext. `show` masks marked values, values with URL
+  credentials, and any value stored as ciphertext. Values sealed by an
+  earlier version under an unmarked key stay sealed and masked, but
+  `decrypt` returns them unmarked — add `~` before re-encrypting.
 
 ## v0.13.0 - 2026-11-25
 

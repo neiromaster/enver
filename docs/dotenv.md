@@ -49,5 +49,7 @@ the `-o` output file without prompting, while `enver import --force` only
 skips the `--replace` removal confirm.
 
 > `dotenv -o` and `import` move decrypted secrets through a plaintext `.env`
-> file. Mind where it lands; keep values at rest encrypted with `enver
-> encrypt`.
+> file. Mind where it lands. An import stores every value as plaintext: mark
+> the keys to protect with `~` (`enver edit <name>`, Secrets menu, or `~KEY`
+> in the config file), or seal the whole profile with
+> `enver encrypt <name> --all`.
