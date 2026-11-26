@@ -43,8 +43,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/neiromaster/enver/internal/app"
 	"github.com/neiromaster/enver/internal/config"
@@ -53,14 +56,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var globalFlags struct {
+// globalOptions is the root's persistent flags. It is a named type so tests
+// can reset the process view with its zero value.
+type globalOptions struct {
 	configPath string
 	keyPath    string
 	noLocal    bool
 	noExpand   bool
 	global     bool
 	chdir      string
+	// file is the --file value exactly as typed: hints and the write target
+	// spell it that way, while applyFile derives the absolute path from it.
+	file string
 }
+
+var globalFlags globalOptions
 
 var rootCmd = &cobra.Command{
 	Use:   "enver",
@@ -109,11 +119,12 @@ func init() {
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
 	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
+	pf.StringVarP(&globalFlags.file, "file", "f", "", "work on this config file as the whole config (no global or ./.enver.yaml layer); content pulled for it is stored in .enver/<file> beside it")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd, updateCmd, pullCmd)
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return applyChdir()
+		return applyGlobalFlags()
 	}
 
 	app.Interactive = ui.Interactive
@@ -151,20 +162,84 @@ func main() {
 }
 
 func appOpts() app.Options {
-	return app.Options{
+	opts := app.Options{
 		ConfigPath: globalFlags.configPath,
 		KeyPath:    globalFlags.keyPath,
 		NoLocal:    globalFlags.noLocal,
 		NoExpand:   globalFlags.noExpand,
 	}
+	if globalFlags.file != "" {
+		opts.ConfigPath = ""
+		opts.NoLocal = false
+		opts.FilePath = globalFlags.file
+	}
+	return opts
 }
 
 // applyChdir changes to --chdir before any command logic so that LocalPath and
-// relative --config resolve in the target directory. Wired as PersistentPreRunE
-// and called by completion functions (which bypass PersistentPreRunE); tests
-// call it directly.
+// relative --config resolve in the target directory. applyGlobalFlags runs it
+// first, so --file resolves against the new directory; tests call it directly.
 func applyChdir() error {
 	return app.Chdir(globalFlags.chdir)
+}
+
+// applyGlobalFlags applies the root's directory and file flags in one pass, so
+// every entry point — PersistentPreRunE, the completion functions that bypass
+// it, and tests — resolves them the same way.
+func applyGlobalFlags() error {
+	if err := applyChdir(); err != nil {
+		return err
+	}
+	return applyFile()
+}
+
+// applyFile points the process at one config file, once, before any command
+// logic: it redirects the remote store beside the file and spells the pull
+// hint, so every load and write reads the file alone. Conflicts and unusable
+// paths are refused here rather than re-checked per command.
+func applyFile() error {
+	if globalFlags.file == "" {
+		return nil
+	}
+	for _, conflict := range []struct {
+		set  bool
+		flag string
+	}{
+		{globalFlags.configPath != "", "config"},
+		{globalFlags.noLocal, "no-local"},
+		{globalFlags.global, "global"},
+	} {
+		if conflict.set {
+			return fmt.Errorf("--file cannot be combined with --%s: it is the whole config", conflict.flag)
+		}
+	}
+	abs, err := filepath.Abs(globalFlags.file)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		return fmt.Errorf("--file %s is a directory; name a config file", abs)
+	}
+	if info, err := os.Stat(filepath.Dir(abs)); err != nil || !info.IsDir() {
+		return fmt.Errorf("--file %s: parent directory does not exist", abs)
+	}
+	en := filepath.Join(filepath.Dir(abs), ".enver")
+	if info, err := os.Stat(en); err == nil && !info.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory, so no content can be stored beside %s", en, abs)
+	}
+	store := config.FileStoreDir(abs)
+	config.RemotesDir = func() string { return store }
+	config.PullHintFlags = "--file " + hintPath(globalFlags.file)
+	return nil
+}
+
+// hintPath spells a path inside a hint line: quoted only when it contains
+// whitespace, so the common case stays bare.
+func hintPath(p string) string {
+	if strings.IndexFunc(p, unicode.IsSpace) >= 0 {
+		return strconv.Quote(p)
+	}
+	return p
 }
 
 func requireInteractive(what string) error {
@@ -189,8 +264,12 @@ func aborted(w io.Writer) error {
 	return err
 }
 
-// writeTarget is the file mutators write: local by default, global under --global.
+// writeTarget is the file mutators write: the --file file under --file, local
+// by default, global under --global.
 func writeTarget() string {
+	if globalFlags.file != "" {
+		return globalFlags.file
+	}
 	if globalFlags.global {
 		return config.GlobalPath(globalFlags.configPath)
 	}
@@ -198,20 +277,21 @@ func writeTarget() string {
 }
 
 // underLayers reads the stack a write sits on, nearest first: the global file
-// under a local write, and every pulled remote below that. A remote never folds
-// over a user layer, whichever layer declares its record, so the records come
-// from the merged view the write's marks are answered against. The advisories
-// about that content are the merged load's to report, which is why they are
-// dropped here. A secret mark inherited from any of those layers cannot be
-// guessed, so their read errors surface here rather than as a quietly unmarked
-// key.
+// under a local write, and every pulled remote below that. Under --file the
+// file replaces the user layers, so only the remotes pulled for it remain. A
+// remote never folds over a user layer, whichever layer declares its record, so
+// the records come from the merged view the write's marks are answered against.
+// The advisories about that content are the merged load's to report, which is
+// why they are dropped here. A secret mark inherited from any of those layers
+// cannot be guessed, so their read errors surface here rather than as a quietly
+// unmarked key.
 func underLayers(merged config.Config) ([]config.Layer, error) {
 	remotes, _, err := config.RemoteLayers(merged.Remotes)
 	if err != nil {
 		return nil, err
 	}
 	under := make([]config.Layer, 0, len(remotes)+1)
-	if !globalFlags.global {
+	if globalFlags.file == "" && !globalFlags.global {
 		global, err := config.LoadFile(config.GlobalPath(globalFlags.configPath))
 		if err != nil {
 			return nil, err
@@ -272,17 +352,21 @@ func pickerConfig(merged config.Config) (config.Config, error) {
 // notFoundInTarget hints at --global when the profile lives in the other layer,
 // and at `add` when it lives only in remote content: remote profiles are a
 // read-only base, so the writer's remedy is a patch copy in the user layer.
+// Under --file there is no other user layer to point at, so only the remote
+// hint remains.
 func notFoundInTarget(name, target string) error {
-	other := config.LocalPath()
-	if target == other {
-		other = config.GlobalPath(globalFlags.configPath)
-	}
-	if c, err := config.LoadFile(other); err == nil {
-		if _, ok := c.Profiles[name]; ok {
-			if globalFlags.global {
-				return fmt.Errorf("profile %q not found in global config; it is local — run without --global", name)
+	if globalFlags.file == "" {
+		other := config.LocalPath()
+		if target == other {
+			other = config.GlobalPath(globalFlags.configPath)
+		}
+		if c, err := config.LoadFile(other); err == nil {
+			if _, ok := c.Profiles[name]; ok {
+				if globalFlags.global {
+					return fmt.Errorf("profile %q not found in global config; it is local — run without --global", name)
+				}
+				return fmt.Errorf("profile %q not found in local .enver.yaml; it is global — pass --global (-g)", name)
 			}
-			return fmt.Errorf("profile %q not found in local .enver.yaml; it is global — pass --global (-g)", name)
 		}
 	}
 	// A merged load that fails here would only replace a message the caller
@@ -298,6 +382,9 @@ func notFoundInTarget(name, target string) error {
 // addCommandLine is the command a scope hint points at: the patch copy lands in
 // the write target, so it needs the same scope flag the refused write carried.
 func addCommandLine(name string) string {
+	if globalFlags.file != "" {
+		return "enver add --file " + hintPath(globalFlags.file) + " " + name
+	}
 	if globalFlags.global {
 		return "enver add -g " + name
 	}
@@ -305,16 +392,10 @@ func addCommandLine(name string) string {
 }
 
 func targetProfiles(cmd *cobra.Command, toComplete string) []string {
-	if err := applyChdir(); err != nil {
+	if err := applyGlobalFlags(); err != nil {
 		return nil
 	}
-	g, _ := cmd.Flags().GetBool("global")
-	cfgPath, _ := cmd.Flags().GetString("config")
-	target := config.LocalPath()
-	if g {
-		target = config.GlobalPath(cfgPath)
-	}
-	cfg, err := config.LoadFile(target)
+	cfg, err := completionTarget(cmd)
 	if err != nil {
 		return nil
 	}
@@ -325,6 +406,21 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 		}
 	}
 	return out
+}
+
+// completionTarget is the config completion offers profile names from: the
+// standalone file under --file, the local file by default, the global one
+// under --global.
+func completionTarget(cmd *cobra.Command) (config.Config, error) {
+	if file, _ := cmd.Flags().GetString("file"); file != "" {
+		return config.LoadStandalone(file)
+	}
+	g, _ := cmd.Flags().GetBool("global")
+	cfgPath, _ := cmd.Flags().GetString("config")
+	if g {
+		return config.LoadFile(config.GlobalPath(cfgPath))
+	}
+	return config.LoadFile(config.LocalPath())
 }
 
 // osArgs is the seam completion tests use to fake the raw __complete line.
@@ -354,7 +450,7 @@ func rawCompleteWords() []string {
 // file completion. Completion is a silent read: the candidates are the whole
 // output, so a load warning would be injected into the shell's own stream.
 func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if err := applyChdir(); err != nil {
+	if err := applyGlobalFlags(); err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 	raw := rawCompleteWords()
@@ -367,7 +463,8 @@ func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]st
 	}
 	cfgPath, _ := cmd.Flags().GetString("config")
 	noLocal, _ := cmd.Flags().GetBool("no-local")
-	names := app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete)
+	file, _ := cmd.Flags().GetString("file")
+	names := app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal, FilePath: file}, toComplete)
 	out := make([]string, 0, len(names))
 	for _, n := range names {
 		if !slices.Contains(args, n) {

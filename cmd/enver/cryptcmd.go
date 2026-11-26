@@ -12,6 +12,7 @@ import (
 )
 
 var keygenRandom bool
+var keygenForce bool
 
 var uiConfirm = ui.Confirm
 
@@ -20,7 +21,7 @@ var keygenCmd = &cobra.Command{
 	Short: "Generate the encryption key from a passphrase",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		force, _ := cmd.Flags().GetBool("force")
+		force := keygenForce
 		err := app.Keygen(app.KeygenOptions{
 			Path:    keygenPath(),
 			Random:  keygenRandom,
@@ -171,7 +172,7 @@ func encryptedKeys(path, profile string) []string {
 }
 
 func init() {
-	keygenCmd.Flags().BoolP("force", "f", false, "overwrite an existing key")
+	keygenCmd.Flags().BoolVar(&keygenForce, "force", false, "overwrite an existing key")
 	keygenCmd.Flags().BoolVar(&keygenRandom, "random", false, "generate a random key instead of deriving from a passphrase")
 	encryptCmd.Flags().Bool("all", false, "encrypt every value, not just ~marked ones")
 }
