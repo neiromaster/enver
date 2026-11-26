@@ -104,6 +104,34 @@ func RemoteStatePath(name string) string {
 	return filepath.Join(RemotesDir(), filepath.FromSlash(name)) + ".meta"
 }
 
+// FileStoreDir is where the stored content of the records a standalone config
+// declares lives: next to the file, under .enver, named after the file, so a
+// file checked into a repo carries its own remote store instead of writing into
+// the user's machine-wide one, and two files in one directory keep their stores
+// apart. Callers point RemotesDir here before a standalone load or pull.
+func FileStoreDir(file string) string {
+	return filepath.Join(filepath.Dir(file), ".enver", filepath.Base(file))
+}
+
+// PullHintFlags holds the flag text a pull hint spells after `enver pull`: the
+// invocation's own flags, set by the caller that knows how the command was run,
+// so a hint suggests the same view the user is in. Empty in the default view.
+var PullHintFlags string
+
+// PullCommand renders the pull line a hint shows, flags first so the suggested
+// line reproduces the invocation the hint came from, then the arguments the
+// hint names.
+func PullCommand(args ...string) string {
+	line := "enver pull"
+	if PullHintFlags != "" {
+		line += " " + PullHintFlags
+	}
+	if len(args) > 0 {
+		line += " " + strings.Join(args, " ")
+	}
+	return line
+}
+
 // ReadRemoteState reads the fetch provenance recorded for name. ok is false when
 // no state can be trusted: the remote was never pulled, the sidecar is
 // unreadable or records no source URL, or name falls outside the record-path
