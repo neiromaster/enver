@@ -79,7 +79,7 @@ func TestEncryptDecryptFileRoundTrip(t *testing.T) {
 profiles:
   anth:
     env:
-      ANTHROPIC_API_KEY: sk-ant-secret-1234567890
+      ~ANTHROPIC_API_KEY: sk-ant-secret-1234567890
       ANTHROPIC_MODEL: claude-sonnet-5
 `
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
@@ -96,7 +96,7 @@ profiles:
 		t.Fatalf("encrypt: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("encrypted %d values, want 1 (only API_KEY is secret-looking)", n)
+		t.Fatalf("encrypted %d values, want 1 (only the marked value is a candidate)", n)
 	}
 	enc, _ := os.ReadFile(path)
 	if !strings.Contains(string(enc), "enc:v3:") {
@@ -183,7 +183,7 @@ func TestEncryptFileEncodesURLSecrets(t *testing.T) {
 func TestEncryptFileWrongKeyFailsDecrypt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      API_KEY: secret\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("profiles:\n  p:\n    env:\n      ~API_KEY: secret\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	keyA := make([]byte, 32)
@@ -394,7 +394,7 @@ func TestEncryptFileSaltStableAcrossRuns(t *testing.T) {
 	// one per value.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	original := "default: anth\nprofiles:\n  anth:\n    env:\n      EXISTING_SECRET: existing-value\n      OTHER_VALUE: new-value-to-encrypt\n"
+	original := "default: anth\nprofiles:\n  anth:\n    env:\n      ~EXISTING_SECRET: existing-value\n      OTHER_VALUE: new-value-to-encrypt\n"
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestEncryptFileSaltStableAcrossRuns(t *testing.T) {
 		t.Fatalf("first encrypt: %v", err)
 	}
 	if n1 != 1 {
-		t.Fatalf("first encrypt encrypted %d values, want 1 (only EXISTING_SECRET is secret-looking)", n1)
+		t.Fatalf("first encrypt encrypted %d values, want 1 (only the marked key is a candidate)", n1)
 	}
 	n2, err := EncryptFile(path, key, salt, "", true)
 	if err != nil {

@@ -140,19 +140,24 @@ func TestResolveProfileNotFound(t *testing.T) {
 }
 
 func TestMaskValue(t *testing.T) {
-	cases := []struct{ k, v string }{
-		{"ANTHROPIC_API_KEY", "sk-ant-xxxxxxxxxxxxxx"},
-		{"DB_PASSWORD", "supersecret123"},
-		{"AUTH_TOKEN", "tok-xxxx"},
-		{"CREDENTIAL", "cred-xxxx"},
-	}
-	for _, c := range cases {
-		if got := MaskValue(c.v, ShouldMask(c.k, c.v, false, false)); got == c.v {
-			t.Fatalf("MaskValue(%q) returned the value unchanged", c.k)
+	plain := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{
+		"MAX_TOKENS": "8192", "ANTHROPIC_MODEL": "claude-sonnet-5", "AUTHOR": "me", "KEY_PATH": "/keys/id",
+	}}}}
+	for k, v := range plain.Profiles["p"].Env {
+		if got := MaskValue(v, ShouldMask(k, v, false, false)); got != v {
+			t.Errorf("unmarked %s = %q, want it shown", k, got)
 		}
 	}
-	if got := MaskValue("claude-sonnet-5", ShouldMask("ANTHROPIC_MODEL", "claude-sonnet-5", false, false)); got != "claude-sonnet-5" {
-		t.Fatalf("non-secret masked: got %q", got)
+	marked := Config{Profiles: map[string]Profile{"p": {Env: map[string]string{
+		"ANTHROPIC_API_KEY": "sk-ant-xxxxxxxxxxxxxx", "DB_PASSWORD": "supersecret123",
+		"AUTH_TOKEN": "tok-xxxx", "CREDENTIAL": "cred-xxxx",
+	}, Marked: map[string]bool{
+		"ANTHROPIC_API_KEY": true, "DB_PASSWORD": true, "AUTH_TOKEN": true, "CREDENTIAL": true,
+	}}}}
+	for k, v := range marked.Profiles["p"].Env {
+		if got := MaskValue(v, ShouldMask(k, v, true, false)); got == v {
+			t.Errorf("marked %s shown in clear", k)
+		}
 	}
 }
 
@@ -163,11 +168,14 @@ func TestShouldMask(t *testing.T) {
 	if !ShouldMask("X", "enc:v3:abc", false, true) {
 		t.Fatal("encrypted at rest masks")
 	}
-	if !ShouldMask("GITHUB_TOKEN", "x", false, false) {
-		t.Fatal("heuristic still masks")
+	if ShouldMask("GITHUB_TOKEN", "ghp_x", false, false) {
+		t.Fatal("a key's name must not mask")
 	}
-	if ShouldMask("API", "https://api.example.com", false, false) {
-		t.Fatal("a plain non-secret value must not mask")
+	if !ShouldMask("API", "https://user:pw@api.example.com", false, false) {
+		t.Fatal("URL credentials mask")
+	}
+	if ShouldMask("MAX_TOKENS", "8192", false, false) {
+		t.Fatal("a number is not a secret")
 	}
 }
 
@@ -190,8 +198,8 @@ func TestMaskValueShortSecretRedacted(t *testing.T) {
 		{"0123456789ab", "0123…" + "(len=12)"},
 	}
 	for _, c := range cases {
-		if got := MaskValue(c.v, ShouldMask("API_KEY", c.v, false, false)); got != c.want {
-			t.Errorf("MaskValue(API_KEY, %q) = %q, want %q", c.v, got, c.want)
+		if got := MaskValue(c.v, true); got != c.want {
+			t.Errorf("MaskValue(%q) = %q, want %q", c.v, got, c.want)
 		}
 	}
 }
@@ -222,16 +230,19 @@ func TestMaskValueURLSecrets(t *testing.T) {
 	}
 }
 
-func TestShouldEncryptMatchesSecretSelection(t *testing.T) {
+func TestShouldEncryptSelectsOnlyMarks(t *testing.T) {
 	cases := []struct {
 		key, val string
 		want     bool
 	}{
-		{"API_KEY", "sk-123", true},
-		{"password", "hunter2", true},
-		{"db", "postgres://u:p@host/db", true}, // URL credentials
+		{"~API_KEY", "sk-123", true},
+		{"API_KEY", "sk-123", false},
+		{"password", "hunter2", false},
+		{"MAX_TOKENS", "8192", false},
+		{"db", "postgres://u:p@host/db", true},
 		{"MODEL", "gpt-x", false},
-		{"BASE_URL", "https://api.example.com", false},
+		{"~PROJECT_PATH", "/Users/anna/x", true},
+		{"PROJECT_PATH", "/Users/anna/x", false},
 	}
 	for _, c := range cases {
 		if got := ShouldEncrypt(c.key, c.val); got != c.want {
@@ -796,7 +807,7 @@ func TestMergeCommentsSticky(t *testing.T) {
 func TestEncryptFileRefusesKeyMismatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	cfgContent := "profiles:\n  p:\n    env:\n      TOKEN: plain\n"
+	cfgContent := "profiles:\n  p:\n    env:\n      ~TOKEN: plain\n"
 	if err := os.WriteFile(path, []byte(cfgContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
