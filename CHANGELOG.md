@@ -8,6 +8,14 @@
   credentials, and any value stored as ciphertext. Values sealed by an
   earlier version under an unmarked key stay sealed and masked, but
   `decrypt` returns them unmarked — add `~` before re-encrypting.
+- **New:** `enver --file <path>` (short `-f`) works on one config file as the
+  whole config. Reads, writes and completion come from that file alone, and
+  the content pulled for it is stored in `.enver/<file>/` beside it, laid out
+  like the shared store. `--config`, `--no-local`, `-g`/`--global` and
+  `pull --local` are errors together with `--file`. `validate` refuses `--file`
+  until named-file checks arrive.
+- **Breaking:** `keygen` loses the `-f` shorthand, which `--file` takes;
+  `--force` stays.
 
 ## v0.13.0 - 2026-11-25
 
