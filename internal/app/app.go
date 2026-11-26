@@ -250,7 +250,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if len(cmdArgs) == 0 {
 		if dashAt < 0 && len(args) > 1 {
 			rest := strings.Join(args[1:], " ")
-			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s %s -- %s`", opts.Name, args[0], rest, opts.Name, args[0], rest)
+			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s`", opts.Name, args[0], rest, config.HintCommand(strings.TrimPrefix(opts.Name, "enver "), args[0], "--", rest))
 		}
 		return fmt.Errorf("%s requires a command after `--`", opts.Name)
 	}
@@ -279,7 +279,7 @@ func profilesOrDefault(profiles []string, def string) ([]string, error) {
 		return profiles, nil
 	}
 	if def == "" {
-		return nil, fmt.Errorf("no profile specified and no default set in config; set one with `enver default <profile>`")
+		return nil, fmt.Errorf("no profile specified and no default set in config; set one with `%s`", config.HintCommand("default", "<profile>"))
 	}
 	return []string{def}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/neiromaster/enver/internal/crypto"
 )
 
@@ -61,7 +62,7 @@ func Keygen(opts KeygenOptions) error {
 			return err
 		}
 		if risk {
-			fmt.Fprintln(os.Stderr, "warning: overwriting the key makes existing encrypted values unreadable; run `enver decrypt` with the old key first to migrate")
+			fmt.Fprintf(os.Stderr, "warning: overwriting the key makes existing encrypted values unreadable; run `%s` with the old key first to migrate\n", config.HintCommand("decrypt"))
 		}
 		return crypto.GenerateKey(opts.Path, opts.Force)
 	}

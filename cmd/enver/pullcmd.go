@@ -45,8 +45,9 @@ A source is github:owner/repo[@ref], optionally with a path inside the repo,
 gist:owner/id[/file][@revision] (a gist has no branches or tags, so a revision
 is the full 40-character sha), or an https URL. Registration writes the global
 config; --local writes the project's .enver.yaml instead, so the record travels
-with the repository. A remote's profiles appear under its record name as a
-prefix, unless --no-prefix stores them under their bare upstream names.
+with the repository. Under --file registration writes that file. A remote's
+profiles appear under its record name as a prefix, unless --no-prefix stores
+them under their bare upstream names.
 
 Nothing is resolved from the network when a profile is read: run enver pull
 again to refresh. Removing a record deletes its content only when no visible

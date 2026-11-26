@@ -113,23 +113,29 @@ func FileStoreDir(file string) string {
 	return filepath.Join(filepath.Dir(file), ".enver", filepath.Base(file))
 }
 
-// PullHintFlags holds the flag text a pull hint spells after `enver pull`: the
-// invocation's own flags, set by the caller that knows how the command was run,
-// so a hint suggests the same view the user is in. Empty in the default view.
-var PullHintFlags string
+// HintFlags holds the flag text every command-line hint carries after
+// `enver <verb>`: `--file <path>` under `--file`, empty otherwise. The CLI sets
+// it once per process, so a hint suggests the same view the user is in.
+var HintFlags string
 
-// PullCommand renders the pull line a hint shows, flags first so the suggested
-// line reproduces the invocation the hint came from, then the arguments the
-// hint names.
-func PullCommand(args ...string) string {
-	line := "enver pull"
-	if PullHintFlags != "" {
-		line += " " + PullHintFlags
+// HintCommand renders the command line a hint shows: the flag text right after
+// the verb, so the suggested line reproduces the invocation the hint came from,
+// then the arguments the hint names.
+func HintCommand(verb string, args ...string) string {
+	line := "enver " + verb
+	if HintFlags != "" {
+		line += " " + HintFlags
 	}
 	if len(args) > 0 {
 		line += " " + strings.Join(args, " ")
 	}
 	return line
+}
+
+// PullCommand renders the pull line a hint shows: HintCommand for the pull
+// verb, which is the verb all ten hint sites spell.
+func PullCommand(args ...string) string {
+	return HintCommand("pull", args...)
 }
 
 // ReadRemoteState reads the fetch provenance recorded for name. ok is false when

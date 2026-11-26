@@ -190,8 +190,8 @@ func LayerEra(layer string) int {
 }
 
 // Config is the merged top-level document. Origins records, per profile and env
-// key, which layer ("global", "local", or "remote:<name>") provided the winning
-// value; it is filled by Merge and never serialized.
+// key, which layer ("global", "local", "file", or "remote:<name>") provided the
+// winning value; it is filled by Merge and never serialized.
 type Config struct {
 	Default  string                  `yaml:"default"`
 	Profiles map[string]Profile      `yaml:"profiles"`
@@ -640,8 +640,9 @@ func LoadStandalone(path string) (Config, error) {
 
 // Source identifies where a resolved env value came from: the profile that last
 // set it along the chain, and the layer whose copy of that profile carried the
-// winning value ("global", "local", or "remote:<name>"). A key overridden by a
-// closer parent or child reports the override, matching value provenance.
+// winning value ("global", "local", "file", or "remote:<name>"). A key
+// overridden by a closer parent or child reports the override, matching value
+// provenance.
 type Source struct {
 	Profile string `json:"profile"`
 	Layer   string `json:"layer"`

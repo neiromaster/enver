@@ -187,6 +187,26 @@ func TestFileHintsNameTheFile(t *testing.T) {
 	}
 }
 
+// TestFileHintsCarryTheFlagOutsidePull pins the hint seam beyond pull: every
+// hint that spells an enver command line carries `--file <path>` right after
+// the verb, so following one under --file stays on the file.
+func TestFileHintsCarryTheFlagOutsidePull(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  t:\n    env:\n      A: \"1\"\n")
+	for _, args := range [][]string{{"show", "--file", "team.yaml"}, {"default", "--file", "team.yaml"}} {
+		r := s.run(args...)
+		if r.ExitCode != 1 || !strings.Contains(r.Stderr, "set one with `enver default --file team.yaml <profile>`") {
+			t.Fatalf("%v: the no-default hint does not name the file: exit %d, stderr: %s", args, r.ExitCode, r.Stderr)
+		}
+	}
+	envfile := filepath.Join(s.project, "secrets.env")
+	s.writeFile(envfile, "A=1\n")
+	r := s.run("import", "--file", "team.yaml", envfile, "p")
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "enver edit --file team.yaml p") || !strings.Contains(r.Stdout, "enver encrypt --file team.yaml p --all") {
+		t.Fatalf("the import summary does not name the file: exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}
+
 // TestFilePullUsesTheStoreBesideIt pins the store split: a pull under --file
 // writes the record into the file and the content into the store beside it, the
 // shared store under the config home stays untouched, and the shared pull
@@ -209,7 +229,7 @@ func TestFilePullUsesTheStoreBesideIt(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.project, ".enver", "team.yaml", "base.yaml")); err != nil {
 		t.Fatalf("the store beside the file: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(s.configPath(), "..", "remotes", "base.yaml")); err == nil {
+	if _, err := os.Stat(filepath.Join(s.remotesDir(), "base.yaml")); err == nil {
 		t.Fatal("the shared store was written")
 	}
 	shown := s.run("show", "--file", "team.yaml", "t")
@@ -217,19 +237,28 @@ func TestFilePullUsesTheStoreBesideIt(t *testing.T) {
 		t.Fatalf("show --file after pull: exit %d, %q, stderr: %s", shown.ExitCode, shown.Stdout, shown.Stderr)
 	}
 	// The global profile g must be absent from the listing; the check reads the
-	// profile column of every line rather than substring-matching g anywhere.
-	if listed := s.run("list", "--file", "team.yaml"); listed.ExitCode != 0 {
+	// profile column of every line rather than substring-matching g anywhere,
+	// and the file's own profile t anchors the scan on a listing that printed
+	// rows, so the absence claim cannot pass vacuously.
+	listed := s.run("list", "--file", "team.yaml")
+	if listed.ExitCode != 0 {
 		t.Fatalf("list --file: exit %d, %q, stderr: %s", listed.ExitCode, listed.Stdout, listed.Stderr)
-	} else {
-		for _, line := range strings.Split(strings.TrimRight(listed.Stdout, "\n"), "\n") {
-			f := strings.Fields(line)
-			if len(f) > 0 && f[0] == "*" {
-				f = f[1:]
-			}
-			if len(f) > 0 && f[0] == "g" {
-				t.Fatalf("list --file offers the global profile:\n%s", listed.Stdout)
-			}
+	}
+	sawT := false
+	for _, line := range strings.Split(strings.TrimRight(listed.Stdout, "\n"), "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && f[0] == "*" {
+			f = f[1:]
 		}
+		if len(f) > 0 && f[0] == "t" {
+			sawT = true
+		}
+		if len(f) > 0 && f[0] == "g" {
+			t.Fatalf("list --file offers the global profile:\n%s", listed.Stdout)
+		}
+	}
+	if !sawT {
+		t.Fatalf("list --file never showed the file's own profile in the scan:\n%s", listed.Stdout)
 	}
 	if seen := s.run("pull", "--list"); seen.ExitCode != 0 || strings.Contains(seen.Stdout, "base") {
 		t.Fatalf("the shared pull --list saw the file's record: %q", seen.Stdout)
@@ -256,13 +285,16 @@ func TestKeygenForceLosesShorthand(t *testing.T) {
 }
 
 // TestFileCompletionOffersTheFileToMutators pins mutator completion: edit under
-// --file offers the write target's profiles, not the global config's.
+// --file offers the write target's profiles, not the global config's and not a
+// remote-projected name, which every mutator would then refuse.
 func TestFileCompletionOffersTheFileToMutators(t *testing.T) {
 	s := newSandbox(t)
 	s.writeGlobal("profiles:\n  g:\n    env:\n      A: \"1\"\n")
-	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  t:\n    env:\n      A: \"1\"\n")
+	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  t:\n    env:\n      A: \"1\"\nremotes:\n  r:\n    url: https://example.invalid/r.yaml\n")
+	store := filepath.Join(s.project, ".enver", "team.yaml")
+	s.writeFile(filepath.Join(store, "r.yaml"), "profiles:\n  default:\n    env:\n      R: \"1\"\n")
 	tokens := completionTokens(s.run("__complete", "edit", "--file", "team.yaml", "").Stdout)
-	if !slices.Contains(tokens, "t") || slices.Contains(tokens, "g") {
+	if !slices.Contains(tokens, "t") || slices.Contains(tokens, "g") || slices.Contains(tokens, "r/default") {
 		t.Fatalf("completion under --file = %q", tokens)
 	}
 }

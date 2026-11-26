@@ -122,7 +122,7 @@ func init() {
 	pf.BoolVar(&globalFlags.noLocal, "no-local", false, "ignore the ./.enver.yaml layer when reading")
 	pf.BoolVar(&globalFlags.noExpand, "no-expand", false, "do not expand $VAR references")
 	pf.BoolVarP(&globalFlags.global, "global", "g", false, "write to the global config instead of the local .enver.yaml (mutating commands)")
-	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml and relative --config resolve against it)")
+	pf.StringVar(&globalFlags.chdir, "chdir", "", "run as if started from this directory (.enver.yaml, relative --config and relative --file resolve against it)")
 	pf.StringVarP(&globalFlags.file, "file", "f", "", "work on this config file as the whole config (no global or ./.enver.yaml layer); content pulled for it is stored in .enver/<file> beside it")
 
 	rootCmd.AddCommand(xCmd, showCmd, exportCmd, dotenvCmd, importCmd, listCmd, keygenCmd, encryptCmd, decryptCmd, addCmd, defaultCmd, validateCmd, removeCmd, renameCmd, duplicateCmd, editCmd, updateCmd, pullCmd)
@@ -225,7 +225,7 @@ func applyFile() error {
 		return fmt.Errorf("--file %s is a directory; name a config file", abs)
 	}
 	if info, err := os.Stat(filepath.Dir(abs)); err != nil || !info.IsDir() {
-		return fmt.Errorf("--file %s: parent directory does not exist", abs)
+		return fmt.Errorf("--file %s: parent directory is missing or not a directory", abs)
 	}
 	en := filepath.Join(filepath.Dir(abs), ".enver")
 	if info, err := os.Stat(en); err == nil && !info.IsDir() {
@@ -233,7 +233,7 @@ func applyFile() error {
 	}
 	store := config.FileStoreDir(abs)
 	config.RemotesDir = func() string { return store }
-	config.PullHintFlags = "--file " + hintPath(globalFlags.file)
+	config.HintFlags = "--file " + hintPath(globalFlags.file)
 	return nil
 }
 
@@ -385,14 +385,12 @@ func notFoundInTarget(name, target string) error {
 
 // addCommandLine is the command a scope hint points at: the patch copy lands in
 // the write target, so it needs the same scope flag the refused write carried.
+// --file comes through the hint seam; -g keeps its shorthand.
 func addCommandLine(name string) string {
-	if globalFlags.file != "" {
-		return "enver add --file " + hintPath(globalFlags.file) + " " + name
-	}
 	if globalFlags.global {
 		return "enver add -g " + name
 	}
-	return "enver add " + name
+	return config.HintCommand("add", name)
 }
 
 func targetProfiles(cmd *cobra.Command, toComplete string) []string {
@@ -413,11 +411,12 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 }
 
 // completionTarget is the config completion offers profile names from: the
-// standalone file under --file, the local file by default, the global one
+// file under --file (its own profiles — every mutator refuses a name only
+// remote content projects), the local file by default, the global one
 // under --global.
 func completionTarget(cmd *cobra.Command) (config.Config, error) {
 	if file, _ := cmd.Flags().GetString("file"); file != "" {
-		return config.LoadStandalone(file)
+		return config.LoadFile(file)
 	}
 	g, _ := cmd.Flags().GetBool("global")
 	cfgPath, _ := cmd.Flags().GetString("config")
