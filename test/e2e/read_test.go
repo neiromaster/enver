@@ -95,7 +95,7 @@ func TestChdirReadsLocalFromGivenDir(t *testing.T) {
 
 func TestShowJSONUnmasked(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: secretvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: secretvalue1\n")
 	var payload struct {
 		Profile string            `json:"profile"`
 		Env     map[string]string `json:"env"`
@@ -118,7 +118,7 @@ func TestShowJSONUnmasked(t *testing.T) {
 
 func TestListJSONUnmasked(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: secretvalue1\n  q:\n    env:\n      A: \"1\"\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: secretvalue1\n  q:\n    env:\n      A: \"1\"\n")
 	if r := s.run("default", "p"); r.ExitCode != 0 {
 		t.Fatalf("default set: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}

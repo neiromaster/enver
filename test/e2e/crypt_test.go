@@ -150,7 +150,7 @@ func TestSecretMarkEndToEnd(t *testing.T) {
 
 func TestEncryptShowDecryptLifecycle(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	r := s.run("encrypt", "p")
 	if r.ExitCode != 0 {
@@ -173,12 +173,31 @@ func TestEncryptShowDecryptLifecycle(t *testing.T) {
 	}
 }
 
+// TestEncryptLeavesUnmarkedKeyInClear pins the accepted cost of Part 1: an
+// unmarked key is shown by show and left alone by encrypt.
+func TestEncryptLeavesUnmarkedKeyInClear(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  p:\n    env:\n      API_KEY: sk-plain-123\n      MAX_TOKENS: 8192\n")
+	requireKeygen(t, s)
+	r := s.run("encrypt", "p")
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "encrypted 0 value(s)") {
+		t.Fatalf("encrypt must leave an unmarked key alone, got %d, %q, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+	shown := s.run("show", "p")
+	if shown.ExitCode != 0 || !strings.Contains(shown.Stdout, "API_KEY=sk-plain-123") || !strings.Contains(shown.Stdout, "MAX_TOKENS=8192") {
+		t.Fatalf("show must print unmarked values in clear, got %d, %q, stderr: %s", shown.ExitCode, shown.Stdout, shown.Stderr)
+	}
+	if strings.Contains(s.readLocal(), "enc:v3:") {
+		t.Fatalf("encrypt sealed an unmarked key:\n%s", s.readLocal())
+	}
+}
+
 // TestShowWithoutKeyDegrades pins the display/execution split: with no key
 // source text show names what it cannot read and still exits 0, while JSON
 // keeps failing loudly rather than handing machines ciphertext.
 func TestShowWithoutKeyDegrades(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
 		t.Fatalf("encrypt failed: %s", r.Stderr)
@@ -207,7 +226,7 @@ func TestShowWithoutKeyDegrades(t *testing.T) {
 
 func TestShowWithWrongKeyFails(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
 		t.Fatalf("encrypt failed: %s", r.Stderr)
@@ -226,7 +245,7 @@ func TestShowWithWrongKeyFails(t *testing.T) {
 
 func TestEnverKeyEnvDecrypts(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
 		t.Fatalf("encrypt failed: %s", r.Stderr)
@@ -295,7 +314,7 @@ func typeKeys(t *testing.T, f *os.File, keys string) {
 // flag — dropping it would leave the edited text in the file in the clear.
 func TestEditDecryptsAndReencrypts(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
 		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
@@ -372,7 +391,7 @@ func TestEditDecryptsAndReencrypts(t *testing.T) {
 // gate lives in doAdd, so only driving the command reaches it.
 func TestAddRefusesToClobberSealedValueWithoutKey(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("default: work\nprofiles:\n  base:\n    env:\n      PLAIN: b\n  work:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("default: work\nprofiles:\n  base:\n    env:\n      PLAIN: b\n  work:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "work"); r.ExitCode != 0 {
 		t.Fatalf("encrypt: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
