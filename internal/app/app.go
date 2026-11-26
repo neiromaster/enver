@@ -24,6 +24,10 @@ type Options struct {
 	NoLocal    bool
 	NoExpand   bool   // skip $VAR interpolation
 	Name       string // invocation label ("enver x") for error messages
+	// FilePath names one config file to work on as the whole config: reads come
+	// from it and the content pulled for it, and no user layer contributes.
+	// Setting it makes ConfigPath and NoLocal meaningless.
+	FilePath string
 	// TolerateMissingKey degrades an absent key to a per-key report instead of
 	// a failure. Only the text display path may set it: a child process or a
 	// machine consumer started with unreadable values fails somewhere else.
@@ -85,7 +89,13 @@ func Load(opts Options) (config.Config, error) {
 // reports the advisories or deliberately stays silent — there is no third
 // behavior to keep in sync.
 func loadMerged(opts Options, report bool) (config.Config, error) {
-	cfg, err := config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
+	var cfg config.Config
+	var err error
+	if opts.FilePath != "" {
+		cfg, err = config.LoadStandalone(opts.FilePath)
+	} else {
+		cfg, err = config.LoadMerged(opts.ConfigPath, !opts.NoLocal)
+	}
 	if report && LoadWarnings != nil {
 		LoadWarnings(cfg.Warnings)
 	}

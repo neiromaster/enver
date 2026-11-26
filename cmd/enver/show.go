@@ -102,6 +102,30 @@ type envRender struct {
 	undecryptable map[string]string
 }
 
+// layerLabel is the layer name a provenance render shows: under --file the one
+// file is the whole config, so a global-labeled entry presents as the file
+// layer.
+func layerLabel(layer string) string {
+	if globalFlags.file != "" && layer == config.LayerGlobal {
+		return config.LayerFile
+	}
+	return layer
+}
+
+// relabelSources restamps each source's layer through layerLabel, so the JSON
+// provenance names layers the way the text comment does.
+func relabelSources(sources map[string]config.Source) map[string]config.Source {
+	if globalFlags.file == "" {
+		return sources
+	}
+	out := make(map[string]config.Source, len(sources))
+	for k, s := range sources {
+		s.Layer = layerLabel(s.Layer)
+		out[k] = s
+	}
+	return out
+}
+
 // markNote flags a row whose value carries the secret mark but still sits in
 // plaintext: the mark's promise of encryption is not kept yet.
 const markNote = "~ marked, not encrypted"
@@ -145,7 +169,7 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 		}
 		comment := ""
 		if s, ok := sources[k]; ok {
-			comment = fmt.Sprintf("# from %s (%s)", s.Profile, s.Layer)
+			comment = fmt.Sprintf("# from %s (%s)", s.Profile, layerLabel(s.Layer))
 		}
 		if marked && !encrypted {
 			comment = strings.TrimSpace(comment + " " + markNote)
@@ -182,6 +206,8 @@ type showJSON struct {
 // is reported instead of rendered: handing out enc:v3: text where a value
 // belongs is the trap the report exists to avoid.
 func printEnvJSON(w io.Writer, profile string, chain []string, env map[string]string, sources, unsets map[string]config.Source, undecryptable map[string]string) error {
+	sources = relabelSources(sources)
+	unsets = relabelSources(unsets)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(showJSON{Profile: profile, Chain: chain, Env: readableOnly(env, undecryptable), Sources: sources, Unsets: unsets, Undecryptable: undecryptable})

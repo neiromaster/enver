@@ -17,6 +17,9 @@ var validateCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if globalFlags.file != "" {
+			return fmt.Errorf("--file is not supported by validate; it checks the merged config of the current directory")
+		}
 		cfg, err := app.Load(appOpts())
 		if err != nil {
 			return err
