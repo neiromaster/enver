@@ -975,8 +975,6 @@ func (c Config) ExtendedBy(name string) []string {
 	return out
 }
 
-var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|credential)`)
-
 // urlCredRe matches a value that embeds credentials in a URL authority, e.g.
 // postgres://user:pass@db.internal:5432/app. Such values are secrets even under
 // a generic key (DATABASE_URL, CONNECTION_STRING). The userinfo is matched
@@ -985,29 +983,24 @@ var secretRe = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|auth|cr
 // component (https://api.example.com) are not secrets.
 var urlCredRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.\-]*://(?:[^/@\s:]*:[^@\s]*|[^/@\s:]+)@`)
 
-// IsSensitive reports whether a key/value pair should be masked for display:
-// a secret-looking key name, or a value that carries credentials in a URL.
-func IsSensitive(k, v string) bool {
-	return secretRe.MatchString(k) || urlCredRe.MatchString(v)
+// IsSensitive reports whether a value should be masked on display because it
+// embeds credentials in a URL authority.
+func IsSensitive(value string) bool {
+	return urlCredRe.MatchString(value)
 }
 
-// ShouldEncrypt reports whether a key/value pair should be stored encrypted.
-// It shares the secret heuristic with display masking on purpose, but is a
-// separate predicate: the security-side selection may grow stricter than the
-// display-side one without rewriting every mask call site. A key written with
-// the secret mark is a candidate whatever its name or value.
-func ShouldEncrypt(k, v string) bool {
-	name, marked := envname.SplitMarked(k)
-	return marked || secretRe.MatchString(name) || urlCredRe.MatchString(v)
+// ShouldEncrypt reports whether a key/value pair is a candidate for
+// enver encrypt: the key carries the ~ mark, or the value embeds URL
+// credentials.
+func ShouldEncrypt(key, value string) bool {
+	_, marked := envname.SplitMarked(key)
+	return marked || IsSensitive(value)
 }
 
 // ShouldMask reports whether a resolved value must be masked in text output:
-// the winning entry carries the secret mark, the value is ciphertext at rest,
-// or the name/value heuristic flags it. Display masking is separate from
-// ShouldEncrypt so a value encrypted without a mark, or a marked value not yet
-// encrypted, still hides on screen.
-func ShouldMask(k, v string, marked, encrypted bool) bool {
-	return marked || encrypted || IsSensitive(k, v)
+// the mark is the only name signal, the URL rule the only value signal.
+func ShouldMask(key, value string, marked, encrypted bool) bool {
+	return marked || encrypted || IsSensitive(value)
 }
 
 // MaskValue redacts a value for display. A secret shows its first four

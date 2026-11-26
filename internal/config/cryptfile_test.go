@@ -21,7 +21,7 @@ func writeMixedSaltConfig(t *testing.T, keyT, saltT []byte) (path, encT string) 
 		t.Fatal(err)
 	}
 	path = filepath.Join(t.TempDir(), "config.yaml")
-	cfg := "profiles:\n  q:\n    env:\n      OLD: " + encT + "\n  p:\n    env:\n      TOKEN: plain\n"
+	cfg := "profiles:\n  q:\n    env:\n      OLD: " + encT + "\n  p:\n    env:\n      ~TOKEN: plain\n"
 	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestEncryptFileJoinsFileWideSameSaltEra(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	cfg := "profiles:\n  q:\n    env:\n      OLD: " + enc + "\n  p:\n    env:\n      TOKEN: plain\n"
+	cfg := "profiles:\n  q:\n    env:\n      OLD: " + enc + "\n  p:\n    env:\n      ~TOKEN: plain\n"
 	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
