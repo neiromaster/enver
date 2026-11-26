@@ -21,6 +21,10 @@ type PullOptions struct {
 	// TargetIsGlobal selects the layer a registration writes: the global config
 	// by default, the project's .enver.yaml under --local.
 	TargetIsGlobal bool
+	// TargetLabel names the layer a registration writes when it is neither user
+	// layer — the --file target, spelled the way the invocation typed it. Empty
+	// keeps the existing user-layer names in every message.
+	TargetLabel string
 	// NoPrefix registers the remote with bare upstream names. It is a
 	// registration mode, not an update one: a stored record owns its mode.
 	NoPrefix bool
@@ -173,7 +177,7 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 	if !config.ValidRecordPath(name) {
 		return "", fmt.Errorf("remote name %q is not a valid record name", name)
 	}
-	target := remoteLayerState{path: opts.TargetPath, cfg: opts.Target, global: opts.TargetIsGlobal}
+	target := remoteLayerState{path: opts.TargetPath, cfg: opts.Target, global: opts.TargetIsGlobal, label: opts.TargetLabel}
 	other := remoteLayerState{path: opts.OtherPath, cfg: opts.Other, global: !opts.TargetIsGlobal}
 	// The closest declaration is the local one when it exists: it is the layer
 	// that controls the source right now, whichever layer the write target is.
@@ -186,9 +190,9 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 	case opts.LayerPinned:
 		if !declaresRemote(from.cfg, name) {
 			if declaresRemote(into.cfg, name) {
-				return "", fmt.Errorf("remote %q is not declared in the %s; it is declared in the %s — run without the layer flag to target it", name, layerName(from.global), layerName(into.global))
+				return "", fmt.Errorf("remote %q is not declared in the %s; it is declared in the %s — run without the layer flag to target it", name, from.layerName(), into.layerName())
 			}
-			return "", fmt.Errorf("remote %q is not declared in the %s", name, layerName(from.global))
+			return "", fmt.Errorf("remote %q is not declared in the %s", name, from.layerName())
 		}
 	case opts.OtherHidden:
 		if !declaresRemote(target.cfg, name) {
@@ -207,10 +211,10 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n✓ removed remote %q from the %s\n", name, layerName(from.global))
+	fmt.Fprintf(&b, "\n✓ removed remote %q from the %s\n", name, from.layerName())
 	if rec, ok := into.cfg.Remotes[name]; ok {
 		fmt.Fprintf(&b, "  remote %q is still declared in the %s and now resolves to %s; run %s to refresh its content\n",
-			name, layerName(into.global), recordSource(rec), config.PullCommand(name))
+			name, into.layerName(), recordSource(rec), config.PullCommand(name))
 		return b.String(), nil
 	}
 	if err := config.RemoveRemoteContent(name); err != nil {
@@ -242,13 +246,24 @@ type remoteLayerState struct {
 	path   string
 	cfg    config.Config
 	global bool
+	label  string
 }
 
-func layerName(global bool) string {
+// layerName is the name a layer carries in a summary or error: the label a
+// caller pinned for a layer that is neither user layer, else the user-layer
+// name its flag picks.
+func layerName(global bool, label string) string {
+	if label != "" {
+		return label
+	}
 	if global {
 		return "global config"
 	}
 	return "local .enver.yaml"
+}
+
+func (s remoteLayerState) layerName() string {
+	return layerName(s.global, s.label)
 }
 
 func declaresRemote(cfg config.Config, name string) bool {
@@ -273,7 +288,7 @@ func checkNewRecord(name string, rec config.RemoteRecord, opts PullOptions) erro
 	}
 	next[name] = rec
 	if err := config.ValidateRemotes(next); err != nil {
-		return fmt.Errorf("the remotes section of the %s would not survive a rewrite: %w", layerName(opts.TargetIsGlobal), err)
+		return fmt.Errorf("the remotes section of the %s would not survive a rewrite: %w", layerName(opts.TargetIsGlobal, opts.TargetLabel), err)
 	}
 	for _, existing := range slices.Sorted(maps.Keys(opts.Merged.Remotes)) {
 		if existing != name && strings.EqualFold(existing, name) {

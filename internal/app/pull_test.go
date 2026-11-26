@@ -2144,3 +2144,61 @@ func TestPullHintsCarryFileFlags(t *testing.T) {
 		t.Fatalf("hint without --file: %v", err)
 	}
 }
+
+func TestPullRemoveNamesTheFile(t *testing.T) {
+	t.Run("a --file target is named by its label", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+		opts := f.options(t, false, nil)
+		opts.TargetLabel = "file team.yaml"
+
+		summary, err := PullRemove("llm", opts)
+		if err != nil {
+			t.Fatalf("PullRemove: %v", err)
+		}
+		if !strings.Contains(summary, `removed remote "llm" from the file team.yaml`) {
+			t.Fatalf("the summary does not name the file:\n%s", summary)
+		}
+	})
+
+	t.Run("an empty label keeps the user-layer names", func(t *testing.T) {
+		f := newPullFixture(t)
+		f.write(t, f.localPath, "remotes:\n  llm:\n    url: https://example.com/local.yaml\n")
+		opts := f.options(t, false, nil)
+
+		summary, err := PullRemove("llm", opts)
+		if err != nil {
+			t.Fatalf("PullRemove: %v", err)
+		}
+		if !strings.Contains(summary, `removed remote "llm" from the local .enver.yaml`) {
+			t.Fatalf("an empty label must keep the layer names:\n%s", summary)
+		}
+	})
+
+	t.Run("a pinned miss names the file", func(t *testing.T) {
+		f := newPullFixture(t)
+		opts := f.options(t, false, nil)
+		opts.TargetLabel = "file team.yaml"
+		opts.LayerPinned = true
+
+		_, err := PullRemove("llm", opts)
+		if err == nil || !strings.Contains(err.Error(), `remote "llm" is not declared in the file team.yaml`) {
+			t.Fatalf("a pinned miss must name the file: %v", err)
+		}
+	})
+
+	t.Run("a refused rewrite names the file", func(t *testing.T) {
+		f := newPullFixture(t)
+		opts := f.options(t, false, nil)
+		opts.TargetLabel = "file team.yaml"
+		opts.Target = config.Config{Remotes: map[string]config.RemoteRecord{
+			"llm": {URL: "https://example.com/a.yaml"},
+			"LLM": {URL: "https://example.com/b.yaml"},
+		}}
+
+		_, err := Pull("https://example.com/new.yaml", "new", opts)
+		if err == nil || !strings.Contains(err.Error(), "the remotes section of the file team.yaml would not survive a rewrite") {
+			t.Fatalf("a refused rewrite must name the file: %v", err)
+		}
+	})
+}

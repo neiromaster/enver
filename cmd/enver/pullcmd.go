@@ -136,22 +136,25 @@ func dispatchPull(opts app.PullOptions, args []string) (string, error) {
 
 // pullOptions assembles the run: the merged view the gate judges against, the
 // two user layers with the write target first, and the injected seams. Under
-// --file the file is the whole config, so it is the target and there is no
-// other layer.
+// --file the file is the whole config, so it is the target, there is no other
+// layer, and the messages name the file.
 func pullOptions() (app.PullOptions, error) {
 	merged, err := app.Load(appOpts())
 	if err != nil {
 		return app.PullOptions{}, err
 	}
 	target, other := config.GlobalPath(globalFlags.configPath), config.LocalPath()
+	label := ""
 	if pullLocal {
 		target, other = other, target
 	}
 	if globalFlags.file != "" {
 		target, other = globalFlags.file, ""
+		label = "file " + globalFlags.file
 	}
 	opts := app.PullOptions{
 		TargetIsGlobal: !pullLocal && globalFlags.file == "",
+		TargetLabel:    label,
 		NoPrefix:       pullNoPrefix,
 		Force:          pullForce,
 		Merged:         merged,
