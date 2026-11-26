@@ -168,7 +168,7 @@ func PullAll(opts PullOptions) (string, error) {
 // standalone profiles but lose every inherited key.
 func PullRemove(name string, opts PullOptions) (string, error) {
 	if parent, _, nested := strings.Cut(name, "/"); nested && config.ValidRecordName(parent) {
-		return "", fmt.Errorf("remote %q is not a top-level record; nested records are removed with the record that declares them, so run enver pull --rm %s", name, parent)
+		return "", fmt.Errorf("remote %q is not a top-level record; nested records are removed with the record that declares them, so run %s", name, config.PullCommand("--rm", parent))
 	}
 	if !config.ValidRecordPath(name) {
 		return "", fmt.Errorf("remote name %q is not a valid record name", name)
@@ -209,8 +209,8 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n✓ removed remote %q from the %s\n", name, layerName(from.global))
 	if rec, ok := into.cfg.Remotes[name]; ok {
-		fmt.Fprintf(&b, "  remote %q is still declared in the %s and now resolves to %s; run enver pull %s to refresh its content\n",
-			name, layerName(into.global), recordSource(rec), name)
+		fmt.Fprintf(&b, "  remote %q is still declared in the %s and now resolves to %s; run %s to refresh its content\n",
+			name, layerName(into.global), recordSource(rec), config.PullCommand(name))
 		return b.String(), nil
 	}
 	if err := config.RemoveRemoteContent(name); err != nil {
@@ -231,9 +231,9 @@ func PullRemove(name string, opts PullOptions) (string, error) {
 // record is refreshed by pulling the record that declares it.
 func notRegistered(name string) error {
 	if parent, _, nested := strings.Cut(name, "/"); nested {
-		return fmt.Errorf("remote %q is not registered; nested records are fetched with the record that declares them, so run enver pull %s", name, parent)
+		return fmt.Errorf("remote %q is not registered; nested records are fetched with the record that declares them, so run %s", name, config.PullCommand(parent))
 	}
-	return fmt.Errorf("remote %q is not registered; register it with enver pull <source> --as %s", name, name)
+	return fmt.Errorf("remote %q is not registered; register it with %s", name, config.PullCommand("<source>", "--as", name))
 }
 
 // remoteLayerState is one config file a pull can read or write, named the way

@@ -57,6 +57,9 @@ closest declaration.`,
 	SilenceErrors:     true,
 	ValidArgsFunction: completePull,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if pullLocal && globalFlags.file != "" {
+			return fmt.Errorf("--local and --file conflict; --file is the whole config")
+		}
 		if pullLocal && globalFlags.global {
 			return fmt.Errorf("--local and --global conflict; pick the layer the record belongs to")
 		}
@@ -132,25 +135,31 @@ func dispatchPull(opts app.PullOptions, args []string) (string, error) {
 }
 
 // pullOptions assembles the run: the merged view the gate judges against, the
-// two user layers with the write target first, and the injected seams.
+// two user layers with the write target first, and the injected seams. Under
+// --file the file is the whole config, so it is the target and there is no
+// other layer.
 func pullOptions() (app.PullOptions, error) {
 	merged, err := app.Load(appOpts())
 	if err != nil {
 		return app.PullOptions{}, err
 	}
+	target, other := config.GlobalPath(globalFlags.configPath), config.LocalPath()
+	if pullLocal {
+		target, other = other, target
+	}
+	if globalFlags.file != "" {
+		target, other = globalFlags.file, ""
+	}
 	opts := app.PullOptions{
-		TargetIsGlobal: !pullLocal,
+		TargetIsGlobal: !pullLocal && globalFlags.file == "",
 		NoPrefix:       pullNoPrefix,
 		Force:          pullForce,
 		Merged:         merged,
 		Fetch:          pullFetch,
 		GistHead:       pullGistHead,
 		Confirm:        ui.Confirm,
-		TargetPath:     config.GlobalPath(globalFlags.configPath),
-		OtherPath:      config.LocalPath(),
-	}
-	if pullLocal {
-		opts.TargetPath, opts.OtherPath = opts.OtherPath, opts.TargetPath
+		TargetPath:     target,
+		OtherPath:      other,
 	}
 	if opts.Target, err = config.LoadFile(opts.TargetPath); err != nil {
 		return app.PullOptions{}, err
@@ -158,8 +167,9 @@ func pullOptions() (app.PullOptions, error) {
 	// Under --no-local the local layer is not part of the view a registration or
 	// a re-fetch judges, so it is not read and cannot block one. A removal is
 	// different: deleting content a local record still declares would blank every
-	// profile under its prefix, so --rm always sees both layers.
-	if !globalFlags.noLocal || pullRm {
+	// profile under its prefix, so --rm always sees both layers. Under --file
+	// OtherPath is empty: there is no other layer to read.
+	if opts.OtherPath != "" && (!globalFlags.noLocal || pullRm) {
 		if opts.Other, err = config.LoadFile(opts.OtherPath); err != nil {
 			return app.PullOptions{}, err
 		}
@@ -167,19 +177,26 @@ func pullOptions() (app.PullOptions, error) {
 	return opts, nil
 }
 
-// completePull offers the record names the merged view registers. It loads the
-// config directly rather than through app.Load so no load-time warning can leak
+// completePull offers the record names the active view registers: the merged
+// config by default, the standalone file under --file. It loads the config
+// directly rather than through app.Load so no load-time warning can leak
 // into a shell's completion output.
 func completePull(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
-	if err := applyChdir(); err != nil {
+	if err := applyGlobalFlags(); err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
-	cfgPath, _ := cmd.Flags().GetString("config")
-	noLocal, _ := cmd.Flags().GetBool("no-local")
-	cfg, err := config.LoadMerged(cfgPath, !noLocal)
+	var cfg config.Config
+	var err error
+	if file, _ := cmd.Flags().GetString("file"); file != "" {
+		cfg, err = config.LoadStandalone(file)
+	} else {
+		cfgPath, _ := cmd.Flags().GetString("config")
+		noLocal, _ := cmd.Flags().GetBool("no-local")
+		cfg, err = config.LoadMerged(cfgPath, !noLocal)
+	}
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
