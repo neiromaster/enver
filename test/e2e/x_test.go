@@ -178,7 +178,7 @@ func TestXStripsEnverKeyFromChild(t *testing.T) {
 
 func TestXForwardKeyMaterializesKeyFileKey(t *testing.T) {
 	s := newSandbox(t)
-	s.writeLocal("profiles:\n  p:\n    env:\n      TOKEN: plainvalue1\n")
+	s.writeLocal("profiles:\n  p:\n    env:\n      ~TOKEN: plainvalue1\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "p"); r.ExitCode != 0 {
 		t.Fatalf("encrypt failed: %s", r.Stderr)

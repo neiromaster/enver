@@ -46,6 +46,31 @@ func TestImportEnvMergeAndReplaceSummary(t *testing.T) {
 // globalParentOnly marks GH_TOKEN in a parent no target profile extends.
 const globalParentOnly = "profiles:\n  base:\n    env:\n      ~GH_TOKEN: parent\n"
 
+// TestImportSummaryPlaintextHint pins the summary's closing hint: an import
+// never seals, so it must say the values landed as plaintext and name both
+// ways to protect them — marking the keys, or sealing the whole profile.
+func TestImportSummaryPlaintextHint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeFile(t, path, "profiles:\n  p:\n    env:\n      A: old\n")
+	summary, err := ImportEnv(strings.NewReader("A=1\n"), path, "p", "", ImportOptions{})
+	if err != nil {
+		t.Fatalf("ImportEnv: %v", err)
+	}
+	for _, want := range []string{
+		"Imported values are stored in plaintext",
+		"`enver edit p` Secrets menu",
+		"`~KEY` in the config file",
+		"`enver encrypt p --all`",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary must mention %q:\n%s", want, summary)
+		}
+	}
+	if strings.Contains(summary, "Run `enver encrypt p` to encrypt secrets.") {
+		t.Fatalf("summary must not send the reader to a command that seals nothing:\n%s", summary)
+	}
+}
+
 // globalWithParent also gives work the extends only the merged view can see, so
 // the target file on its own knows nothing of the marking parent.
 const globalWithParent = globalParentOnly + "  work:\n    extends: base\n"

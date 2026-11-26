@@ -358,10 +358,10 @@ func (s *editState) carriedMark(key string, inherited []ui.EnvEntry) bool {
 
 // maskedLabel renders one variable row: the key spelled with the mark it
 // carries, and the value masked exactly as the menu listing masks it, so no
-// picker reveals a value another surface hides. The mask lookup keeps the
-// runtime name; the mark is display syntax only.
+// picker reveals a value another surface hides. The mask decision reads the
+// value and the flags, never the name; the mark is display syntax only.
 func maskedLabel(e ui.EnvEntry) string {
-	return fmt.Sprintf("%s = %s", envname.JoinMarked(e.Key, e.Secret), config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, e.Secret, e.Encrypted)))
+	return fmt.Sprintf("%s = %s", envname.JoinMarked(e.Key, e.Secret), config.MaskValue(e.Value, config.ShouldMask(e.Value, e.Secret, e.Encrypted)))
 }
 
 func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]bool) []ui.Option {

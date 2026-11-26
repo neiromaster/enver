@@ -158,7 +158,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 		marked := e.Secret || writeMarks[e.Key]
 		out = append(out, ui.SummaryEntry{
 			Key:   envname.JoinMarked(e.Key, marked),
-			Value: config.MaskValue(e.Value, config.ShouldMask(e.Key, e.Value, marked, crypto.IsEncrypted(e.Value))),
+			Value: config.MaskValue(e.Value, config.ShouldMask(e.Value, marked, crypto.IsEncrypted(e.Value))),
 			Kind:  kind,
 		})
 	}
@@ -172,7 +172,7 @@ func buildSummary(entries []ui.EnvEntry, parentEnv map[string]string, parentMark
 	for _, k := range inherited {
 		out = append(out, ui.SummaryEntry{
 			Key:   envname.JoinMarked(k, parentMarked[k]),
-			Value: config.MaskValue(parentEnv[k], config.ShouldMask(k, parentEnv[k], parentMarked[k], crypto.IsEncrypted(parentEnv[k]))),
+			Value: config.MaskValue(parentEnv[k], config.ShouldMask(parentEnv[k], parentMarked[k], crypto.IsEncrypted(parentEnv[k]))),
 			Kind:  ui.EntryInherited,
 		})
 	}

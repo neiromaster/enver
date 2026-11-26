@@ -235,8 +235,8 @@ func TestBuildSummary(t *testing.T) {
 }
 
 // TestBuildSummaryMasksByMark pins the summary's display rule: a marked row is
-// spelled ~KEY and masked, an inherited mark does the same for the inherited row,
-// and neither value embeds URL credentials, so only the mark can be doing
+// spelled ~KEY and masked, an inherited mark does the same for the inherited
+// row, and neither value embeds URL credentials, so only the mark can be doing
 // either. The override lookup and the own-key set keep the runtime name.
 func TestBuildSummaryMasksByMark(t *testing.T) {
 	const ownValue, inheritedValue = "plain-own-value", "plain-inherited-value"
@@ -306,8 +306,8 @@ func TestBuildSummaryMasksCiphertext(t *testing.T) {
 // retype with a plain name can neither unmark a stored secret nor show a mark the
 // write drops.
 func TestBuildSummaryMarksWhatTheWriteKeeps(t *testing.T) {
-	// PROJECT_PATH embeds no URL credentials, so only the
-	// mark can mask it.
+	// PROJECT_PATH embeds no URL credentials, so only a mark
+	// can mask it.
 	const key, typed = "PROJECT_PATH", "plain-typed-value"
 	entries := []ui.EnvEntry{{Key: key, Value: typed}}
 	noOther := config.Config{}

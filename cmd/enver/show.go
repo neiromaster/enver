@@ -141,7 +141,7 @@ func printEnv(w io.Writer, env map[string]string, chain []string, sources, unset
 		if reason, ok := opts.undecryptable[k]; ok {
 			v = "(cannot decrypt: " + reason + ")"
 		} else if !opts.unmasked {
-			v = config.MaskValue(v, config.ShouldMask(k, v, marked, encrypted))
+			v = config.MaskValue(v, config.ShouldMask(v, marked, encrypted))
 		}
 		comment := ""
 		if s, ok := sources[k]; ok {

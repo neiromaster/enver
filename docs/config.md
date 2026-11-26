@@ -12,7 +12,7 @@ default: anth
 profiles:
   anth:
     env:
-      ANTHROPIC_API_KEY: sk-ant-...
+      ~ANTHROPIC_API_KEY: sk-ant-...
       ANTHROPIC_BASE_URL: https://api.anthropic.com
       ANTHROPIC_MODEL: claude-sonnet-5
 
@@ -297,7 +297,7 @@ always above:
 profiles:
   llm/ollama:
     env:
-      OLLAMA_API_KEY: sk-live
+      ~OLLAMA_API_KEY: sk-live
 ```
 
 `enver add llm/ollama` is the bootstrap for this: on a name only remote content
@@ -376,7 +376,7 @@ profiles:
   dev:
     extends: [proxy, opus-models]
     env:
-      ANTHROPIC_API_KEY: sk-...
+      ~ANTHROPIC_API_KEY: sk-...
 ```
 
 Precedence: parents are applied **left-to-right, so a later parent overrides an

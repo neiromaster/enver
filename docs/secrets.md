@@ -37,7 +37,7 @@ with the old key first if you need to migrate them.
 
 Encryption and masking select by the `~` mark and by values that embed URL
 credentials; a key's name plays no part. A leading `~` on an env key marks any
-other variable a secret candidate — a path carrying a username, a login, an
+variable a secret candidate — a path carrying a username, a login, an
 internal hostname:
 
 ```yaml
@@ -165,7 +165,7 @@ ciphertext remains:
 profiles:
   llm/ollama:
     env:
-      OLLAMA_API_KEY: sk-live
+      ~OLLAMA_API_KEY: sk-live
 ```
 
 A patch written through `enver add` inherits the mark the remote's entry carries
