@@ -54,7 +54,7 @@ func printRemoteStatuses(w io.Writer, rows []app.RemoteStatus) error {
 		dim, bold = dimStyle, boldStyle
 	}
 	if len(rows) == 0 {
-		_, err := fmt.Fprintln(w, dim.Render("# no remotes registered; register one with enver pull <source> --as <name>"))
+		_, err := fmt.Fprintln(w, dim.Render("# no remotes registered; register one with "+config.PullCommand("<source>", "--as", "<name>")))
 		return err
 	}
 	if _, err := fmt.Fprintln(w, dim.Render(fmt.Sprintf("# remotes: %d", len(rows)))); err != nil {

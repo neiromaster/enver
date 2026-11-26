@@ -114,7 +114,7 @@ closest declaration.`,
 func dispatchPull(opts app.PullOptions, args []string) (string, error) {
 	if len(args) == 0 {
 		if pullAs != "" {
-			return "", fmt.Errorf("--as names the record for a source; run enver pull <source> --as <name>")
+			return "", fmt.Errorf("--as names the record for a source; run %s", config.PullCommand("<source>", "--as", "<name>"))
 		}
 		return app.PullAll(opts)
 	}
