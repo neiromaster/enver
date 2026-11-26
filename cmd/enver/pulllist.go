@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/neiromaster/enver/internal/app"
+	"github.com/neiromaster/enver/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -84,7 +85,7 @@ func freshnessNote(row app.RemoteStatus, now time.Time) string {
 		parts = append(parts, commitNote(row))
 		parts = append(parts, pulledNote(row, now))
 	case row.Stored:
-		parts = append(parts, "no pull state; run enver pull "+row.Name)
+		parts = append(parts, "no pull state; run "+config.PullCommand(row.Name))
 	default:
 		parts = append(parts, "never pulled")
 	}

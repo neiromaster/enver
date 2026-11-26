@@ -131,3 +131,16 @@ func TestValidateRefusesFile(t *testing.T) {
 		t.Fatalf("validate under --file: %v", err)
 	}
 }
+
+func TestScanCryptIncludesFile(t *testing.T) {
+	resetFile(t, "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	globalFlags.file = filepath.Join(t.TempDir(), "team.yaml")
+	if err := os.WriteFile(globalFlags.file, []byte("profiles:\n  p:\n    env:\n      K: "+sealedValue(t, "v")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scan, err := scanCryptForApp()
+	if err != nil || scan.Salt == nil {
+		t.Fatalf("scan did not see the file's ciphertext: %+v, %v", scan, err)
+	}
+}

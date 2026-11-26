@@ -119,7 +119,7 @@ func init() {
 // comma-segment against the merged view the flag is itself validated on,
 // keeping typed parents as the prefix and not re-offering them.
 func completeImportExtends(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if err := applyChdir(); err != nil {
+	if err := applyGlobalFlags(); err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 	prefix := ""
@@ -130,8 +130,9 @@ func completeImportExtends(cmd *cobra.Command, args []string, toComplete string)
 	picked := app.SplitExtends(prefix)
 	cfgPath, _ := cmd.Flags().GetString("config")
 	noLocal, _ := cmd.Flags().GetBool("no-local")
+	file, _ := cmd.Flags().GetString("file")
 	var out []string
-	for _, n := range app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal}, toComplete) {
+	for _, n := range app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal, FilePath: file}, toComplete) {
 		if !slices.Contains(picked, n) {
 			out = append(out, prefix+n)
 		}

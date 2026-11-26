@@ -55,11 +55,18 @@ func keygenPath() string {
 	return crypto.KeyFilePath()
 }
 
-// scanCryptForApp adapts the two-layer salt scan to the app.Keygen seam.
-// A scan error already names the configs; the wrap here would only repeat it.
+// scanCryptForApp adapts the salt scan to the app.Keygen seam: the global and
+// local configs always take part, and a --file file joins them, because the
+// key cache is machine-wide and a new key is judged against every config's
+// ciphertext, not just the one the command names. A scan error already names
+// the configs; the wrap here would only repeat it.
 func scanCryptForApp() (app.CryptScan, error) {
 	var salts crypto.SaltScan
-	for _, p := range []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()} {
+	paths := []string{config.GlobalPath(globalFlags.configPath), config.LocalPath()}
+	if globalFlags.file != "" {
+		paths = append(paths, globalFlags.file)
+	}
+	for _, p := range paths {
 		if err := config.ScanCrypt(p, &salts); err != nil {
 			return app.CryptScan{}, err
 		}
