@@ -3,13 +3,13 @@
 Secrets in the config can be encrypted so the config is safe to commit to a
 dotfiles repo. Only individual secret values are encrypted — keys, structure
 and non-secret values (base URLs, model names) stay plaintext. "Secret" means
-what the name or value heuristic flags, or what you mark with a leading `~` on
-the key (see [Marking arbitrary values](#marking-arbitrary-values)).
+what you mark with a leading `~` on the key, or a value that embeds
+credentials in a URL (see [Marking arbitrary values](#marking-arbitrary-values)).
 
 ```sh
 enver keygen                    # prompt for a passphrase, write the key cache (mode 0600)
 enver keygen --random           # non-interactive: write a random key cache instead (for CI)
-enver encrypt                   # encrypt secret and ~marked values in the config
+enver encrypt                   # encrypt ~marked values (enc:v3:argon2id:...)
 enver encrypt glm --all         # encrypt every value in the "glm" profile
 enver decrypt                   # restore plaintext (the ~ marks stay)
 ```
@@ -35,10 +35,10 @@ with the old key first if you need to migrate them.
 
 ## Marking arbitrary values
 
-Encryption and masking key off names
-(`key|token|secret|password|passwd|auth|credential`) and values that embed URL
-credentials. A leading `~` on an env key marks any other variable a secret
-candidate — a path carrying a username, a login, an internal hostname:
+Encryption and masking select by the `~` mark and by values that embed URL
+credentials; a key's name plays no part. A leading `~` on an env key marks any
+other variable a secret candidate — a path carrying a username, a login, an
+internal hostname:
 
 ```yaml
 profiles:
@@ -55,10 +55,9 @@ variable name (a bare `~` is rejected), and one profile cannot spell the same
 variable both ways — `~K` beside `K` is an error. On an `unset:` entry the mark
 is accepted and ignored: a fence has nothing to encrypt.
 
-A mark is a hint, never enforcement — it only widens what `enver encrypt`
-selects. A marked value stays plaintext in the file until you run that encrypt
-step yourself; `show` masks it whatever its name looks like, and flags the
-plaintext state, so the file never looks safer than it is:
+A marked value stays plaintext in the file until you run that encrypt step
+yourself; `show` masks it whatever its name, and flags the plaintext state, so
+the file never looks safer than it is:
 
 ```console
 $ enver show work
@@ -236,10 +235,10 @@ From then on `enver x` runs without prompting.
   prefixes (older formats) are rejected. The key cache lives at
   `~/.config/enver/key` (mode `0600`) — **never commit the key**.
 - **Preview masking** — `enver show` redacts a value whose key is marked with
-  `~`, whose value is encrypted at rest, or whose name matches
-  `key|token|secret|password|passwd|auth|credential`; use `--no-mask` or
-  `enver export` to reveal them. Masking is display only — the file stays as it
-  is — so a marked key still in plaintext is flagged, not fixed.
+  `~`, whose value is encrypted at rest, or which embeds credentials in a URL;
+  use `--no-mask` or `enver export` to reveal them. Masking is display only —
+  the file stays as it is — so a marked key still in plaintext is flagged, not
+  fixed.
 - **Scope** — encryption protects against accidental leaks (git, dotfiles,
   casual disk access), not against an attacker with read access to both the
   config and the key on the same machine. For stronger key storage, keep the

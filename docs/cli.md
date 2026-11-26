@@ -22,7 +22,7 @@ enver default [profile] [--clear]         Set, show, or clear the default profil
 enver validate                            Check config health
 enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --list, --force)
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
-enver encrypt [profile] [--all]           Encrypt secret values in the config
+enver encrypt [profile] [--all]           Encrypt ~marked values (--all: every value)
 enver decrypt [profile]                   Decrypt values back to plaintext
 enver update [--check]                    Update the enver binary; --check reports (0/1/2 exit codes)
 ```
@@ -94,10 +94,9 @@ emitted only when the output destination is a terminal; `NO_COLOR` and
 `TERM=dumb` turn it off, so piped output (`enver show | grep`) stays plain.
 `--format json` is never styled.
 
-A value counts as a secret when its key looks secret
-(`key|token|secret|password|passwd|auth|credential`, case-insensitive), when
-the value embeds credentials in a URL such as `postgres://user:pass@host`, or
-when the key carries a leading `~` mark — which makes any name a candidate (see
+A value counts as a secret when the key carries a leading `~` mark or the
+value embeds credentials in a URL such as `postgres://user:pass@host` — a
+key's name never matters (see
 [`secrets.md`](./secrets.md#marking-arbitrary-values)). `enver show` masks
 those values and `enver encrypt` seals them (use `--no-mask` to reveal); a
 value already stored as `enc:v3:` stays masked and is skipped by `encrypt`.

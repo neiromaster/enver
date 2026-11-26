@@ -7,7 +7,7 @@ any child command — without mutating the target tool's own configuration.
 
 ```console
 $ enver show dev
-ANTHROPIC_API_KEY=sk-a…(len=27)  # from base-anthropic (global)
+ANTHROPIC_API_KEY=sk-a…(len=27)  # from base-anthropic (global) ~ marked, not encrypted
 $ enver x dev -- claude
 ```
 

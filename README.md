@@ -15,7 +15,7 @@ is a provider-agnostic exec shim that speaks plain YAML and plain env vars.
 ```console
 $ enver show dev
 # profile: dev → base-anthropic → opus-models
-ANTHROPIC_API_KEY=sk-a…(len=27)  # from base-anthropic (global)
+ANTHROPIC_API_KEY=sk-a…(len=27)  # from base-anthropic (global) ~ marked, not encrypted
 ANTHROPIC_BASE_URL=https://api.anthropic.com  # from base-anthropic (global)
 ANTHROPIC_MODEL=claude-opus-5  # from opus-models (global)
 ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5-20251001  # from dev (local)
