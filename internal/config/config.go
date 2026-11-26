@@ -144,6 +144,7 @@ func stripCommentPrefix(c string) string {
 const (
 	LayerGlobal = "global"
 	LayerLocal  = "local"
+	LayerFile   = "file"
 )
 
 // remoteLayerPrefix heads the label a remote's content carries, followed by the
@@ -609,6 +610,31 @@ func LoadMerged(globalOverride string, useLocal bool) (Config, error) {
 		cfg = Merge(cfg, overlay, LayerGlobal, LayerLocal)
 	}
 	cfg.Warnings = slices.Concat(skippedContent, orphanWarnings(records), remoteWarnings(cfg.Remotes))
+	return cfg, nil
+}
+
+// LoadStandalone loads one named file as the whole config: the file's entries
+// labelled LayerFile, folded over the stored content of the records it
+// declares, with no global or local layer — a --file invocation works on the
+// one file, not on whatever the user home and the working directory contribute.
+// The fold and the warnings are LoadMerged's exactly, so both views describe
+// the same stored content alike; when no remote contributes, the base label is
+// LayerFile, the layer every entry of an empty fold belongs to. A missing file
+// yields an empty Config, no error, like any absent layer.
+func LoadStandalone(path string) (Config, error) {
+	file, err := load(path)
+	if err != nil {
+		return file, err
+	}
+	base, remoteBaseLabel, skippedContent, err := remoteBase(file.Remotes)
+	if err != nil {
+		return file, err
+	}
+	if remoteBaseLabel == "" {
+		remoteBaseLabel = LayerFile
+	}
+	cfg := Merge(base, file, remoteBaseLabel, LayerFile)
+	cfg.Warnings = slices.Concat(skippedContent, orphanWarnings(file.Remotes), remoteWarnings(cfg.Remotes))
 	return cfg, nil
 }
 
