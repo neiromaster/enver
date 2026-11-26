@@ -58,6 +58,39 @@ stays the overriding layer's verbatim rather than merging; `extends` lists merge
 as `[global…, local…]`, so a local parent takes priority over a global parent on
 a shared key.
 
+## Working on one file
+
+`enver <command> --file team.yaml …` (short `-f`) works on that file as if it
+were the whole config. Nothing else is read: not the global config, not
+`./.enver.yaml`. Reads resolve the file and the content pulled for it; mutators
+write the file; completion offers its profiles.
+
+The layer flags are errors together with `--file`: `--config`, `--no-local`,
+`-g`/`--global`, and `pull --local`. There is one layer, so the flags that
+choose among layers have nothing to choose.
+
+The records the file declares are pulled into `.enver/<file>/` beside it, not
+into `~/.config/enver/remotes/` — one directory per file, named by the file's
+full name, laid out like the shared store:
+
+    team.yaml
+    .enver/
+      team.yaml/
+        claude.yaml
+        claude.meta
+
+Add `.enver/` to `.gitignore`; enver does not manage it. Renaming or deleting
+the file leaves `.enver/<old name>/` behind; it is removed by hand. Hints that
+spell a command line carry `--file <path>`.
+
+Completion sees `--file` only when it stands left of the cursor:
+`enver show --file team.yaml <Tab>` offers the file's profiles;
+`enver show <Tab> --file team.yaml` offers the default config's.
+
+Between this release and the one that ships `validate <files>`, `validate`
+refuses `--file` with "`--file` is not supported by validate; it checks the
+merged config of the current directory".
+
 ## Remotes
 
 A remote is a config file someone else publishes — typically in a GitHub repo —
@@ -225,7 +258,9 @@ stored content is missing contributes no profiles and warns, naming the
   rename; a child whose stored copy still matches its declaration is not
   rewritten at all). It is config, not cache: XDG cache is disposable by
   convention, and deleting it must never silently change what `enver x`
-  exports.
+  exports. Under `--file` the same content and sidecars live in
+  `.enver/<file>/` beside the file (see
+  [Working on one file](#working-on-one-file)).
 - **Provenance** lives in a machine-local sidecar, `remotes/<name>.meta`: the
   fetched URL, the resolved ref, the commit sha a fetch resolved, and when the
   pull ran. Recording it in the record would dirty a checked-in `.enver.yaml`
@@ -257,9 +292,11 @@ enver pull --rm <name>            remove the record (and its content)
 
 Registration writes the **global** config, because a record is usually personal
 machine setup; pass `--local` to write the project's `.enver.yaml` instead, so
-the record travels with the repository. Registering globally a name the local
-file already declares is refused with that same `--local` hint: the local record
-would override the global one anyway. Re-registering a name prints the old and
+the record travels with the repository. Under `--file` registration writes
+the file itself (see [Working on one file](#working-on-one-file)). Registering
+globally a name the local file already declares is refused with that same
+`--local` hint: the local record would override the global one anyway.
+Re-registering a name prints the old and
 new source; when user-layer patch profiles sit under that prefix, a changed
 source or pull mode is a **takeover** — it changes what your credentials
 compose with, so pull asks first (`--force` accepts without asking, and is the

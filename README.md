@@ -103,6 +103,7 @@ store, inherits like code, and hands the result to a single child process.
 | Feature | Doc |
 |---|---|
 | Layered configs: remote content ⊕ global store ⊕ project file, per-key overlay, no walk-up | [`config.md`](docs/config.md#layers) |
+| Work on one config file as the whole config (`--file`), with the content pulled for it stored beside it in `.enver/<file>/` | [`config.md`](docs/config.md#working-on-one-file) |
 | Remote configs: `enver pull` a shared YAML, patch its profiles in place, keep working offline | [`config.md`](docs/config.md#remotes) |
 | Multi-parent `extends`: mixins composed left-to-right, transitive inheritance | [`config.md`](docs/config.md#multiple-parents) |
 | Run-line composition: `enver x base slot -- cmd` is an anonymous `extends` at launch | [`cli.md`](docs/cli.md#composing-profiles) |

@@ -102,6 +102,10 @@ addresses such a profile directly. Read commands accept several profiles:
 enver x base slot -- cmd composes them left to right (later wins), as an
 anonymous extends.
 
+Pass --file <path> to work on that file as the whole config: no global or
+.enver.yaml layer is read, writers write the file, and the content pulled for
+it is stored in .enver/<file>/ beside it.
+
 Config: $XDG_CONFIG_HOME/enver/config.yaml (default ~/.config/enver/config.yaml),
 plus a local .enver.yaml in the current directory. Mutating commands write to
 the local file by default; pass --global (-g) to write the user config.`,

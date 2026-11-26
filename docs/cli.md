@@ -60,6 +60,7 @@ enver --key <path>                        Key file (or ENVER_KEY env)
 enver --no-local                          Ignore the ./.enver.yaml layer when reading
 enver --no-expand                         Do not expand $VAR references
 enver --chdir <dir>                       Run as if started from <dir> (.enver.yaml and relative --config resolve against it)
+enver --file / -f <path>                  Work on <path> as the whole config (no global or ./.enver.yaml layer); content pulled for it is stored in .enver/<file>/ beside it
 enver --version / -h, --help
 ```
 
@@ -157,11 +158,13 @@ offers one and a nested path cannot be addressed by name.
 Argument completion offers the registered record names, so `enver pull <Tab>`
 lists what can be re-fetched or removed. Registration writes the global config;
 `--local` writes the project's `.enver.yaml` instead, so the record travels with
-the repo. A remote's profiles load as `<name>/<profile>`; `--no-prefix` stores
-them under their bare upstream names, and a re-pull never changes the mode a
-record was stored with. `--rm` removes the closest declaration in the merged
-view (`-g`/`--local` target an explicit layer) and deletes the content only when
-no layer still declares the name. `--list` is the read-only freshness view:
+the repo. Under `--file` registration writes the file (see
+[`config.md`](./config.md#working-on-one-file)). A remote's profiles load as
+`<name>/<profile>`; `--no-prefix` stores them under their bare upstream names,
+and a re-pull never changes the mode a record was stored with. `--rm` removes
+the closest declaration in the merged view (`-g`/`--local` target an explicit
+layer) and deletes the content only when no layer still declares the name.
+`--list` is the read-only freshness view:
 each record with its source, whether it is pinned, and the commit and time of
 its last pull. A re-registration that changes the source or the mode of a record
 your patches sit under is a takeover: pull warns and asks first, and `--force`
