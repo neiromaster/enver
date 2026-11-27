@@ -20,7 +20,8 @@
   consumer's pull applies; a file with an enver section and no mark is checked
   as a local config, where a profile may be named `llm/ollama`; a file with
   neither is skipped as not an enver config. `--strict` fails on warnings.
-  The lefthook recipe in `docs/config.md` needs no `exclude` for enver files.
+  The lefthook recipe in `docs/config.md` excludes the project's own
+  `.enver.yaml` — a layer, judged by the merged mode, not by its file.
 
 ## v0.13.0 - 2026-11-25
 
