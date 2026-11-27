@@ -187,6 +187,13 @@ func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
 	}
 }
 
+func TestIssueReasonMarkedEmpty(t *testing.T) {
+	is := Issue{Kind: KindMarkedEmpty, Severity: SeverityWarning}
+	if is.Severity != SeverityWarning || is.Reason() != "marked for publication but declares neither profiles nor remotes" {
+		t.Fatalf("marked-empty issue = %s / %q", is.Severity, is.Reason())
+	}
+}
+
 func hasIssue(issues []Issue, kind IssueKind) bool {
 	for _, is := range issues {
 		if is.Kind == kind {
