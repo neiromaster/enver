@@ -475,6 +475,39 @@ func TestUninstallUserDataNoteHonorsXDG(t *testing.T) {
 	})
 }
 
+// A trailing separator on the install dir must not make our own bin directory
+// look foreign to the root audit: the provider normalizes it, raw strings do
+// not.
+func TestUninstallToleratesTrailingSeparator(t *testing.T) {
+	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
+		s := newUninstallSandbox(t, dir)
+		if err := os.MkdirAll(s.installDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(s.exe, []byte("stub"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		installDir := s.installDir + string(os.PathSeparator)
+
+		messages, result := runUninstall(t, engine, s.env(), installDir, s.profile, "")
+
+		wantMessages := []string{
+			"enver: removed " + s.exe,
+			"enver: removed " + s.installRoot,
+			s.userDataLine(),
+		}
+		if !slices.Equal(messages, wantMessages) {
+			t.Fatalf("output lines:\n%q\nwant:\n%q", messages, wantMessages)
+		}
+		if result != "<null>" {
+			t.Fatalf("returned PATH = %q, want <null>", result)
+		}
+		if _, err := os.Stat(s.installRoot); !os.IsNotExist(err) {
+			t.Fatalf("install root survived a trailing-separator install dir (stat err: %v)", err)
+		}
+	})
+}
+
 func TestUninstallKeepsForeignFiles(t *testing.T) {
 	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
 		s := newUninstallSandbox(t, dir)

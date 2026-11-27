@@ -126,9 +126,15 @@ function Add-EnverCompletion {
     Add-EnverTextFile -Path $ProfilePath -Text $Text -Encoding $File.Encoding
   }
 
-  $Policy = Get-ExecutionPolicy
-  if ($Policy -eq "Restricted" -or $Policy -eq "AllSigned") {
-    Write-Host "enver: PowerShell execution policy is $Policy, so completions will not load. Run: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+  # The profile line is already written, so an unavailable policy query (a
+  # broken module path can hide the cmdlet) must not fail the install.
+  try {
+    $Policy = Get-ExecutionPolicy
+    if ($Policy -eq "Restricted" -or $Policy -eq "AllSigned") {
+      Write-Host "enver: PowerShell execution policy is $Policy, so completions will not load. Run: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+    }
+  } catch {
+    # Treat the missing cmdlet as "no advice to print".
   }
 }
 
@@ -238,9 +244,19 @@ function Invoke-EnverUninstall {
   # is foreign: keep the whole tree rather than delete user files.
   $InstallRoot = Split-Path -Parent $InstallDir
   if (Test-Path -Path $InstallRoot) {
+    # Compare through the provider, not raw strings: it returns children in a
+    # canonical form an 8.3 short input path would not match. Get-Item keeps a
+    # trailing separator, so trim it to match Get-ChildItem FullNames.
+    $Owned = @()
+    foreach ($OwnDir in @($InstallDir, $CompletionDir)) {
+      if (Test-Path -LiteralPath $OwnDir) {
+        $OwnedFull = (Get-Item -LiteralPath $OwnDir).FullName
+        $Owned += $OwnedFull.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+      }
+    }
     $Foreign = @(Get-ChildItem -Path $InstallRoot -Recurse -Force -File)
     foreach ($Item in @(Get-ChildItem -Path $InstallRoot -Recurse -Force -Directory)) {
-      if ($Item.FullName -ne $InstallDir -and $Item.FullName -ne $CompletionDir) {
+      if ($Owned -notcontains $Item.FullName) {
         $Foreign += $Item
       }
     }
