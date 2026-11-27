@@ -19,7 +19,7 @@ enver remove [profile] [-y]               Delete a profile
 enver rename [old] [new]                  Rename a profile (rewrites extends/default refs)
 enver duplicate <src> [new]               Copy a profile (extends, env, comments)
 enver default [profile] [--clear]         Set, show, or clear the default profile
-enver validate                            Check config health
+enver validate [files...] [--strict]      Check config health, or named files by their own rules
 enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --list, --force)
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
 enver encrypt [profile] [--all]           Encrypt ~marked values (--all: every value)

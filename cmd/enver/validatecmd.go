@@ -18,8 +18,39 @@ import (
 var validateStrict bool
 
 var validateCmd = &cobra.Command{
-	Use:           "validate [files...]",
-	Short:         "Check config health, or named files by their own rules",
+	Use:   "validate [files...]",
+	Short: "Check config health, or named files by their own rules",
+	Long: `Check the health of the merged config, or named files by the rules their
+own content declares.
+
+With no files, the merged config of the current directory is checked: dangling
+extends and extends cycles, empty profiles, profiles that define and unset the
+same key, and ~-marked keys left in plaintext. Exits non-zero on an error, and
+on a warning under --strict.
+
+With file arguments, every named file is checked offline: no store is read, no
+network is touched, no key is needed. The file's own content picks the rules.
+
+A file marked publish: true is checked by the rules a consumer's pull applies —
+own profile names must be bare, extends only inside the file's own namespace or
+the records it declares, no in-file cycles, usable record declarations,
+current-era ciphertext — plus the health checks. A file with an enver section
+(profiles, remotes, default) and no mark is checked as a local config, where a
+profile may be named llm/ollama. A file with neither is skipped and reported as
+such; it never fails the run, so one hook over *.yaml leaves the repository's
+other YAML alone.
+
+Each finding is one line prefixed with the path as given — <file>: error: ...,
+<file>: warning: ..., <file>: note: ... A clean file prints "<file>: ✓ valid
+for publication" or "<file>: ✓ valid as a local config", and the summary is the
+command's error: N of M files failed. Notes never fail. --strict makes warnings
+fail, in this mode and the merged one — a ~-marked key left in plaintext is a
+warning, so --strict stops a commit on a forgotten encrypt. A file named by
+--file joins the same list.
+
+Whether a declared source is reachable is not validate's job: the full
+rehearsal is enver pull --file <file>, which fetches the tree and gates every
+file the way a consumer's pull will.`,
 	Args:          cobra.ArbitraryArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,

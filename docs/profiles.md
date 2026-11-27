@@ -168,3 +168,30 @@ Every dangling `extends` is an error: strict scoping leaves no authorship to
 grade, since a remote file can no longer name a parent outside its own
 namespace. The hint survives where a pull can help — a parent whose record is
 declared but not yet pulled carries the `enver pull <name>` that supplies it.
+
+With file arguments, `enver validate [--strict] <file>...` checks every named
+file offline — no store is read, no network is touched, no key is needed — by
+the rules its own content declares:
+
+- A file marked `publish: true` is checked by the rules a consumer's `pull`
+  applies: own profile names must be bare, `extends` only inside the file's
+  own namespace or the records it declares, no in-file cycles, usable record
+  declarations, current-era ciphertext — plus the health checks above.
+- A file with an enver section (`profiles`, `remotes`, `default`) and no mark
+  is checked as a local config, where a profile may be named `llm/ollama`.
+- A file with neither is skipped and reported as such; it never fails the
+  command, so one hook over `*.yaml` leaves the repository's other YAML alone.
+
+Every finding is one line on stdout prefixed with the path as given
+(`<file>: error: …`), a clean file gets `✓ valid for publication` or
+`✓ valid as a local config`, and the summary (`enver: N of M files failed`)
+is the command's error. Notes never fail. `--strict` makes warnings fail, in
+this mode and the merged one — a `~`-marked key left in plaintext is a
+warning, so `--strict` is what stops a commit on a forgotten `enver encrypt`.
+Whether a declared source is reachable is not validate's job; the full
+rehearsal is `enver pull --file <file>`, which fetches the tree and gates
+every file. The hook recipe and the `publish` flow live in
+[`config.md`](./config.md#authoring-a-remote-config).
+
+Shell completion for the arguments is the shell's own file completion:
+validate takes files, not profiles.
