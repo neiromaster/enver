@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,39 @@ func (s *sandbox) plantPatchStore(t *testing.T, body string) {
 	t.Helper()
 	s.writeFile(filepath.Join(s.remotesDir(), "llm.yaml"), body)
 	s.writeFile(filepath.Join(s.remotesDir(), "llm.meta"), "url: "+patchRemoteURL+"\npulled-at: 2026-11-15T10:00:00Z\n")
+}
+
+// patchCompletionSandbox is patchSandbox with the two names a completion list
+// must treat differently from the pulled projection: a profile the local
+// target owns, and a record declared but never pulled, whose absent content
+// projects nothing.
+func patchCompletionSandbox(t *testing.T) *sandbox {
+	t.Helper()
+	s := patchSandbox(t)
+	s.writeLocal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\n  ghost:\n    url: https://example.com/ghost.yaml\nprofiles:\n  own:\n    env:\n      A: \"1\"\n")
+	return s
+}
+
+// plantPatchFile writes the --file variant beside the sandbox project: the file
+// declares its own record, and the content a pull leaves for it sits in the
+// store next to the file.
+func (s *sandbox) plantPatchFile(t *testing.T) {
+	t.Helper()
+	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  t:\n    env:\n      A: \"1\"\nremotes:\n  r:\n    url: https://example.com/team.yaml\n")
+	store := filepath.Join(s.project, ".enver", "team.yaml")
+	s.writeFile(filepath.Join(store, "r.yaml"), "profiles:\n  default:\n    env:\n      R: \"1\"\n")
+	s.writeFile(filepath.Join(store, "r.meta"), "url: https://example.com/team.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+}
+
+// hasPrefixToken reports whether any candidate lies under the namespace a
+// record prefixes its content with.
+func hasPrefixToken(tokens []string, prefix string) bool {
+	for _, token := range tokens {
+		if strings.HasPrefix(token, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // tuiSession drives one interactive enver process over a pty.
@@ -470,5 +504,78 @@ func TestEditPatchBootstrapDegradesUndecryptable(t *testing.T) {
 	cfg := s.readLocal()
 	if !strings.Contains(cfg, "MODEL: llama3") || strings.Contains(cfg, "SECRET") {
 		t.Fatalf("overriding a different key must save only that key:\n%s", cfg)
+	}
+}
+
+// TestEditAddCompletionOffersRemoteNames pins discoverability: the two commands
+// that bootstrap a patch copy offer the names remote content projects, beside
+// the target's own names, and under --file they offer the file's own projection
+// with nothing from the user layer. An unpulled record contributes no name.
+func TestEditAddCompletionOffersRemoteNames(t *testing.T) {
+	s := patchCompletionSandbox(t)
+	for _, sub := range []string{"add", "edit"} {
+		r := s.run("__complete", sub, "")
+		if r.ExitCode != 0 {
+			t.Fatalf("%s: exit = %d, stderr: %s", sub, r.ExitCode, r.Stderr)
+		}
+		tokens := completionTokens(r.Stdout)
+		for _, want := range []string{"own", "llm/ollama"} {
+			if !slices.Contains(tokens, want) {
+				t.Errorf("%s completion = %q, want %q", sub, tokens, want)
+			}
+		}
+		if hasPrefixToken(tokens, "ghost/") {
+			t.Errorf("%s completion = %q, an unpulled record must contribute no name", sub, tokens)
+		}
+	}
+
+	s.plantPatchFile(t)
+	tokens := completionTokens(s.run("__complete", "edit", "--file", "team.yaml", "").Stdout)
+	for _, want := range []string{"t", "r/default"} {
+		if !slices.Contains(tokens, want) {
+			t.Fatalf("edit --file completion = %q, want %q", tokens, want)
+		}
+	}
+	for _, gone := range []string{"own", "llm/ollama"} {
+		if slices.Contains(tokens, gone) {
+			t.Fatalf("edit --file completion = %q, must not carry the user layer's %q", tokens, gone)
+		}
+	}
+}
+
+// TestMutatorCompletionStaysTargetScoped pins the other half: every mutator that
+// cannot bootstrap a patch keeps offering only the write target's own names, so
+// a remote-projected or global-owned name never suggests a command the mutator
+// would refuse. edit offers the remote projection but still not the global one.
+func TestMutatorCompletionStaysTargetScoped(t *testing.T) {
+	s := patchCompletionSandbox(t)
+	s.writeGlobal("profiles:\n  g:\n    env:\n      G: \"1\"\n")
+
+	strict := []string{"remove", "rename", "duplicate", "default", "encrypt", "decrypt"}
+	for _, sub := range strict {
+		r := s.run("__complete", sub, "")
+		if r.ExitCode != 0 {
+			t.Fatalf("%s: exit = %d, stderr: %s", sub, r.ExitCode, r.Stderr)
+		}
+		tokens := completionTokens(r.Stdout)
+		if !slices.Contains(tokens, "own") {
+			t.Errorf("%s completion = %q, want the target's own name", sub, tokens)
+		}
+		for _, gone := range []string{"llm/ollama", "g"} {
+			if slices.Contains(tokens, gone) {
+				t.Errorf("%s completion = %q, must not offer %q", sub, tokens, gone)
+			}
+		}
+		if hasPrefixToken(tokens, "ghost/") {
+			t.Errorf("%s completion = %q, an unpulled record must contribute no name", sub, tokens)
+		}
+	}
+
+	tokens := completionTokens(s.run("__complete", "edit", "").Stdout)
+	if slices.Contains(tokens, "g") {
+		t.Errorf("edit completion = %q, must not offer the global-owned %q: a local-target edit would refuse it", tokens, "g")
+	}
+	if hasPrefixToken(tokens, "ghost/") {
+		t.Errorf("edit completion = %q, an unpulled record must contribute no name", tokens)
 	}
 }

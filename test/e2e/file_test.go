@@ -284,16 +284,17 @@ func TestKeygenForceLosesShorthand(t *testing.T) {
 	}
 }
 
-// TestFileCompletionOffersTheFileToMutators pins mutator completion: edit under
-// --file offers the write target's profiles, not the global config's and not a
-// remote-projected name, which every mutator would then refuse.
+// TestFileCompletionOffersTheFileToMutators pins strict mutator completion:
+// remove under --file offers the write target's profiles, not the global
+// config's and not a remote-projected name, which it would then refuse. add and
+// edit are the exception — they bootstrap a patch copy over such a name.
 func TestFileCompletionOffersTheFileToMutators(t *testing.T) {
 	s := newSandbox(t)
 	s.writeGlobal("profiles:\n  g:\n    env:\n      A: \"1\"\n")
 	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  t:\n    env:\n      A: \"1\"\nremotes:\n  r:\n    url: https://example.invalid/r.yaml\n")
 	store := filepath.Join(s.project, ".enver", "team.yaml")
 	s.writeFile(filepath.Join(store, "r.yaml"), "profiles:\n  default:\n    env:\n      R: \"1\"\n")
-	tokens := completionTokens(s.run("__complete", "edit", "--file", "team.yaml", "").Stdout)
+	tokens := completionTokens(s.run("__complete", "remove", "--file", "team.yaml", "").Stdout)
 	if !slices.Contains(tokens, "t") || slices.Contains(tokens, "g") || slices.Contains(tokens, "r/default") {
 		t.Fatalf("completion under --file = %q", tokens)
 	}

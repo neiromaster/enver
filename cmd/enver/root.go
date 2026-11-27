@@ -464,10 +464,7 @@ func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]st
 			}
 		}
 	}
-	cfgPath, _ := cmd.Flags().GetString("config")
-	noLocal, _ := cmd.Flags().GetBool("no-local")
-	file, _ := cmd.Flags().GetString("file")
-	names := app.MatchingProfiles(app.Options{ConfigPath: cfgPath, NoLocal: noLocal, FilePath: file}, toComplete)
+	names := app.MatchingProfiles(completionOptions(cmd), toComplete)
 	out := make([]string, 0, len(names))
 	for _, n := range names {
 		if !slices.Contains(args, n) {
@@ -477,12 +474,40 @@ func completeProfile(cmd *cobra.Command, args []string, toComplete string) ([]st
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completionOptions points a merged load at the view the completion describes:
+// the --file target alone, or the global and local layers the flags select.
+func completionOptions(cmd *cobra.Command) app.Options {
+	cfgPath, _ := cmd.Flags().GetString("config")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	file, _ := cmd.Flags().GetString("file")
+	return app.Options{ConfigPath: cfgPath, NoLocal: noLocal, FilePath: file}
+}
+
 // completeProfileInTarget backs mutators: write-target-scoped completion.
 func completeProfileInTarget(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 	return targetProfiles(cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeProfileInTargetOrRemote backs the two commands that bootstrap a patch
+// copy over a name only remote content provides (add and edit): they offer the
+// target's own names plus the merged names a remote projects, since those are
+// the names they can patch into the target. A user layer's own name stays out —
+// a local target refuses a global profile, so offering it would suggest a
+// command that fails — and so does a name no pulled content provides.
+func completeProfileInTargetOrRemote(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	out := targetProfiles(cmd, toComplete)
+	for _, name := range app.MatchingRemoteProfiles(completionOptions(cmd), toComplete) {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
 // codedError carries a process exit code out of a command. main unwraps it:

@@ -392,6 +392,23 @@ func recoverKey(salt []byte, p crypto.Argon2Params, sample string) ([]byte, erro
 // a silent read: the candidates are the whole output, so a load warning would be
 // injected into the shell's own stream.
 func MatchingProfiles(opts Options, toComplete string) []string {
+	return matchingProfiles(opts, toComplete, nil)
+}
+
+// MatchingRemoteProfiles returns the merged profile names beginning with
+// toComplete that remote content projects, for the completion of commands that
+// can bootstrap a patch copy over such a name. It never returns a user layer's
+// own name: those commands still refuse a name only another layer owns. The
+// load stays silent, exactly as MatchingProfiles does.
+func MatchingRemoteProfiles(opts Options, toComplete string) []string {
+	return matchingProfiles(opts, toComplete, func(cfg config.Config, name string) bool {
+		return config.IsRemoteLayer(cfg.ProfileLayer[name])
+	})
+}
+
+// matchingProfiles is the one candidate scan both completion variants share;
+// keep decides which merged names are eligible, and nil admits every one.
+func matchingProfiles(opts Options, toComplete string, keep func(config.Config, string) bool) []string {
 	cfg, err := loadMerged(opts, false)
 	if err != nil {
 		return nil
@@ -399,9 +416,13 @@ func MatchingProfiles(opts Options, toComplete string) []string {
 	names := cfg.ProfileNames()
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if strings.HasPrefix(n, toComplete) {
-			out = append(out, n)
+		if !strings.HasPrefix(n, toComplete) {
+			continue
 		}
+		if keep != nil && !keep(cfg, n) {
+			continue
+		}
+		out = append(out, n)
 	}
 	return out
 }

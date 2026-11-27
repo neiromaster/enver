@@ -981,6 +981,38 @@ func TestMatchingProfiles(t *testing.T) {
 	}
 }
 
+// TestMatchingRemoteProfiles pins the variant add and edit use: it narrows the
+// merged view to names a remote projects, so a user layer's own name never
+// reaches a list that already refuses it.
+func TestMatchingRemoteProfiles(t *testing.T) {
+	dir := t.TempDir()
+	prev := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prev })
+	if err := os.MkdirAll(config.RemotesDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.RemoteContentPath("llm"), []byte("profiles:\n  ollama:\n    env:\n      A: \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  alpha:\n    env:\n      A: \"1\"\nremotes:\n  llm:\n    url: https://example.com/llm.yaml\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+
+	if got := MatchingRemoteProfiles(opts, ""); !slices.Equal(got, []string{"llm/ollama"}) {
+		t.Fatalf(`MatchingRemoteProfiles("") = %v, want [llm/ollama]`, got)
+	}
+	if got := MatchingRemoteProfiles(opts, "llm/"); !slices.Equal(got, []string{"llm/ollama"}) {
+		t.Fatalf(`MatchingRemoteProfiles("llm/") = %v, want [llm/ollama]`, got)
+	}
+	if got := MatchingRemoteProfiles(opts, "al"); got == nil || len(got) != 0 {
+		t.Fatalf(`MatchingRemoteProfiles("al") = %v, want the own name filtered out`, got)
+	}
+}
+
 func TestChildEnvDropsEnverKey(t *testing.T) {
 	t.Setenv("ENVER_KEY", "sk-decrypt-master")
 	env, _, err := childEnv(Options{}, map[string]string{"ENVER_INJECTED": "yes"})
