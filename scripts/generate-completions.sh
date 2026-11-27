@@ -15,3 +15,4 @@ mkdir -p completions
 "$bin" completion bash > completions/enver.bash
 "$bin" completion fish > completions/enver.fish
 "$bin" completion zsh > completions/enver.zsh
+"$bin" completion powershell > completions/enver.ps1
