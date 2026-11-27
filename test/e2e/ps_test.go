@@ -57,6 +57,10 @@ func runPowerShell(t *testing.T, engine, policy, stdin string, env map[string]st
 	for k := range env {
 		keys = append(keys, k)
 	}
+	// Each engine must compute its own default module path, as it would on a
+	// real machine: a pwsh 7 PSModulePath inherited by Windows PowerShell 5.1
+	// hides its own modules and Get-ExecutionPolicy fails to autoload.
+	keys = append(keys, "PSModulePath")
 	cmd.Env = filterEnv(os.Environ(), keys...)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
