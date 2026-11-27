@@ -89,10 +89,6 @@ Completion sees `--file` only when it stands left of the cursor:
 `enver show --file team.yaml <Tab>` offers the file's profiles;
 `enver show <Tab> --file team.yaml` offers the default config's.
 
-Between this release and the one that ships `validate <files>`, `validate`
-refuses `--file` with "`--file` is not supported by validate; it checks the
-merged config of the current directory".
-
 ## Remotes
 
 A remote is a config file someone else publishes — typically in a GitHub repo —
@@ -402,6 +398,39 @@ waiting to be completed — `enver validate` reports every dangling `extends`
 as an error, yours and a remote's alike. The hint survives where a pull can
 help: a parent whose record is declared but not yet pulled carries the
 `enver pull <name>` that supplies it.
+
+## Authoring a remote config
+
+A file meant to be published says so itself:
+
+    publish: true
+    profiles:
+      base:
+        env: …
+
+`enver validate --strict <file>` checks it offline, by the rules a consumer's
+pull applies; a file without the mark that has an enver section is checked as a
+local config, where a profile may be named `llm/ollama`; a file with neither
+is skipped. `--strict` makes warnings fail, which is what stops a commit on a
+`~`-marked key left in plaintext.
+
+Add to `.gitignore`:
+
+    .enver/
+
+and a hook:
+
+    pre-commit:
+      commands:
+        enver:
+          glob: "*.yaml"
+          run: enver validate --strict {staged_files}
+
+Each file says what it is, so the recipe needs no `exclude` for enver files;
+the repository's other YAML is skipped as long as it has none of `profiles`,
+`remotes`, `default`. Authoring happens through `enver <command> --file
+<file>`, and `enver pull --file <file> <source> --as <name>` fetches what the
+file declares into `.enver/<file>/`.
 
 ## Multiple parents
 

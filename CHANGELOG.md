@@ -12,10 +12,15 @@
   whole config. Reads, writes and completion come from that file alone, and
   the content pulled for it is stored in `.enver/<file>/` beside it, laid out
   like the shared store. `--config`, `--no-local`, `-g`/`--global` and
-  `pull --local` are errors together with `--file`. `validate` refuses `--file`
-  until named-file checks arrive.
+  `pull --local` are errors together with `--file`.
 - **Breaking:** `keygen` loses the `-f` shorthand, which `--file` takes;
   `--force` stays.
+- **New:** `enver validate [--strict] <file>...` checks named files offline.
+  A file says what it is: `publish: true` means it is checked by the rules a
+  consumer's pull applies; a file with an enver section and no mark is checked
+  as a local config, where a profile may be named `llm/ollama`; a file with
+  neither is skipped as not an enver config. `--strict` fails on warnings.
+  The lefthook recipe in `docs/config.md` needs no `exclude` for enver files.
 
 ## v0.13.0 - 2026-11-25
 

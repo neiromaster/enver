@@ -92,7 +92,7 @@ environment injected, without mutating any tool's own config.
   enver rename [old] [new]              rename a profile (+ extends/default refs)
   enver duplicate <src> [new]           copy a profile
   enver default [profile]               set/show the default (--clear to clear)
-  enver validate                        check config health
+  enver validate [files...] [--strict]  check config health, or named files by their own rules
   enver pull <source> --as <name>       fetch and register a remote config
   enver update [--check]                update enver to the latest release
   enver keygen | encrypt | decrypt      manage encrypted secrets
