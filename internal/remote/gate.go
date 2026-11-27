@@ -259,13 +259,14 @@ func checkRemoteProfiles(cfg config.Config, prefix string) []Finding {
 // checkLocalExtends applies the local extends table to the file's own
 // declarations. File mode reads no pulled content, so a target is judged
 // against what the file declares: its own profiles and its own remotes:
-// section. A bare name the file declares, or a target under a declared
-// prefixed record, is fine — whether that record's content carries the
-// profile is the pull's check. A declared no-prefix record softens the bare
-// case: its profiles land bare, so an undeclared bare name may be one of them,
-// and a prefixed spelling is refused for the bare name it hides. A target is
-// segment-checked only when it drew no other finding, the way the publish
-// rules judge a target's shape before its spelling.
+// section. A target whose spelling names one of the file's own profiles is
+// fine, bare or slash-named — the local view resolves it by name — and so is a
+// target under a declared prefixed record, since whether that record's content
+// carries the profile is the pull's check. A declared no-prefix record softens
+// the bare case: its profiles land bare, so an undeclared bare name may be one
+// of them, and a prefixed spelling is refused for the bare name it hides. A
+// target is segment-checked only when it drew no other finding, the way the
+// publish rules judge a target's shape before its spelling.
 func checkLocalExtends(cfg config.Config, prefix string) []Finding {
 	defined := make(map[string]bool, len(cfg.Profiles))
 	for name := range cfg.Profiles {
@@ -297,17 +298,19 @@ func checkLocalExtends(cfg config.Config, prefix string) []Finding {
 }
 
 // localTargetVerdict judges one extends target against what the file declares.
-// It reports the finding, if any, and whether it drew one: a bare name the
-// file declares, or a target under a declared prefixed record, is fine; a bare
-// name nothing in the file can supply is an error unless a declared no-prefix
-// record could be holding it, which is only a note, and a prefixed target
-// under such a record is refused for the bare name it hides.
+// It reports the finding, if any, and whether it drew one. A target whose
+// spelling names one of the file's own profiles is fine whether it is bare or
+// slash-named: the local view resolves it by name, so the record rows below
+// apply only to targets that are not own profiles. A bare name nothing in the
+// file can supply is an error unless a declared no-prefix record could be
+// holding it, which is only a note, and a prefixed target under such a record
+// is refused for the bare name it hides.
 func localTargetVerdict(cfg config.Config, defined map[string]bool, noPrefix []string, name, target, prefix string) (Finding, bool) {
+	if defined[target] {
+		return Finding{}, false
+	}
 	head, rest, hasSlash := strings.Cut(target, "/")
 	if !hasSlash {
-		if defined[target] {
-			return Finding{}, false
-		}
 		if len(noPrefix) > 0 {
 			noun := "record"
 			if len(noPrefix) > 1 {
@@ -613,10 +616,12 @@ func newFinding(severity config.Severity, prefix, profile, target, text string) 
 	return Finding{Severity: severity, Profile: profile, Target: target, Text: prefix + text}
 }
 
-// newErrorFinding keeps the error a finding was rendered from, so Gate can
-// return an error a caller matches with errors.Is.
+// newErrorFinding keeps the error a finding was rendered from, already
+// carrying the label the text carries, so Gate can return an error whose text
+// is the finding's and whose cause a caller still matches with errors.Is.
 func newErrorFinding(prefix, profile, target string, err error) Finding {
-	return Finding{Severity: config.SeverityError, Profile: profile, Target: target, Text: prefix + err.Error(), cause: err}
+	labeled := fmt.Errorf("%s%w", prefix, err)
+	return Finding{Severity: config.SeverityError, Profile: profile, Target: target, Text: labeled.Error(), cause: labeled}
 }
 
 // errOf renders an error finding as the error Gate refuses a pull with: the

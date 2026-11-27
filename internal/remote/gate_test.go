@@ -109,6 +109,19 @@ func TestGateRejectsUnparseableYAML(t *testing.T) {
 	gateRequireError(t, err, "YAML")
 }
 
+// Gate's refusal names what failed to load: the record the pull was for, or
+// "remote content" when no record names it.
+func TestGateErrorCarriesLabel(t *testing.T) {
+	_, err := Gate([]byte("profiles:\n  a: [unclosed\n"), GateOpts{Record: "llm"})
+	gateRequireError(t, err, `remote "llm": not valid YAML`)
+
+	_, err = Gate([]byte("profiles:\n  a: [unclosed\n"), GateOpts{})
+	gateRequireError(t, err, "remote content: not valid YAML")
+
+	_, err = Gate(gateEnvFile("a/b", "K", "v"), GateOpts{Record: "llm"})
+	gateRequireError(t, err, `remote "llm": profile`, "bare upstream profile name")
+}
+
 func TestGateRejectsInvalidEnvNames(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -602,6 +615,7 @@ func TestCheckLocalExtends(t *testing.T) {
 		parts    []string
 	}{
 		{"own bare", "profiles:\n  a:\n    extends: b\n  b:\n    env:\n      K: v\n", "", nil},
+		{"own slash-named", "profiles:\n  \"a/b\":\n    extends: c/d\n  \"c/d\":\n    env:\n      K: v\n", "", nil},
 		{"undeclared bare", "profiles:\n  a:\n    extends: ghost\n", config.SeverityError, []string{"no profile of this file declares"}},
 		{"prefixed record", prefixed, "", nil},
 		{"undeclared record", "profiles:\n  a:\n    extends: x/b\n", config.SeverityError, []string{"no record"}},
