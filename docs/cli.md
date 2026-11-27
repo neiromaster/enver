@@ -1,8 +1,8 @@
 # CLI reference
 
 All commands and global flags. Behavior details: [`config.md`](./config.md),
-[`profiles.md`](./profiles.md), [`dotenv.md`](./dotenv.md),
-[`secrets.md`](./secrets.md).
+[`remotes.md`](./remotes.md), [`profiles.md`](./profiles.md),
+[`dotenv.md`](./dotenv.md), [`secrets.md`](./secrets.md).
 
 ## Commands
 
@@ -68,6 +68,9 @@ enver --version / -h, --help
 
 With no profile arguments, the config's `default` is used. `enver show`
 previews the resolved env (masked by default); `enver list` lists profiles.
+
+### Provenance
+
 Every `show` line is annotated with the defining profile and layer
 (`ANTHROPIC_MODEL=claude-sonnet-5  # from anth (global)`), so with multi-parent
 `extends` you can see at a glance which profile actually won a key — a
@@ -75,7 +78,11 @@ variable picked up from `./.enver.yaml` is marked `(local)`, one from the
 global config `(global)`, and one a pulled remote supplied `(remote:<name>)`,
 which is how a swapped endpoint becomes visible. Keys the chain deliberately
 excludes render as comment rows (`# DEBUG — unset by "prod"`, detailed in
-[`dotenv.md`](./dotenv.md)). `--format json` carries the same provenance as a
+[`dotenv.md`](./dotenv.md)).
+
+### JSON output
+
+`--format json` carries the same provenance as a
 structured `sources` map plus an `unsets` map with the same profile/layer
 shape, so a machine reader can tell a deliberately unset key from an
 accidental absence. A key whose ciphertext this key cannot read is reported
@@ -89,11 +96,15 @@ supplied is the exception — it degrades per key in both formats (see
 vars cell reads `N (→?)` instead of a resolved count — while `--format json`
 errors instead of listing a partial config.
 
+### Styling
+
 In a terminal, text output is styled: keys are bold, and every comment — the
 `# profile:` header, provenance suffixes, unset rows — is dim. Styling is
 emitted only when the output destination is a terminal; `NO_COLOR` and
 `TERM=dumb` turn it off, so piped output (`enver show | grep`) stays plain.
 `--format json` is never styled.
+
+### Masking
 
 A value counts as a secret when the key carries a leading `~` mark or the
 value embeds credentials in a URL such as `postgres://user:pass@host` — a
@@ -104,6 +115,9 @@ value already stored as `enc:v3:` stays masked and is skipped by `encrypt`.
 Plain URLs without credentials (`https://api.example.com`) are left alone.
 Masking is text-only: a marked key whose value is still plaintext is masked and
 annotated `~ marked, not encrypted`, while the file itself stays as it is.
+
+### Export formats
+
 `enver export` is always unmasked so `eval "$(enver export <profile>)"` applies
 to the current shell. `--format fish` emits `set -gx K 'V'` for fish
 (`enver export <profile> --format fish | source`); `--format powershell`
@@ -171,7 +185,7 @@ your patches sit under is a takeover: pull warns and asks first, and `--force`
 accepts it without asking; a re-fetch that would replace content the sidecar
 says came from another source passes the same gate. Records, projection, the pull
 gate, the divergence warning and the patch flow are documented in
-[`config.md`](./config.md#remotes).
+[`remotes.md`](./remotes.md).
 
 ## Removed forms
 

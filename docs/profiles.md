@@ -114,7 +114,7 @@ an `extends`, or an `unset`, so **Done** is rejected on an empty profile.
 A pulled remote contributes profiles under its record prefix (`llm/ollama`,
 `llm/qwen`) without living in any file you edit: remote content is a read-only
 base below your own layers. The rules that follow from that, and the commands
-that carry them, are in [`config.md`](./config.md#remotes).
+that carry them, are in [`remotes.md`](./remotes.md).
 
 - **Patch with `add`.** `enver add llm/ollama` on a name only remote content
   provides writes your copy of the projected name into the write target — the
@@ -152,46 +152,3 @@ in `$XDG_CONFIG_HOME/enver/remotes/` and the next pull overwrites it.
   with a name, set it; `--clear` removes the default. The effective default is
   the local file's `default` when set, otherwise the global file's — a project
   can pin its own default while keeping the user-level one as fallback.
-
-## validate
-
-`enver validate` audits config health: dangling `extends` and `extends`
-cycles (errors); profiles with nothing to contribute — no env, no extends, no
-unset (warning); a profile that both defines and unsets the same key in
-one layer (`contradictory-unset`, warning); and a `~`-marked key still stored in
-plaintext (`plaintext-secret`, warning). It also checks the global file against
-the remote content it sits on (a global profile may extend a remote-provided
-name; extending a local-only one is flagged, since it is fine in this directory
-and broken elsewhere). Exits non-zero if any error is found.
-
-Every dangling `extends` is an error: strict scoping leaves no authorship to
-grade, since a remote file can no longer name a parent outside its own
-namespace. The hint survives where a pull can help — a parent whose record is
-declared but not yet pulled carries the `enver pull <name>` that supplies it.
-
-With file arguments, `enver validate [--strict] <file>...` checks every named
-file offline — no store is read, no network is touched, no key is needed — by
-the rules its own content declares:
-
-- A file marked `publish: true` is checked by the rules a consumer's `pull`
-  applies: own profile names must be bare, `extends` only inside the file's
-  own namespace or the records it declares, no in-file cycles, usable record
-  declarations, current-era ciphertext — plus the health checks above.
-- A file with an enver section (`profiles`, `remotes`, `default`) and no mark
-  is checked as a local config, where a profile may be named `llm/ollama`.
-- A file with neither is skipped and reported as such; it never fails the
-  command, so one hook over `*.yaml` leaves the repository's other YAML alone.
-
-Every finding is one line on stdout prefixed with the path as given
-(`<file>: error: …`), a clean file gets `✓ valid for publication` or
-`✓ valid as a local config`, and the summary (`enver: N of M files failed`)
-is the command's error. Notes never fail. `--strict` makes warnings fail, in
-this mode and the merged one — a `~`-marked key left in plaintext is a
-warning, so `--strict` is what stops a commit on a forgotten `enver encrypt`.
-Whether a declared source is reachable is not validate's job; the full
-rehearsal is `enver pull --file <file>`, which fetches the tree and gates
-every file. The hook recipe and the `publish` flow live in
-[`config.md`](./config.md#authoring-a-remote-config).
-
-Shell completion for the arguments is the shell's own file completion:
-validate takes files, not profiles.

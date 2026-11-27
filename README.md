@@ -136,8 +136,8 @@ store, inherits like code, and hands the result to a single child process.
 |---|---|
 | Layered configs: remote content ⊕ global store ⊕ project file, per-key overlay, no walk-up | [`config.md`](docs/config.md#layers) |
 | Work on one config file as the whole config (`--file`), with the content pulled for it stored beside it in `.enver/<file>/` | [`config.md`](docs/config.md#working-on-one-file) |
-| Check a config before publishing it: `enver validate --strict <file>`, from a pre-commit hook | [`config.md`](docs/config.md#authoring-a-remote-config) |
-| Remote configs: `enver pull` a shared YAML, patch its profiles in place, keep working offline | [`config.md`](docs/config.md#remotes) |
+| Check a config before publishing it: `enver validate --strict <file>`, from a pre-commit hook | [`remotes.md`](docs/remotes.md#validate) |
+| Remote configs: `enver pull` a shared YAML, patch its profiles in place, keep working offline | [`remotes.md`](docs/remotes.md#remotes) |
 | Multi-parent `extends`: mixins composed left-to-right, transitive inheritance | [`config.md`](docs/config.md#multiple-parents) |
 | Run-line composition: `enver x base slot -- cmd` is an anonymous `extends` at launch | [`cli.md`](docs/cli.md#composing-profiles) |
 | `unset` fences: keys enver must never set; shell values pass through untouched | [`config.md`](docs/config.md#suppressing-variables-unset) |
@@ -157,10 +157,12 @@ store, inherits like code, and hands the result to a single child process.
 
 ## Full manual
 
-- [`docs/config.md`](docs/config.md) — layers, remotes, merge rules, `extends`,
+- [`docs/config.md`](docs/config.md) — layers, merge rules, `extends`,
   suppressing variables
+- [`docs/remotes.md`](docs/remotes.md) — `enver pull`, nesting, trust,
+  authoring a config to publish, `validate`
 - [`docs/profiles.md`](docs/profiles.md) — `add`, `edit`, remove/rename/
-  duplicate/default, `validate`
+  duplicate/default
 - [`docs/cli.md`](docs/cli.md) — command and flag reference, masking,
   removed forms
 - [`docs/dotenv.md`](docs/dotenv.md) — `.env` import/export
