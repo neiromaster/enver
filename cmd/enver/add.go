@@ -94,6 +94,39 @@ func parentEnvFor(cfg config.Config, self string, extends config.Extends) (map[s
 	return backdrop, marked, warns
 }
 
+// remoteBackdrop resolves the remote-provided name as the inherited base for a
+// patch bootstrap. The merged view has no user-layer copy of the name — that is
+// the bootstrap precondition — so resolving it here is the remote's own chain.
+// Resolution rides the display seam the show command uses: an undecryptable
+// remote value degrades to a per-key note instead of failing, which is the only
+// honest answer for ciphertext its author may have written under another key.
+// The degraded keys come back with the note in place of their value (a marked
+// value would mask the note, so the mark is dropped for display only) and one
+// warning per key. A resolution failure is a note too: the collector still
+// opens, just without a base, rather than refusing a patch the writer accepts.
+func remoteBackdrop(merged config.Config, name string) (map[string]string, map[string]bool, []string) {
+	if _, ok := config.RemoteName(merged.ProfileLayer[name]); !ok {
+		return map[string]string{}, nil, nil
+	}
+	opts := appOpts()
+	opts.TolerateMissingKey = true
+	opts.TolerateRemoteWrongKey = true
+	r, err := app.ResolveConfig(merged, []string{name}, opts)
+	if err != nil {
+		return map[string]string{}, nil, []string{fmt.Sprintf("note: remote base for %q is unresolvable (%v) — its inherited keys are hidden", name, err)}
+	}
+	env := maps.Clone(r.Env)
+	marked := maps.Clone(r.Marked)
+	var warns []string
+	for _, k := range slices.Sorted(maps.Keys(r.Undecryptable)) {
+		reason := r.Undecryptable[k]
+		env[k] = "(cannot decrypt: " + reason + ")"
+		delete(marked, k)
+		warns = append(warns, fmt.Sprintf("note: %s cannot be decrypted from the remote (%s); its value stays hidden unless you override it", k, reason))
+	}
+	return env, marked, warns
+}
+
 // buildProfile composes the profile add writes: env keyed by runtime name, and
 // the marks the entries carry — a typed ~ or the card's carried flag — which the
 // caller merges with the marks the write implies.
@@ -357,7 +390,16 @@ func doAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	parentEnv, parentMarked, inheritedWarns := parentEnvFor(merged, name, extends)
+	var parentEnv map[string]string
+	var parentMarked map[string]bool
+	var inheritedWarns []string
+	if patchRemote != "" {
+		// The bootstrap case: the name has no copy here, so its base is the
+		// remote content itself rather than a picked extends chain.
+		parentEnv, parentMarked, inheritedWarns = remoteBackdrop(merged, name)
+	} else {
+		parentEnv, parentMarked, inheritedWarns = parentEnvFor(merged, name, extends)
+	}
 	for _, w := range inheritedWarns {
 		fmt.Println("  " + w)
 	}
