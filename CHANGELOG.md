@@ -22,6 +22,11 @@
   neither is skipped as not an enver config. `--strict` fails on warnings.
   The lefthook recipe in `docs/config.md` excludes the project's own
   `.enver.yaml` — a layer, judged by the merged mode, not by its file.
+- **New:** Windows installs get PowerShell completions wired by
+  `install.ps1` (dot-sourced from the profile; `ENVER_NO_COMPLETION=1`
+  opts out), and `install.ps1 -Uninstall` removes the binary, the
+  completion wiring and the PATH entry. `brew uninstall --zap` now removes
+  `~/.config/enver`.
 
 ## v0.13.0 - 2026-11-25
 
