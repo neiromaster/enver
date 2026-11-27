@@ -30,6 +30,10 @@ type Severity string
 const (
 	SeverityError   Severity = "error"
 	SeverityWarning Severity = "warning"
+	// SeverityNote grades an advisory that never fails a check: ciphertext
+	// that decrypts only for its author, KDF parameters above this build's
+	// defaults, an extends target file mode cannot verify.
+	SeverityNote Severity = "note"
 )
 
 // Issue is one config-health finding.
