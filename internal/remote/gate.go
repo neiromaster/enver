@@ -141,7 +141,7 @@ func Check(content []byte, mode Mode, label string) (cfg config.Config, findings
 		findings = append(findings, checkRemoteProfiles(cfg, prefix)...)
 	}
 	findings = append(findings, checkNestedDeclarations(cfg, prefix)...)
-	findings = append(findings, checkRemoteCiphertext(cfg, prefix)...)
+	findings = append(findings, checkRemoteCiphertext(cfg, mode, prefix)...)
 	findings = append(findings, childNameFindings(cfg, prefix)...)
 	slices.SortStableFunc(findings, func(a, b Finding) int {
 		return severityRank(a.Severity) - severityRank(b.Severity)
@@ -246,12 +246,37 @@ func checkRemoteProfiles(cfg config.Config, prefix string) []Finding {
 				continue
 			}
 			if bad, has := invalidTargetSegment(target); has {
-				findings = append(findings, newErrorFinding(prefix, name, target, fmt.Errorf("profile %s extends %s, whose %s segment is not a valid profile name (want [A-Za-z0-9][A-Za-z0-9_-]*)", quoteName(name), quoteName(target), quoteName(bad))))
+				findings = append(findings, segmentFinding(prefix, name, target, bad))
 			}
 		}
 	}
 	if cycle := extendsCycle(cfg, defined); cycle != nil {
 		findings = append(findings, cycleFinding(prefix, cycle))
+	}
+	return findings
+}
+
+// NoPrefixExtendsFindings reports each own profile whose extends target names
+// a declared record with a slash, where the record is declared with no_prefix.
+// A no-prefix record contributes no name segment — its profiles land bare — so
+// a target spelled record/profile never resolves for a consumer, and a
+// consumer's pull refuses the file one stage later with its own message; the
+// pull's Gate stays silent on the shape, and this check exists for validate's
+// publish mode to name the fault where the author can act on it.
+func NoPrefixExtendsFindings(cfg config.Config) []Finding {
+	var findings []Finding
+	for _, name := range cfg.ProfileNames() {
+		for _, target := range cfg.Profiles[name].Extends {
+			head, _, hasSlash := strings.Cut(target, "/")
+			if !hasSlash {
+				continue
+			}
+			rec, declared := cfg.Remotes[head]
+			if !declared || !rec.NoPrefix {
+				continue
+			}
+			findings = append(findings, newErrorFinding("", name, target, fmt.Errorf("profile %s extends %s, but record %s is declared with no_prefix: a no-prefix record contributes no name segment, so its profiles never sit under the record's own name, and a consumer's pull refuses the file; declare the record with a prefix, or keep the shared values in a profile of this file", quoteName(name), quoteName(target), quoteName(head))))
+		}
 	}
 	return findings
 }
@@ -287,7 +312,7 @@ func checkLocalExtends(cfg config.Config, prefix string) []Finding {
 				continue
 			}
 			if bad, has := invalidTargetSegment(target); has {
-				findings = append(findings, newErrorFinding(prefix, name, target, fmt.Errorf("profile %s extends %s, whose %s segment is not a valid profile name (want [A-Za-z0-9][A-Za-z0-9_-]*)", quoteName(name), quoteName(target), quoteName(bad))))
+				findings = append(findings, segmentFinding(prefix, name, target, bad))
 			}
 		}
 	}
@@ -295,6 +320,12 @@ func checkLocalExtends(cfg config.Config, prefix string) []Finding {
 		findings = append(findings, cycleFinding(prefix, cycle))
 	}
 	return findings
+}
+
+// segmentFinding renders the refusal of an extends target whose spelling
+// carries a segment no profile can be named by.
+func segmentFinding(prefix, name, target, bad string) Finding {
+	return newErrorFinding(prefix, name, target, fmt.Errorf("profile %s extends %s, whose %s segment is not a valid profile name (want [A-Za-z0-9][A-Za-z0-9_-]*)", quoteName(name), quoteName(target), quoteName(bad)))
 }
 
 // localTargetVerdict judges one extends target against what the file declares.
@@ -445,9 +476,10 @@ func (r encRef) String() string { return r.profile + "/" + r.key }
 // build, so landing it only guarantees a broken resolve later; parameters beyond
 // the parse caps are the attacker-chosen-cost control, and the per-file count
 // cap keeps a fetched file from turning into a key-patching chore. Current-era
-// values are admitted: they are the own-config distribution case, and the note
-// tells a consumer who lacks the author's key how to patch them.
-func checkRemoteCiphertext(cfg config.Config, prefix string) []Finding {
+// values are admitted, with the note the mode calls for: publish speaks to a
+// consumer who lacks the author's key, local speaks to the author holding the
+// key the file itself was sealed with.
+func checkRemoteCiphertext(cfg config.Config, mode Mode, prefix string) []Finding {
 	var foreign, current []encRef
 	for _, name := range cfg.ProfileNames() {
 		profile := cfg.Profiles[name]
@@ -463,7 +495,7 @@ func checkRemoteCiphertext(cfg config.Config, prefix string) []Finding {
 		}
 	}
 	if len(foreign) > 0 {
-		return []Finding{newErrorFinding(prefix, "", "", foreignEraError(foreign, len(current) > 0))}
+		return []Finding{newErrorFinding(prefix, "", "", foreignEraError(foreign, len(current) > 0, mode))}
 	}
 	if len(current) > maxEncryptedValues {
 		return []Finding{newErrorFinding(prefix, "", "", fmt.Errorf("carries %d encrypted values; a remote config may carry at most %d", len(current), maxEncryptedValues))}
@@ -487,7 +519,7 @@ func checkRemoteCiphertext(cfg config.Config, prefix string) []Finding {
 		findings = append(findings, newFinding(config.SeverityNote, prefix, "", "", fmt.Sprintf("%s encrypts with KDF parameters above this build's defaults (e.g. argon2id t=%d m=%d p=%d); they parse and decrypt within the caps, but a higher t or m makes every resolve cost more than a current-era value", joinRefs(over, false), overParams.Time, overParams.Memory, overParams.Threads)))
 	}
 	if len(current) > 0 {
-		findings = append(findings, newFinding(config.SeverityNote, prefix, "", "", encryptedWarning(current)))
+		findings = append(findings, newFinding(config.SeverityNote, prefix, "", "", encryptedNote(current, mode)))
 	}
 	return findings
 }
@@ -496,10 +528,16 @@ func checkRemoteCiphertext(cfg config.Config, prefix string) []Finding {
 // both foreign-era and current-era values is reported as mixed, since that is
 // the more specific breakage: no single era rule can serve it. Every distinct
 // foreign prefix is named, so a file spanning more than one past era says so.
-func foreignEraError(foreign []encRef, mixed bool) error {
+// The advice follows the mode: publish addresses the consumer, whose only
+// recourse is that the upstream must carry current-era values, while local
+// addresses the author holding the key, who can re-encrypt in place.
+func foreignEraError(foreign []encRef, mixed bool, mode Mode) error {
 	prefixes := foreignPrefixes(foreign)
 	if mixed {
 		return fmt.Errorf("mixes ciphertext eras: %s carries %s beside current-era enc:v3 values; re-encrypt every value with this enver build", joinRefs(foreign, false), prefixes)
+	}
+	if mode == Local {
+		return fmt.Errorf("%s carries %s, which this enver build cannot read; re-encrypt them with this enver build", joinRefs(foreign, false), prefixes)
 	}
 	return fmt.Errorf("%s carries %s, which this enver build cannot read; remote content must carry current-era enc:v3 values", joinRefs(foreign, false), prefixes)
 }
@@ -521,11 +559,16 @@ func foreignPrefixes(foreign []encRef) string {
 	return strings.Join(prefixes, ", ")
 }
 
-// encryptedWarning reports the current-era values the check cannot decrypt and
-// carries the supported patch path from the spec: plaintext patches while any
-// author ciphertext remains, encryption only once every foreign value is
-// replaced, because two salts in one profile break passphrase recovery.
-func encryptedWarning(current []encRef) string {
+// encryptedNote reports the current-era values the check cannot decrypt. The
+// advice follows the mode: publish carries the supported patch path from the
+// spec — plaintext patches while any author ciphertext remains, encryption only
+// once every foreign value is replaced, because two salts in one profile break
+// passphrase recovery — while local names the bare fact, since the file's own
+// author is the key that sealed those values.
+func encryptedNote(current []encRef, mode Mode) string {
+	if mode == Local {
+		return fmt.Sprintf("%d encrypted value(s); they decrypt only for the key that sealed them: %s", len(current), joinRefs(current, true))
+	}
 	return fmt.Sprintf("%d encrypted value(s) decrypt only for the author's key: %s; patch these keys with plaintext values while foreign ciphertext remains, and encrypt only after every foreign value is replaced - your ciphertext beside the author's puts two salts in one profile and breaks passphrase recovery", len(current), joinRefs(current, true))
 }
 

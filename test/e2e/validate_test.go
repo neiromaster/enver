@@ -81,17 +81,26 @@ func TestValidateStrictMergedMode(t *testing.T) {
 // TestValidateFileNamesTheFileOnce pins the file label on both argument forms:
 // a positional and a --file value are reported under the path itself, never
 // re-labelled as a remote record, and the path is named exactly once across
-// stdout and stderr.
+// stdout and stderr — for a file the check refuses and for one nothing can
+// read at all.
 func TestValidateFileNamesTheFileOnce(t *testing.T) {
 	s := newSandbox(t)
 	s.writeFile(filepath.Join(s.project, "team.yaml"), "publish: true\nprofiles:\n  \"a/b\":\n    env:\n      K: v\n")
-	for _, args := range [][]string{{"validate", "team.yaml"}, {"validate", "--file", "team.yaml"}} {
-		r := s.run(args...)
+	for _, c := range []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"positional", []string{"validate", "team.yaml"}, "team.yaml"},
+		{"file flag", []string{"validate", "--file", "team.yaml"}, "team.yaml"},
+		{"missing file", []string{"validate", "missing.yaml"}, "missing.yaml"},
+	} {
+		r := s.run(c.args...)
 		if r.ExitCode != 1 || strings.Contains(r.Stdout, `remote "team.yaml"`) {
-			t.Fatalf("%v: exit %d, stdout: %s", args, r.ExitCode, r.Stdout)
+			t.Fatalf("%s: exit %d, stdout: %s", c.name, r.ExitCode, r.Stdout)
 		}
-		if got := strings.Count(strings.TrimSpace(r.Stdout)+"\n"+strings.TrimSpace(r.Stderr), "team.yaml"); got != 1 {
-			t.Fatalf("%v: the file is named %d times:\n%s%s", args, got, r.Stdout, r.Stderr)
+		if got := strings.Count(strings.TrimSpace(r.Stdout)+"\n"+strings.TrimSpace(r.Stderr), c.path); got != 1 {
+			t.Fatalf("%s: %s is named %d times:\n%s%s", c.name, c.path, got, r.Stdout, r.Stderr)
 		}
 	}
 }
@@ -153,6 +162,23 @@ func TestValidateUnreadablePath(t *testing.T) {
 	r := s.run("validate", s.project)
 	if r.ExitCode != 1 || !strings.Contains(r.Stdout, "error: cannot read") {
 		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}
+
+// TestValidatePublishRefusesNoPrefixExtends pins the publish-mode rule the pull
+// applies one stage later: an extends target spelled record/profile under a
+// declared no_prefix record never resolves for a consumer, so validate refuses
+// the file where the author can act on the finding.
+func TestValidatePublishRefusesNoPrefixExtends(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "f.yaml"),
+		"publish: true\nremotes:\n  r: { url: https://example.invalid/r.yaml, no_prefix: true }\nprofiles:\n  a: { extends: r/x, env: { K: v } }\n")
+	r := s.run("validate", "--strict", "f.yaml")
+	if r.ExitCode != 1 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, `f.yaml: error: profile "a" extends "r/x", but record "r" is declared with no_prefix`) {
+		t.Fatalf("stdout misses the no-prefix extends refusal:\n%s", r.Stdout)
 	}
 }
 

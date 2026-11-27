@@ -43,25 +43,40 @@ func TestCheckFile(t *testing.T) {
 		strict         bool
 		want           []string
 		failed         bool
+		exact          int
 	}{
 		{"publish slash", "team.yaml", "publish: true\nprofiles:\n  \"llm/qwen\":\n    env:\n      K: v\n", true,
-			[]string{`team.yaml: error: profile "llm/qwen" is not a bare upstream profile name`}, true},
+			[]string{`team.yaml: error: profile "llm/qwen" is not a bare upstream profile name`}, true, 0},
 		{"local slash", "ci.yaml", "profiles:\n  \"llm/qwen\":\n    env:\n      K: v\n", true,
-			[]string{"ci.yaml: ✓ valid as a local config"}, false},
+			[]string{"ci.yaml: ✓ valid as a local config"}, false, 0},
 		{"skipped", "other.yaml", "name: ci\non: [push]\n", true,
-			[]string{"other.yaml: skipped: not an enver config"}, false},
+			[]string{"other.yaml: skipped: not an enver config"}, false, 0},
 		{"unknown key", "typo.yaml", "publish: true\nprofiles: {}\nprofile: {}\n", true,
-			[]string{`typo.yaml: error: unknown top-level key "profile"`}, true},
+			[]string{`typo.yaml: error: unknown top-level key "profile"`}, true, 0},
 		{"marked empty, strict", "m.yaml", "publish: true\n", true,
-			[]string{"m.yaml: warning: marked for publication but declares neither profiles nor remotes"}, true},
+			[]string{"m.yaml: warning: marked for publication but declares neither profiles nor remotes"}, true, 0},
 		{"marked empty, lax", "m.yaml", "publish: true\n", false,
-			[]string{"m.yaml: warning: marked for publication but declares neither profiles nor remotes"}, false},
+			[]string{"m.yaml: warning: marked for publication but declares neither profiles nor remotes"}, false, 0},
 		{"bad mark", "b.yaml", "publish: yes\nprofiles: {}\n", true,
-			[]string{"b.yaml: error: publish: want the boolean true"}, true},
+			[]string{"b.yaml: error: publish: want the boolean true"}, true, 0},
+		{"misplaced mark", "mp.yaml", "profiles:\n  a:\n    publish: true\n    env:\n      K: v\n", true,
+			[]string{"mp.yaml: error: publish is not a profile field; the mark belongs at the top level of the file"}, true, 0},
+		{"type error", "t.yaml", "publish: true\nprofiles: []\n", true,
+			[]string{"t.yaml: error:", "cannot unmarshal"}, true, 1},
+		{"env value type error", "e.yaml", "profiles:\n  a:\n    env:\n      K: [x]\n", true,
+			[]string{"e.yaml: error:", "cannot unmarshal"}, true, 1},
 	} {
 		lines, failed := checkFile(c.path, []byte(c.in), c.strict)
 		if failed != c.failed {
 			t.Errorf("%s: failed = %v, want %v", c.name, failed, c.failed)
+		}
+		if c.exact > 0 && len(lines) != c.exact {
+			t.Errorf("%s: %d lines, want exactly %d: %q", c.name, len(lines), c.exact, lines)
+		}
+		for _, l := range lines {
+			if strings.Contains(l, "\n") {
+				t.Errorf("%s: line %q carries a newline; every finding is one line", c.name, l)
+			}
 		}
 		for _, w := range c.want {
 			if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, w) }) {
