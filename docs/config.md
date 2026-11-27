@@ -395,7 +395,10 @@ A dangling `extends` is an error whoever authored it. Strict scoping removed
 the authorship grading: a remote file can no longer name a parent outside its
 own namespace, so a reference no profile defines is a broken config, not one
 waiting to be completed — `enver validate` reports every dangling `extends`
-as an error, yours and a remote's alike. The hint survives where a pull can
+as an error, yours and a remote's alike. That is the merged mode: a named
+local file is judged by what it declares itself, where a bare target that may
+sit in one of its declared `no_prefix` records is a note, since the file mode
+reads no pulled content to settle it. The hint survives where a pull can
 help: a parent whose record is declared but not yet pulled carries the
 `enver pull <name>` that supplies it.
 
@@ -424,13 +427,18 @@ and a hook:
       commands:
         enver:
           glob: "*.yaml"
+          exclude: "{,**/}.enver.yaml"
           run: enver validate --strict {staged_files}
 
-Each file says what it is, so the recipe needs no `exclude` for enver files;
-the repository's other YAML is skipped as long as it has none of `profiles`,
-`remotes`, `default`. Authoring happens through `enver <command> --file
-<file>`, and `enver pull --file <file> <source> --as <name>` fetches what the
-file declares into `.enver/<file>/`.
+The glob matches the project's own `.enver.yaml` too, at the root and nested.
+That file is a layer, not a file to publish, and a named file is judged on its
+own — a config extending a global profile would fail — so the recipe excludes
+it and the merged mode covers it: `enver validate --strict` with no files. The
+repository's other YAML is skipped as long as it has none of `profiles`,
+`remotes`, `default`; a file that does carry one of those and is not meant as
+an enver config needs an `exclude` of its own. Authoring happens through
+`enver <command> --file <file>`, and `enver pull --file <file> <source> --as
+<name>` fetches what the file declares into `.enver/<file>/`.
 
 ## Multiple parents
 
