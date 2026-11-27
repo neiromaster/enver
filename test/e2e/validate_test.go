@@ -39,8 +39,20 @@ func TestValidateNamedFiles(t *testing.T) {
 	if !strings.Contains(r.Stderr, "3 of 4 files failed (warnings treated as errors)") {
 		t.Fatalf("summary: %s", r.Stderr)
 	}
-	if i, j := strings.Index(r.Stdout, "team.yaml:"), strings.Index(r.Stdout, "ci.yaml:"); i > j {
-		t.Fatalf("files out of order:\n%s", r.Stdout)
+	first := []string{
+		`team.yaml: error: profile "llm/qwen" is not a bare upstream profile name`,
+		"ci.yaml: ✓ valid as a local config",
+		"other.yaml: skipped: not an enver config",
+		`typo.yaml: error: unknown top-level key "profile"`,
+		"empty-marked.yaml: warning: marked for publication",
+	}
+	at := 0
+	for _, line := range first {
+		i := strings.Index(r.Stdout[at:], line)
+		if i < 0 {
+			t.Fatalf("%q does not come after the previous file's first line:\n%s", line, r.Stdout)
+		}
+		at += i
 	}
 	lax := s.run(append([]string{"validate"}, files...)...)
 	if lax.ExitCode != 1 || !strings.Contains(lax.Stderr, "2 of 4 files failed") || strings.Contains(lax.Stderr, "treated as errors") {
@@ -140,6 +152,37 @@ func TestValidateUnreadablePath(t *testing.T) {
 	s := newSandbox(t)
 	r := s.run("validate", s.project)
 	if r.ExitCode != 1 || !strings.Contains(r.Stdout, "error: cannot read") {
+		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}
+
+// TestValidateNotePassesStrict pins the bottom rung of the severity ladder: a
+// file whose only finding is a note passes even under --strict, and the note
+// line takes the verdict line's place.
+func TestValidateNotePassesStrict(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "p.yaml"),
+		"remotes:\n  r:\n    url: https://example.invalid/r.yaml\n    no_prefix: true\nprofiles:\n  a:\n    extends: ghost\n")
+	r := s.run("validate", "--strict", "p.yaml")
+	if r.ExitCode != 0 ||
+		!strings.Contains(r.Stdout, "p.yaml: note:") ||
+		strings.Contains(r.Stdout, "✓ valid") {
+		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}
+
+// TestValidateUnreadablePathsDoNotStopTheRest pins the per-file error: paths
+// nothing can be read from fail their own check while the healthy file beside
+// them is still reported, and the summary counts both failures.
+func TestValidateUnreadablePathsDoNotStopTheRest(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "ok.yaml"), "profiles:\n  p:\n    env:\n      K: v\n")
+	r := s.run("validate", s.project, "missing.yaml", "ok.yaml")
+	if r.ExitCode != 1 ||
+		!strings.Contains(r.Stdout, s.project+": error: cannot read:") ||
+		!strings.Contains(r.Stdout, "missing.yaml: error: cannot read:") ||
+		!strings.Contains(r.Stdout, "ok.yaml: ✓ valid as a local config") ||
+		!strings.Contains(r.Stderr, "2 of 3 files failed") {
 		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
 	}
 }
