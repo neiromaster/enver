@@ -3,6 +3,7 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -643,5 +644,153 @@ func TestCheckReportsEveryError(t *testing.T) {
 	_, findings, err := Check([]byte("profiles:\n  \"llm/qwen\":\n    env:\n      \"bad-name\": x\n"), Publish, "")
 	if err != nil || !gateFinding(findings, config.SeverityError, "bare upstream profile name") || !gateFinding(findings, config.SeverityError, "invalid env key name") {
 		t.Fatalf("both errors must be reported: %v, %+v", err, findings)
+	}
+}
+
+// The pull refuses an extends target naming a declared no-prefix record one
+// stage later, so Gate stays silent on the shape; validate's publish mode
+// names it through NoPrefixExtendsFindings instead.
+func TestNoPrefixExtendsFindings(t *testing.T) {
+	marked := config.Config{
+		Profiles: map[string]config.Profile{"a": {Extends: []string{"r/x"}}},
+		Remotes:  map[string]config.RemoteRecord{"r": {URL: "https://example.invalid/r.yaml", NoPrefix: true}},
+	}
+	findings := NoPrefixExtendsFindings(marked)
+	if len(findings) != 1 || findings[0].Severity != config.SeverityError {
+		t.Fatalf("findings = %+v, want one error finding", findings)
+	}
+	if findings[0].Profile != "a" || findings[0].Target != "r/x" {
+		t.Fatalf("finding names %q/%q, want a/r/x", findings[0].Profile, findings[0].Target)
+	}
+	for _, part := range []string{
+		`profile "a" extends "r/x", but record "r" is declared with no_prefix`,
+		"a no-prefix record contributes no name segment",
+		"declare the record with a prefix, or keep the shared values in a profile of this file",
+	} {
+		if !strings.Contains(findings[0].Text, part) {
+			t.Errorf("finding text %q lacks %q", findings[0].Text, part)
+		}
+	}
+
+	for _, c := range []struct {
+		name string
+		cfg  config.Config
+	}{
+		{"prefixed record", config.Config{
+			Profiles: map[string]config.Profile{"a": {Extends: []string{"r/x"}}},
+			Remotes:  map[string]config.RemoteRecord{"r": {URL: "https://example.invalid/r.yaml"}},
+		}},
+		{"bare target", config.Config{
+			Profiles: map[string]config.Profile{"a": {Extends: []string{"x"}}},
+			Remotes:  map[string]config.RemoteRecord{"r": {URL: "https://example.invalid/r.yaml", NoPrefix: true}},
+		}},
+		{"undeclared record head", config.Config{
+			Profiles: map[string]config.Profile{"a": {Extends: []string{"s/x"}}},
+			Remotes:  map[string]config.RemoteRecord{"r": {URL: "https://example.invalid/r.yaml", NoPrefix: true}},
+		}},
+	} {
+		if got := NoPrefixExtendsFindings(c.cfg); len(got) != 0 {
+			t.Errorf("%s: findings = %+v, want none", c.name, got)
+		}
+	}
+
+	// The shape stays a pull-admissible one: Gate must keep admitting it, since
+	// the refusal belongs to the consumer's own check one stage later.
+	content := []byte("remotes:\n  r:\n    url: https://example.invalid/r.yaml\n    no_prefix: true\nprofiles:\n  a:\n    extends: r/x\n    env:\n      K: v\n")
+	warnings, err := Gate(content, GateOpts{Record: "llm"})
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Gate = %q, %v; want the shape admitted in silence", warnings, err)
+	}
+}
+
+// The ciphertext advisories address the reader the mode hands them: publish
+// speaks to a consumer who must patch, local speaks to the author holding the
+// key the values were sealed with.
+func TestCheckCiphertextNotesByMode(t *testing.T) {
+	sealed := gateSeal(t, crypto.CurrentParams)
+	content := gateEnvFile("a", "TOKEN", sealed)
+
+	_, findings, err := Check(content, Local, "")
+	if err != nil {
+		t.Fatalf("Local refused current-era ciphertext: %v", err)
+	}
+	if !gateFinding(findings, config.SeverityNote, "a/TOKEN", "they decrypt only for the key that sealed them") {
+		t.Fatalf("findings = %+v, want the local note naming the key", findings)
+	}
+	if gateFinding(findings, config.SeverityNote, "author") || gateFinding(findings, config.SeverityNote, "patch") {
+		t.Fatalf("the local note must not advise a consumer: %+v", findings)
+	}
+
+	_, findings, err = Check(content, Publish, "")
+	if err != nil {
+		t.Fatalf("Publish refused current-era ciphertext: %v", err)
+	}
+	if !gateFinding(findings, config.SeverityNote, "a/TOKEN", "decrypt only for the author's key", "patch these keys with plaintext values") {
+		t.Fatalf("findings = %+v, want today's publish note", findings)
+	}
+}
+
+// A foreign-era value is a refusal in local mode too, but the text addresses
+// the author: which values this build cannot read, and the re-encrypt that
+// fixes them - not the consumer's rule about what remote content carries.
+func TestCheckLocalForeignEraError(t *testing.T) {
+	_, findings, err := Check(gateEnvFile("a", "TOKEN", "enc:v1:YWJj"), Local, "")
+	if err != nil || !gateFinding(findings, config.SeverityError, "a/TOKEN", "enc:v1:", "cannot read", "re-encrypt them with this enver build") {
+		t.Fatalf("findings = %+v, err = %v; want the local foreign-era error", findings, err)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.Text, "remote content must carry") {
+			t.Fatalf("the local error addresses a consumer: %q", f.Text)
+		}
+	}
+}
+
+// Every refusal class Check reports must survive the round-trip through
+// errOf: the error a caller refuses a file with opens with the label, the way
+// Gate's returned error carries the record name.
+func TestCheckErrorFindingsCarryTheLabel(t *testing.T) {
+	flood := "profiles: {}\ndummy:\n  - &a x\n" + strings.Repeat("  - *a\n", 1001)
+	sealed := gateSeal(t, crypto.CurrentParams)
+	var many strings.Builder
+	many.WriteString("profiles:\n  a:\n    env:\n")
+	for i := range 101 {
+		fmt.Fprintf(&many, "      K%d: %q\n", i, sealed)
+	}
+	for _, c := range []struct {
+		name    string
+		mode    Mode
+		content string
+	}{
+		{"unparseable yaml", Publish, "profiles:\n  a: [unclosed\n"},
+		{"not a mapping", Publish, "- a\n"},
+		{"anchor flood", Publish, flood},
+		{"invalid env key name", Publish, "profiles:\n  a:\n    env:\n      \"bad-name\": x\n"},
+		{"invalid record name", Publish, "remotes:\n  \"a/b\":\n    url: https://example.invalid/x.yaml\n"},
+		{"bare upstream name", Publish, "profiles:\n  \"a/b\":\n    env:\n      K: v\n"},
+		{"out of namespace", Publish, "profiles:\n  a:\n    extends: ghost\n"},
+		{"bad target segment", Publish, "profiles:\n  a:\n    extends: r/\nremotes:\n  r:\n    url: https://example.invalid/r.yaml\n"},
+		{"extends cycle", Publish, "profiles:\n  a:\n    extends: b\n  b:\n    extends: a\n"},
+		{"unusable nested declaration", Publish, "remotes:\n  r:\n    url: not-a-source\n"},
+		{"foreign era", Publish, "profiles:\n  a:\n    env:\n      TOKEN: enc:v1:YWJj\n"},
+		{"too many encrypted values", Publish, many.String()},
+		{"malformed encrypted value", Publish, "profiles:\n  a:\n    env:\n      TOKEN: enc:v3:argon2id:3:65536:4:AAAA\n"},
+		{"KDF params over the caps", Publish, "profiles:\n  a:\n    env:\n      TOKEN: enc:v3:argon2id:33:65536:4:AAAA\n"},
+		{"local undeclared bare", Local, "profiles:\n  a:\n    extends: ghost\n"},
+		{"local undeclared record", Local, "profiles:\n  a:\n    extends: x/b\n"},
+		{"local target under a no-prefix record", Local, "remotes:\n  r:\n    url: https://example.invalid/r.yaml\n    no_prefix: true\nprofiles:\n  a:\n    extends: r/b\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, findings, err := Check([]byte(c.content), c.mode, "lbl")
+			if err != nil {
+				t.Fatalf("Check returned %v; refusals are findings", err)
+			}
+			i := slices.IndexFunc(findings, func(f Finding) bool { return f.Severity == config.SeverityError })
+			if i < 0 {
+				t.Fatalf("no error finding in %+v", findings)
+			}
+			if got := findings[i].errOf().Error(); !strings.HasPrefix(got, "lbl: ") {
+				t.Errorf("errOf = %q, want the label prefix", got)
+			}
+		})
 	}
 }
