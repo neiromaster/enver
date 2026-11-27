@@ -45,8 +45,8 @@ func (s *sandbox) plantPatchStore(t *testing.T, body string) {
 	s.writeFile(filepath.Join(s.remotesDir(), "llm.meta"), "url: "+patchRemoteURL+"\npulled-at: 2026-11-15T10:00:00Z\n")
 }
 
-// addSession drives one interactive add process over a pty.
-type addSession struct {
+// tuiSession drives one interactive enver process over a pty.
+type tuiSession struct {
 	t      *testing.T
 	ptmx   *os.File
 	tty    *os.File
@@ -57,7 +57,9 @@ type addSession struct {
 	cancel context.CancelFunc
 }
 
-func startAdd(t *testing.T, s *sandbox, name string) *addSession {
+// startTUI runs the built binary with args on a sized pty, answering the
+// terminal questions through keys.
+func startTUI(t *testing.T, s *sandbox, args ...string) *tuiSession {
 	t.Helper()
 	ptmx, tty, err := pty.Open()
 	if err != nil {
@@ -69,7 +71,7 @@ func startAdd(t *testing.T, s *sandbox, name string) *addSession {
 		t.Skipf("cannot size the pty: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	cmd := exec.CommandContext(ctx, enverBin, "add", name)
+	cmd := exec.CommandContext(ctx, enverBin, args...)
 	cmd.Dir = s.project
 	cmd.Env = s.env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
@@ -79,7 +81,7 @@ func startAdd(t *testing.T, s *sandbox, name string) *addSession {
 		_ = tty.Close()
 		t.Fatal(err)
 	}
-	a := &addSession{t: t, ptmx: ptmx, tty: tty, cmd: cmd, screen: &syncBuffer{}, done: make(chan struct{}), ctx: ctx, cancel: cancel}
+	a := &tuiSession{t: t, ptmx: ptmx, tty: tty, cmd: cmd, screen: &syncBuffer{}, done: make(chan struct{}), ctx: ctx, cancel: cancel}
 	go func() {
 		defer close(a.done)
 		_, _ = io.Copy(a.screen, ptmx)
@@ -94,18 +96,28 @@ func startAdd(t *testing.T, s *sandbox, name string) *addSession {
 	return a
 }
 
-func (a *addSession) wait(want string) {
+func startAdd(t *testing.T, s *sandbox, name string) *tuiSession {
+	t.Helper()
+	return startTUI(t, s, "add", name)
+}
+
+func startEdit(t *testing.T, s *sandbox, name string) *tuiSession {
+	t.Helper()
+	return startTUI(t, s, "edit", name)
+}
+
+func (a *tuiSession) wait(want string) {
 	a.t.Helper()
 	waitForScreen(a.t, a.screen, want)
 }
 
-func (a *addSession) keys(keys string) {
+func (a *tuiSession) keys(keys string) {
 	a.t.Helper()
 	typeKeys(a.t, a.ptmx, keys)
 }
 
 // enter types one env card and submits it.
-func (a *addSession) enter(name, value string) {
+func (a *tuiSession) enter(name, value string) {
 	a.t.Helper()
 	for _, c := range name {
 		a.keys(string(c))
@@ -118,15 +130,28 @@ func (a *addSession) enter(name, value string) {
 	a.keys("\r")
 }
 
+// replaceValue clears the value field a card seeded, types value, and submits.
+// The card opens on the name field; the cursor rides at the end of the seed.
+func (a *tuiSession) replaceValue(value string) {
+	a.t.Helper()
+	a.keys("\t")
+	a.keys("\x15") // ctrl+u: drop the seeded value
+	for _, c := range value {
+		a.keys(string(c))
+	}
+	a.keys("\t")
+	a.keys("\r")
+}
+
 // finish waits for the process, closes the slave, and drains the screen. It
 // fails the test unless the command exited cleanly within the timeout.
-func (a *addSession) finish() string {
+func (a *tuiSession) finish() string {
 	a.t.Helper()
 	err := a.cmd.Wait()
 	_ = a.tty.Close()
 	<-a.done
 	if err != nil || a.ctx.Err() != nil {
-		a.t.Fatalf("add did not finish cleanly: err=%v ctx=%v\n%s", err, a.ctx.Err(), a.screen.String())
+		a.t.Fatalf("the session did not finish cleanly: err=%v ctx=%v\n%s", err, a.ctx.Err(), a.screen.String())
 	}
 	return a.screen.String()
 }
@@ -258,13 +283,11 @@ func sealedExport(t *testing.T, cfg, key string) string {
 	return ""
 }
 
-// TestAddPatchBackdropDegradesUndecryptable pins the display seam: remote
-// ciphertext the configured key cannot read degrades to a per-key note instead of
-// failing the collector, and the user can still save a patch of another key.
-func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
-	s := patchSandbox(t)
-
-	// Author ciphertext under a key that goes away before the add runs.
+// plantForeignCiphertext authors a sealed value under a key that goes away, so
+// the sandbox key cannot read the ciphertext it returns: the remote-ciphertext
+// fixture both bootstrap-degrade tests share.
+func plantForeignCiphertext(t *testing.T, s *sandbox) string {
+	t.Helper()
 	s.writeLocal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\nprofiles:\n  foreign:\n    env:\n      ~SECRET: planted-secret\n")
 	requireKeygen(t, s)
 	if r := s.run("encrypt", "foreign"); r.ExitCode != 0 {
@@ -275,6 +298,15 @@ func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
 		t.Fatalf("key rotation: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
 	s.writeLocal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\n")
+	return cipher
+}
+
+// TestAddPatchBackdropDegradesUndecryptable pins the display seam: remote
+// ciphertext the configured key cannot read degrades to a per-key note instead of
+// failing the collector, and the user can still save a patch of another key.
+func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
+	s := patchSandbox(t)
+	cipher := plantForeignCiphertext(t, s)
 	// Sealed remote values always carry the mark, so the fixture does too: the
 	// note is visible only because the backdrop drops the mark before display,
 	// and keeping the mark would mask the note a reader needs.
@@ -303,6 +335,137 @@ func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
 	a.keys("\r")
 	a.wait("wrote profile")
 	a.finish()
+
+	cfg := s.readLocal()
+	if !strings.Contains(cfg, "MODEL: llama3") || strings.Contains(cfg, "SECRET") {
+		t.Fatalf("overriding a different key must save only that key:\n%s", cfg)
+	}
+}
+
+// TestEditPatchBootstrapOpensOnRemoteBase drives edit on a name only remote
+// content provides: the menu opens on the remote keys as inherited rows, the
+// notice names the remote whose content the save patches, overriding one key
+// marks it as an override, and the written copy carries only what the user
+// entered.
+func TestEditPatchBootstrapOpensOnRemoteBase(t *testing.T) {
+	s := patchSandbox(t)
+	e := startEdit(t, s, "llm/ollama")
+
+	e.wait("Edit profile: llm/ollama")
+	first := plainScreen(e.screen.String())
+	for _, want := range []string{"↳  MODEL = glm", "↳  TEMP = 0.7"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("the first frame must list %q as inherited:\n%s", want, first)
+		}
+	}
+	for _, want := range []string{`profile "llm/ollama" comes from remote "llm"`, "saving writes a patch copy here"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("the bootstrap notice must say %q:\n%s", want, first)
+		}
+	}
+
+	e.keys("\r") // open MODEL's inherited row
+	e.wait("blank name finishes")
+	e.replaceValue("llama3")
+	e.wait("MODEL = llama3")
+	frame := plainScreen(e.screen.String())
+	if !strings.Contains(frame, "↻  MODEL = llama3") {
+		t.Fatalf("the overridden row must be marked as an override of the remote key:\n%s", frame)
+	}
+	if !strings.Contains(frame, "unsaved changes") {
+		t.Fatalf("the override must read as an unsaved change:\n%s", frame)
+	}
+
+	e.keys("G") // jump to the last row (Done)
+	e.keys("\r")
+	e.wait("patches remote")
+	screen := e.finish()
+
+	if !strings.Contains(screen, `patches remote "llm"`) {
+		t.Fatalf("the closing report must name the patched remote:\n%s", screen)
+	}
+	cfg := s.readLocal()
+	if !strings.Contains(cfg, "MODEL: llama3") || strings.Contains(cfg, "TEMP") {
+		t.Fatalf("the patch copy must carry only the overridden key:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "extends") {
+		t.Fatalf("the patch copy must not grow a chain of its own:\n%s", cfg)
+	}
+
+	r := s.run("show", "llm/ollama")
+	if r.ExitCode != 0 {
+		t.Fatalf("show: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "MODEL=llama3") || !strings.Contains(r.Stdout, "# from llm/ollama (local)") {
+		t.Fatalf("the overridden key must win from the local layer:\n%s", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "TEMP=0.7") || !strings.Contains(r.Stdout, "# from llm/ollama (remote:llm)") {
+		t.Fatalf("the untouched key must still come from the remote:\n%s", r.Stdout)
+	}
+}
+
+// TestEditPatchBootstrapThenEditIsNormal pins the notice as one-shot: once the
+// copy exists, edit opens on it as a plain session, listing the copy's own rows
+// and reporting no patched remote.
+func TestEditPatchBootstrapThenEditIsNormal(t *testing.T) {
+	s := patchSandbox(t)
+	s.writeLocal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\nprofiles:\n  llm/ollama:\n    env:\n      MODEL: llama3\n")
+	e := startEdit(t, s, "llm/ollama")
+
+	e.wait("Edit profile: llm/ollama")
+	frame := plainScreen(e.screen.String())
+	for _, gone := range []string{"comes from remote", "saving writes a patch copy"} {
+		if strings.Contains(frame, gone) {
+			t.Fatalf("an existing copy must not announce a bootstrap (%q):\n%s", gone, frame)
+		}
+	}
+	if strings.Contains(frame, "↳  MODEL") || !strings.Contains(frame, "MODEL = llama3") {
+		t.Fatalf("MODEL must be an own row, not an inherited one:\n%s", frame)
+	}
+
+	e.keys("G") // jump to the last row (Done)
+	e.keys("\r")
+	e.wait("updated profile")
+	screen := e.finish()
+
+	if strings.Contains(screen, "patches remote") {
+		t.Fatalf("a plain edit must not report a patched remote:\n%s", screen)
+	}
+	if cfg := s.readLocal(); !strings.Contains(cfg, "MODEL: llama3") {
+		t.Fatalf("the copy must survive the no-op edit:\n%s", cfg)
+	}
+}
+
+// TestEditPatchBootstrapDegradesUndecryptable pins the display seam in edit:
+// remote ciphertext the configured key cannot read degrades to the note the menu
+// can show instead of failing the session, and the save still writes the patch of
+// another key alone.
+func TestEditPatchBootstrapDegradesUndecryptable(t *testing.T) {
+	s := patchSandbox(t)
+	cipher := plantForeignCiphertext(t, s)
+	s.plantPatchStore(t, "profiles:\n  ollama:\n    env:\n      MODEL: glm\n      ~SECRET: "+cipher+"\n")
+
+	e := startEdit(t, s, "llm/ollama")
+	e.wait("Edit profile: llm/ollama")
+	frame := plainScreen(e.screen.String())
+	if !strings.Contains(frame, "↳  SECRET = (cannot decrypt: wrong key (remote))") {
+		t.Fatalf("the unreadable remote key must degrade to an unmasked note in the frame:\n%s", frame)
+	}
+	if strings.Contains(frame, "~SECRET") {
+		t.Fatalf("the degraded row must not render under the remote mark:\n%s", frame)
+	}
+	if got := strings.Count(frame, "note: SECRET cannot be decrypted from the remote"); got != 1 {
+		t.Fatalf("the per-key warning must print exactly once, got %d:\n%s", got, frame)
+	}
+
+	e.keys("\r") // open MODEL's inherited row
+	e.wait("blank name finishes")
+	e.replaceValue("llama3")
+	e.wait("MODEL = llama3")
+	e.keys("G") // jump to the last row (Done)
+	e.keys("\r")
+	e.wait("patches remote")
+	e.finish()
 
 	cfg := s.readLocal()
 	if !strings.Contains(cfg, "MODEL: llama3") || strings.Contains(cfg, "SECRET") {
