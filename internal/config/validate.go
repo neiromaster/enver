@@ -75,28 +75,16 @@ func (i Issue) Reason() string {
 	return string(i.Kind)
 }
 
-// Validate audits cfg for dangling extends, cycles, no-op profiles, unset
-// contradictions, and marked secrets still stored in plaintext.
-func Validate(cfg Config) []Issue {
-	exists := map[string]bool{}
-	for n := range cfg.Profiles {
-		exists[n] = true
-	}
+// ValidateOwn reports the health findings that concern one file's own
+// declarations: an empty profile, a ~-marked key stored in plaintext, and a
+// profile that defines and unsets the same key in one layer. It names no
+// extends relations, so a file that legitimately extends into a record it
+// declares can be checked with it alone; Validate adds the dangling and cycle
+// rules the merged view needs.
+func ValidateOwn(cfg Config) []Issue {
 	var issues []Issue
 	for _, n := range cfg.ProfileNames() {
 		p := cfg.Profiles[n]
-		for _, parent := range p.Extends {
-			if !exists[parent] {
-				issues = append(issues, cfg.danglingIssue(n, parent))
-			}
-		}
-		if len(p.Extends) > 0 {
-			if _, err := cfg.ResolveProfile(n); err != nil {
-				if errors.Is(err, ErrExtendsCycle) {
-					issues = append(issues, Issue{Profile: n, Kind: KindCycle, Severity: SeverityError, Detail: err.Error()})
-				}
-			}
-		}
 		if len(p.Env) == 0 && len(p.Extends) == 0 && len(p.Unset) == 0 {
 			issues = append(issues, Issue{Profile: n, Kind: KindEmpty, Severity: SeverityWarning})
 		}
@@ -119,6 +107,32 @@ func Validate(cfg Config) []Issue {
 		}
 	}
 	return issues
+}
+
+// Validate audits cfg for dangling extends, cycles, no-op profiles, unset
+// contradictions, and marked secrets still stored in plaintext.
+func Validate(cfg Config) []Issue {
+	exists := map[string]bool{}
+	for n := range cfg.Profiles {
+		exists[n] = true
+	}
+	var issues []Issue
+	for _, n := range cfg.ProfileNames() {
+		p := cfg.Profiles[n]
+		for _, parent := range p.Extends {
+			if !exists[parent] {
+				issues = append(issues, cfg.danglingIssue(n, parent))
+			}
+		}
+		if len(p.Extends) > 0 {
+			if _, err := cfg.ResolveProfile(n); err != nil {
+				if errors.Is(err, ErrExtendsCycle) {
+					issues = append(issues, Issue{Profile: n, Kind: KindCycle, Severity: SeverityError, Detail: err.Error()})
+				}
+			}
+		}
+	}
+	return append(issues, ValidateOwn(cfg)...)
 }
 
 // ValidateGlobal audits the global config over the remote layers it sits on

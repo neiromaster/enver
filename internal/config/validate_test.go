@@ -187,6 +187,27 @@ func TestValidateCrossLayerFenceIsNotContradictory(t *testing.T) {
 	}
 }
 
+func TestValidateOwn(t *testing.T) {
+	cfg := Config{Profiles: map[string]Profile{
+		"empty":  {},
+		"plain":  {Env: map[string]string{"K": "v"}},
+		"marked": {Env: map[string]string{"S": "x"}, Marked: map[string]bool{"S": true}},
+		"fence":  {Env: map[string]string{"K": "v"}, Unset: []string{"K"}},
+	}}
+	kinds := map[string]IssueKind{}
+	for _, is := range ValidateOwn(cfg) {
+		kinds[is.Profile] = is.Kind
+	}
+	for p, want := range map[string]IssueKind{"empty": KindEmpty, "marked": KindPlaintextSecret, "fence": KindContradictoryUnset} {
+		if kinds[p] != want {
+			t.Errorf("%s = %s, want %s", p, kinds[p], want)
+		}
+	}
+	if _, ok := kinds["plain"]; ok {
+		t.Error("a healthy profile was reported")
+	}
+}
+
 func TestIssueReasonMarkedEmpty(t *testing.T) {
 	is := Issue{Kind: KindMarkedEmpty, Severity: SeverityWarning}
 	if is.Severity != SeverityWarning || is.Reason() != "marked for publication but declares neither profiles nor remotes" {
