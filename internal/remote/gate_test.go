@@ -55,6 +55,24 @@ func gateRequireWarning(t *testing.T, warnings []string, parts ...string) {
 	}
 }
 
+// gateFinding reports whether findings carry one of the given severity whose
+// text names every part. An empty severity asks a plainer question: whether
+// the check produced no findings at all.
+func gateFinding(findings []Finding, severity config.Severity, parts ...string) bool {
+	if severity == "" {
+		return len(findings) == 0
+	}
+	for _, f := range findings {
+		if f.Severity != severity {
+			continue
+		}
+		if gateWarning([]string{f.Text}, parts...) {
+			return true
+		}
+	}
+	return false
+}
+
 func gateRequireError(t *testing.T, err error, parts ...string) {
 	t.Helper()
 	if err == nil {
@@ -534,4 +552,82 @@ remotes:
 		t.Fatalf("warnings = %q, want exactly one name-shared-with-a-profile warning", warnings)
 	}
 	gateRequireWarning(t, warnings, `"claude"`)
+}
+
+// A pull can draw every advisory class at once: the collision warning that only
+// a pull can judge, the record-named-like-a-profile warning, and the ciphertext
+// notes. Gate returns them in that order, warnings before notes.
+func TestGateOrdersAdvisories(t *testing.T) {
+	sealed := gateSeal(t, crypto.CurrentParams)
+	content := []byte(fmt.Sprintf(`profiles:
+  claude:
+    env:
+      TOKEN: %q
+remotes:
+  claude:
+    url: https://example.invalid/claude.yaml
+`, sealed))
+	merged := config.Config{Profiles: map[string]config.Profile{
+		"claude": {Env: map[string]string{"TOKEN": "mine"}},
+	}}
+	warnings, err := Gate(content, GateOpts{Record: "llm", NoPrefix: true, Merged: merged})
+	if err != nil {
+		t.Fatalf("Gate refused content carrying every advisory class: %v", err)
+	}
+	if len(warnings) != 3 {
+		t.Fatalf("warnings = %q, want collision, then child name, then ciphertext", warnings)
+	}
+	gateRequireWarning(t, warnings[:1], "overridden")
+	gateRequireWarning(t, warnings[1:2], "beside its own profile")
+	gateRequireWarning(t, warnings[2:3], "decrypt only for the author's key")
+}
+
+func TestCheckLocalKeepsSlashNames(t *testing.T) {
+	content := []byte("profiles:\n  \"llm/qwen\":\n    env:\n      K: v\n")
+	_, findings, err := Check(content, Local, "")
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("Local mode refused a slash-named profile: %v, %+v", err, findings)
+	}
+	_, findings, err = Check(content, Publish, "")
+	if err != nil || !gateFinding(findings, config.SeverityError, "bare upstream profile name") {
+		t.Fatalf("Publish mode must refuse a slash-named profile: %v, %+v", err, findings)
+	}
+}
+
+func TestCheckLocalExtends(t *testing.T) {
+	prefixed := "profiles:\n  a:\n    extends: claude/base\nremotes:\n  claude:\n    url: https://example.invalid/claude.yaml\n"
+	for _, c := range []struct {
+		name, in string
+		want     config.Severity
+		parts    []string
+	}{
+		{"own bare", "profiles:\n  a:\n    extends: b\n  b:\n    env:\n      K: v\n", "", nil},
+		{"undeclared bare", "profiles:\n  a:\n    extends: ghost\n", config.SeverityError, []string{"no profile of this file declares"}},
+		{"prefixed record", prefixed, "", nil},
+		{"undeclared record", "profiles:\n  a:\n    extends: x/b\n", config.SeverityError, []string{"no record"}},
+		{"bare with no_prefix", "profiles:\n  a:\n    extends: b\nremotes:\n  r:\n    url: https://example.invalid/r.yaml\n    no_prefix: true\n", config.SeverityNote, []string{"may name a profile of the no-prefix record"}},
+		{"record under no_prefix", "profiles:\n  a:\n    extends: r/b\nremotes:\n  r:\n    url: https://example.invalid/r.yaml\n    no_prefix: true\n", config.SeverityError, []string{"spell the bare name"}},
+	} {
+		_, findings, err := Check([]byte(c.in), Local, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !gateFinding(findings, c.want, c.parts...) {
+			t.Errorf("%s: findings = %+v, want %v with %q", c.name, findings, c.want, c.parts)
+		}
+	}
+}
+
+func TestCheckLocalCycle(t *testing.T) {
+	_, findings, err := Check([]byte("profiles:\n  \"a/b\":\n    extends: c/d\n  \"c/d\":\n    extends: a/b\n"), Local, "")
+	if err != nil || !gateFinding(findings, config.SeverityError, "cycle") {
+		t.Fatalf("a cycle through slash-named profiles: %v, %+v", err, findings)
+	}
+}
+
+func TestCheckReportsEveryError(t *testing.T) {
+	_, findings, err := Check([]byte("profiles:\n  \"llm/qwen\":\n    env:\n      \"bad-name\": x\n"), Publish, "")
+	if err != nil || !gateFinding(findings, config.SeverityError, "bare upstream profile name") || !gateFinding(findings, config.SeverityError, "invalid env key name") {
+		t.Fatalf("both errors must be reported: %v, %+v", err, findings)
+	}
 }
