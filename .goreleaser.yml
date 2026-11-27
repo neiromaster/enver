@@ -30,6 +30,7 @@ archives:
       - completions/enver.bash
       - completions/enver.zsh
       - completions/enver.fish
+      - completions/enver.ps1
     format_overrides:
       - goos: windows
         formats: [zip]
