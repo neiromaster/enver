@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.14.0 - 2026-11-28
+
 - **Breaking:** a key's name no longer makes it a secret. `enver encrypt`
   seals `~`-marked values and values with credentials in a URL; other
   plaintext stays plaintext. `show` masks marked values, values with URL
