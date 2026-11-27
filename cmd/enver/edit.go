@@ -51,6 +51,20 @@ type editState struct {
 	origIsDefault bool
 	origEntries   []ui.EnvEntry
 	origUnset     config.Unsets
+
+	// base is the remote content a bootstrap session patches, nil for a session
+	// editing a copy the target holds. The name exists only in the remote layer,
+	// so there is no working chain for the probe to resolve: the inherited rows
+	// and the override marks read this resolution instead. The rows are
+	// display-only — nothing here is written.
+	base *patchBase
+}
+
+// patchBase is the resolved remote content under a patch bootstrap: the env the
+// menu lists as inherited, with the secret marks its winning entries carry.
+type patchBase struct {
+	env    map[string]string
+	marked map[string]bool
 }
 
 // menuErrorAction classifies a failed menu Select. A cancel — ErrCanceled,
@@ -264,8 +278,22 @@ func nameSetsEqual(a, b []string) bool {
 // working fences (declared and carried) — who contributes a key says nothing
 // about whether it is currently suppressed — so a shadowed key still appears
 // here, unlike inheritedForState, which excludes own keys and honors unsets.
-// A profile with no extends, or a pending extends that would cycle, yields nil.
+// A bootstrap session has no chain to resolve, so the remote base answers
+// instead. A profile with no extends, or a pending extends that would cycle,
+// yields nil.
 func overrideKeySet(cfg config.Config, s editState) map[string]bool {
+	if s.base != nil {
+		var out map[string]bool
+		for _, e := range s.entries {
+			if envname.Has(s.base.env, e.Key) {
+				if out == nil {
+					out = map[string]bool{}
+				}
+				out[e.Key] = true
+			}
+		}
+		return out
+	}
 	if len(s.extends) == 0 {
 		return nil
 	}
@@ -393,9 +421,13 @@ func (s editState) menuOptions(inherited []ui.EnvEntry, overrideKeys map[string]
 		ui.Option{Value: actionSecrets, Icon: ui.IconSecret, Label: "Secrets…"},
 		ui.Option{Value: actionDeleteVar, Icon: ui.IconDeleteVar, Label: "Delete variable…"},
 		ui.Option{Value: actionManageUnsets, Icon: ui.IconUnset, Label: manageUnsetsLabel(len(s.unset))},
-		ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"},
-		ui.Option{Value: actionDone, Icon: ui.IconDone, Label: doneLabel(s.dirty())},
 	)
+	// A bootstrap session has no copy here, so there is nothing for a delete to
+	// remove: offering it would report a removal that never happened.
+	if s.base == nil {
+		opts = append(opts, ui.Option{Value: actionDeleteProfile, Icon: ui.IconDeleteProf, Label: "Delete profile…"})
+	}
+	opts = append(opts, ui.Option{Value: actionDone, Icon: ui.IconDone, Label: doneLabel(s.dirty())})
 	return opts
 }
 
@@ -759,8 +791,17 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A name only remote content provides is not a miss: the remote's content is
+	// the base of the patch the session writes, so the menu opens on it exactly
+	// as add's collector does. Every other miss — a name the other user layer
+	// owns, or one nothing declares — stays notFoundInTarget's answer.
+	patchRemote := ""
 	if !ok {
-		return notFoundInTarget(name, path)
+		remote, isRemote := config.RemoteName(cfg.ProfileLayer[name])
+		if !isRemote {
+			return notFoundInTarget(name, path)
+		}
+		patchRemote = remote
 	}
 	wasDefault := isDefault
 
@@ -772,6 +813,14 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	s, err := newEditState(name, prof, prof.Comments, isDefault, crypter)
 	if err != nil {
 		return err
+	}
+	if patchRemote != "" {
+		env, marked, warns := remoteBackdrop(cfg, name)
+		s.base = &patchBase{env: env, marked: marked}
+		fmt.Printf("  profile %q comes from remote %q; saving writes a patch copy here that overrides it per key\n", name, patchRemote)
+		for _, w := range warns {
+			fmt.Println("  " + w)
+		}
 	}
 	for {
 		inherited := listedInheritedForState(cfg, s)
@@ -809,6 +858,9 @@ func doEdit(cmd *cobra.Command, args []string) error {
 					return nil
 				}
 				fmt.Printf("\n✓ updated profile %q\n", s.name)
+				if patchRemote != "" {
+					fmt.Printf("→ patches remote %q: its content stays the base, these keys override it\n", patchRemote)
+				}
 				if s.encryptNow {
 					if err := encryptMarked(path, s.name); err != nil {
 						return fmt.Errorf("profile %q saved, but encrypting its marked values failed: %w", s.name, err)
@@ -1164,6 +1216,9 @@ func listedInheritedForState(cfg config.Config, s editState) []ui.EnvEntry {
 // parent-contributed keys minus own ones; honorFences decides whether declared
 // unsets strip them from that set first.
 func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.EnvEntry {
+	if s.base != nil {
+		return inheritedFromBase(s, honorFences)
+	}
 	probe := probeConfig(cfg, s)
 	if !honorFences {
 		probe.Profiles[s.name] = stripWorkingFences(probe.Profiles[s.name])
@@ -1173,4 +1228,24 @@ func inheritedViaProbe(cfg config.Config, s editState, honorFences bool) []ui.En
 		return nil
 	}
 	return inheritedEntries(r.Env, r.Marked, s.envMap())
+}
+
+// inheritedFromBase lists the rows a bootstrap session inherits: the remote
+// content is the base the patch overrides, so the menu shows it exactly as the
+// resolution does. The values arrive already degraded — an unreadable remote
+// value carries the note in place of its secret — so a row a reader cannot
+// resolve still shows what the save leaves in place. A declared fence drops a
+// live row here only when the caller honors fences; the listing keeps it and
+// dims it, as it does for a probed chain.
+func inheritedFromBase(s editState, honorFences bool) []ui.EnvEntry {
+	env := s.base.env
+	if honorFences {
+		env = maps.Clone(env)
+		for k := range env {
+			if envname.MatchesAny(s.unset, k) {
+				delete(env, k)
+			}
+		}
+	}
+	return inheritedEntries(env, s.base.marked, s.envMap())
 }
