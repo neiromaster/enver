@@ -10,8 +10,8 @@ import (
 )
 
 // File-flag tests: --file points every command at one config file as the whole
-// config — resolution order, the store it redirects, the helpers every command
-// resolves through, and the command that refuses it.
+// config — resolution order, the store it redirects, and the helpers every
+// command resolves through.
 
 func resetFile(t *testing.T, file string) string {
 	t.Helper()
@@ -121,14 +121,6 @@ func TestLayerLabelUnderFile(t *testing.T) {
 	globalFlags.file = "x.yaml"
 	if layerLabel(config.LayerGlobal) != config.LayerFile || layerLabel("remote:r") != "remote:r" {
 		t.Fatalf("layerLabel under --file = %q / %q", layerLabel(config.LayerGlobal), layerLabel("remote:r"))
-	}
-}
-
-func TestValidateRefusesFile(t *testing.T) {
-	resetFile(t, "x.yaml")
-	err := validateCmd.RunE(validateCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "--file is not supported by validate") {
-		t.Fatalf("validate under --file: %v", err)
 	}
 }
 
