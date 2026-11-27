@@ -220,6 +220,9 @@ func TestAddPatchBackdropFoldsMarks(t *testing.T) {
 	if !strings.Contains(cfg, "~TOKEN: fresh-token") {
 		t.Fatalf("the written key must keep the remote mark (loader-folded spelling):\n%s", cfg)
 	}
+	if strings.Contains(cfg, "MODEL") {
+		t.Fatalf("the untouched remote key must not be written into the patch copy:\n%s", cfg)
+	}
 
 	r := s.run("show", "llm/ollama")
 	if r.ExitCode != 0 {
@@ -272,7 +275,10 @@ func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
 		t.Fatalf("key rotation: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
 	s.writeLocal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\n")
-	s.plantPatchStore(t, "profiles:\n  ollama:\n    env:\n      MODEL: glm\n      SECRET: "+cipher+"\n")
+	// Sealed remote values always carry the mark, so the fixture does too: the
+	// note is visible only because the backdrop drops the mark before display,
+	// and keeping the mark would mask the note a reader needs.
+	s.plantPatchStore(t, "profiles:\n  ollama:\n    env:\n      MODEL: glm\n      ~SECRET: "+cipher+"\n")
 
 	a := startAdd(t, s, "llm/ollama")
 	a.wait("Extends")
@@ -280,10 +286,13 @@ func TestAddPatchBackdropDegradesUndecryptable(t *testing.T) {
 	a.wait("Variables (0 own · 2 inherited)")
 	frame := plainScreen(a.screen.String())
 	if !strings.Contains(frame, "↳ SECRET = (cannot decrypt: wrong key (remote))") {
-		t.Fatalf("the unreadable remote key must degrade to a note in the frame:\n%s", frame)
+		t.Fatalf("the unreadable remote key must degrade to an unmasked note in the frame:\n%s", frame)
 	}
-	if !strings.Contains(frame, "note: SECRET cannot be decrypted from the remote") {
-		t.Fatalf("the per-key warning must reach the terminal:\n%s", frame)
+	if strings.Contains(frame, "~SECRET") || strings.Contains(frame, "(can…") {
+		t.Fatalf("the degraded row must not render under the remote mark:\n%s", frame)
+	}
+	if got := strings.Count(frame, "note: SECRET cannot be decrypted from the remote"); got != 1 {
+		t.Fatalf("the per-key warning must print exactly once, got %d:\n%s", got, frame)
 	}
 
 	a.enter("MODEL", "llama3")
