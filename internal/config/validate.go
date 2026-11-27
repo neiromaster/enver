@@ -21,6 +21,7 @@ const (
 	KindEmpty              IssueKind = "empty"
 	KindContradictoryUnset IssueKind = "contradictory-unset"
 	KindPlaintextSecret    IssueKind = "plaintext-secret"
+	KindMarkedEmpty        IssueKind = "marked-empty"
 )
 
 // Severity grades how loudly an Issue surfaces.
@@ -64,6 +65,8 @@ func (i Issue) Reason() string {
 		return fmt.Sprintf("unsets %q which it also defines in env", i.Target)
 	case KindPlaintextSecret:
 		return fmt.Sprintf("%q is marked secret but stored in plaintext", i.Target)
+	case KindMarkedEmpty:
+		return "marked for publication but declares neither profiles nor remotes"
 	}
 	return string(i.Kind)
 }
