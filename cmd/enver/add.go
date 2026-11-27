@@ -325,7 +325,7 @@ var addCmd = &cobra.Command{
 	Use:               "add [name]",
 	Short:             "Interactively add a profile",
 	Args:              cobra.MaximumNArgs(1),
-	ValidArgsFunction: completeProfileInTarget,
+	ValidArgsFunction: completeProfileInTargetOrRemote,
 	RunE:              doAdd,
 }
 
