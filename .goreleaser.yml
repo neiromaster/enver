@@ -69,6 +69,9 @@ homebrew_casks:
       bash: completions/enver.bash
       zsh: completions/enver.zsh
       fish: completions/enver.fish
+    zap:
+      trash:
+        - "~/.config/enver"
     # Clear quarantine so the unsigned binary runs without manual Gatekeeper
     # approval. install_steps renders Homebrew's declarative DSL; the raw-Ruby
     # install hook it replaces renders the deprecated postflight stanza, which
