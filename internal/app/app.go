@@ -120,6 +120,14 @@ func ResolveProfiles(opts Options, profiles []string) (string, config.Resolved, 
 	return strings.Join(profiles, "+"), r, err
 }
 
+// ResolveConfig resolves profiles against an already-loaded config through the
+// same decryption and degradation seam the read commands use. It exists for a
+// caller holding a merged view that must not load a second time — a second load
+// would replay the load advisories and re-read the layers mid-command.
+func ResolveConfig(cfg config.Config, profiles []string, opts Options) (config.Resolved, error) {
+	return resolve(cfg, profiles, opts)
+}
+
 // Chdir changes to dir when non-empty. Wired into PersistentPreRunE and the
 // completion handlers, which bypass it; "" is a no-op.
 func Chdir(dir string) error {
