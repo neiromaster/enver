@@ -43,8 +43,9 @@ brew install enver               # wires shell completions; strips Gatekeeper qu
 
 `brew uninstall enver` keeps your data; `brew uninstall --zap enver` also
 trashes `~/.config/enver` — including the encryption key, which then comes
-back only from `enver keygen` with your passphrase. If `XDG_CONFIG_HOME` is
-set, your data lives there instead and zap leaves it alone.
+back only from `enver keygen` with your passphrase. Your data is spared only
+if `XDG_CONFIG_HOME` is an absolute path other than `~/.config` — then it
+lives there and zap does not follow it.
 
 **Go** (anywhere with a Go toolchain):
 
