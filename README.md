@@ -41,6 +41,11 @@ brew trust neiromaster/tap       # required for third-party taps
 brew install enver               # wires shell completions; strips Gatekeeper quarantine on macOS
 ```
 
+`brew uninstall enver` keeps your data; `brew uninstall --zap enver` also
+trashes `~/.config/enver` — including the encryption key, which then comes
+back only from `enver keygen` with your passphrase. If `XDG_CONFIG_HOME` is
+set, your data lives there instead and zap leaves it alone.
+
 **Go** (anywhere with a Go toolchain):
 
 ```sh
@@ -69,12 +74,38 @@ irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1
 $env:ENVER_VERSION = "v0.9.1"; irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
 ```
 
+On Windows the installer also dot-sources the bundled
+`completions/enver.ps1` from your `$PROFILE`; `ENVER_NO_COMPLETION=1` opts
+out. Under a `Restricted` execution policy completions will not load — the
+installer prints the fix:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
 > **Piping a script to your shell runs it without review — read it first.**
 > The installer verifies the download against the release's SHA-256
 > checksums, then installs to `~/.local/bin` (macOS/Linux) or
 > `%LOCALAPPDATA%\enver\bin` (Windows); `ENVER_INSTALL_DIR` overrides.
-> Uninstall: delete the `enver` binary (plus the PATH entry the Windows
-> script may have added).
+
+Uninstall a script install — macOS/Linux, remove the binary; Windows, let the
+installer undo what it added (binary, completion line, PATH entry):
+
+```sh
+# macOS/Linux
+rm "$(command -v enver)"
+```
+
+```powershell
+# Windows
+$env:ENVER_UNINSTALL = "1"; irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
+# or, on a script you saved first:
+.\install.ps1 -Uninstall
+```
+
+Your user data lives in `~/.config/enver` — `config.yaml`, the encryption
+key, pulled remotes — and survives uninstall; delete it yourself if that is
+what you want.
 
 **Update**:
 
