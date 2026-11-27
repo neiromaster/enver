@@ -102,6 +102,100 @@ function Remove-EnverPathSegment {
   return ($Segments -join ";")
 }
 
+function Invoke-EnverUninstall {
+  param(
+    [string]$InstallDir,
+    [string]$ProfilePath,
+    [string]$UserPath
+  )
+
+  $Removed = $false
+
+  # The exe locks itself while running, so the delete comes first: a locked
+  # binary aborts before anything else has been changed.
+  $Exe = Join-Path $InstallDir "enver.exe"
+  if (Test-Path -Path $Exe) {
+    try {
+      Remove-Item -Path $Exe -Force -ErrorAction Stop
+    } catch {
+      throw "enver: enver.exe is in use - close terminals running enver and rerun"
+    }
+    Write-Host "enver: removed $Exe"
+    $Removed = $true
+  }
+
+  $CompletionScript = Get-EnverCompletionScriptPath -InstallDir $InstallDir
+  $CompletionDir = Split-Path -Parent $CompletionScript
+  if (Test-Path -Path $CompletionScript) {
+    Remove-Item -Path $CompletionScript -Force -ErrorAction Stop
+    Write-Host "enver: removed $CompletionScript"
+    $Removed = $true
+  }
+  if ((Test-Path -Path $CompletionDir) -and -not (Get-ChildItem -Path $CompletionDir -Force)) {
+    Remove-Item -Path $CompletionDir -Force -ErrorAction Stop
+    Write-Host "enver: removed $CompletionDir"
+    $Removed = $true
+  }
+
+  $HasProfileBlock = $false
+  if (Test-Path -Path $ProfilePath) {
+    foreach ($Line in @(Get-Content -Path $ProfilePath)) {
+      if ($Line.Trim() -eq $EnverCompletionMarker) { $HasProfileBlock = $true; break }
+    }
+  }
+  if ($HasProfileBlock) {
+    Remove-EnverCompletion -ProfilePath $ProfilePath
+    Write-Host "enver: removed the enver completion from $ProfilePath"
+    $Removed = $true
+  }
+
+  $CleanedPath = $null
+  if ($UserPath) {
+    $Candidate = Remove-EnverPathSegment -PathValue $UserPath -Segment $InstallDir
+    if ($Candidate -ne $UserPath) {
+      $CleanedPath = $Candidate
+      Write-Host "enver: removed $InstallDir from your user PATH"
+      $Removed = $true
+    }
+  }
+
+  # The install root holds only our bin/ and completions/ trees. Anything else
+  # is foreign: keep the whole tree rather than delete user files.
+  $InstallRoot = Split-Path -Parent $InstallDir
+  if (Test-Path -Path $InstallRoot) {
+    $Foreign = @(Get-ChildItem -Path $InstallRoot -Recurse -Force -File)
+    foreach ($Item in @(Get-ChildItem -Path $InstallRoot -Recurse -Force -Directory)) {
+      if ($Item.FullName -ne $InstallDir -and $Item.FullName -ne $CompletionDir) {
+        $Foreign += $Item
+      }
+    }
+    if ($Foreign.Count -eq 0) {
+      Remove-Item -Path $InstallRoot -Recurse -Force -ErrorAction Stop
+      Write-Host "enver: removed $InstallRoot"
+      $Removed = $true
+    } else {
+      Write-Host "enver: kept $InstallRoot because it holds files enver did not install"
+      $Removed = $true
+    }
+  }
+
+  if ($Removed) {
+    $ConfigDir = $null
+    if ($env:XDG_CONFIG_HOME) {
+      $ConfigDir = Join-Path $env:XDG_CONFIG_HOME "enver"
+    } elseif ($HOME) {
+      $ConfigDir = Join-Path (Join-Path $HOME ".config") "enver"
+    } elseif ($env:USERPROFILE) {
+      $ConfigDir = Join-Path (Join-Path $env:USERPROFILE ".config") "enver"
+    }
+    if ($ConfigDir) {
+      Write-Host "enver: user data at $ConfigDir was kept - remove it with: Remove-Item -Recurse -Force `"$ConfigDir`""
+    }
+  }
+
+  return $CleanedPath
+}
+
 function Invoke-EnverInstall {
   $Repo = "neiromaster/enver"
   $Base = "https://github.com/$Repo/releases/download"
@@ -186,7 +280,13 @@ function Invoke-EnverInstall {
 # running the install flow.
 if ($env:ENVER_SKIP_INSTALL_FLOW -ne "1") {
   if ($Uninstall -or $env:ENVER_UNINSTALL -eq "1") {
-    Invoke-EnverUninstall
+    $UninstallDir = $env:ENVER_INSTALL_DIR
+    if (-not $UninstallDir) { $UninstallDir = Join-Path $env:LOCALAPPDATA "enver\bin" }
+    $UserPathValue = [Environment]::GetEnvironmentVariable("Path", "User")
+    $CleanedPath = Invoke-EnverUninstall -InstallDir $UninstallDir -ProfilePath $PROFILE -UserPath $UserPathValue
+    if ($null -ne $CleanedPath) {
+      [Environment]::SetEnvironmentVariable("Path", $CleanedPath, "User")
+    }
   } else {
     Invoke-EnverInstall
   }
