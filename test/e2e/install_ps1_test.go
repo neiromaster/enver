@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 const (
@@ -18,6 +21,21 @@ const (
 // psQuote renders a value as a PowerShell single-quoted literal.
 func psQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+// utf16Bytes encodes text as UTF-16 in the requested byte order, without a
+// byte order mark.
+func utf16Bytes(text string, bigEndian bool) []byte {
+	units := utf16.Encode([]rune(text))
+	out := make([]byte, len(units)*2)
+	var order binary.ByteOrder = binary.LittleEndian
+	if bigEndian {
+		order = binary.BigEndian
+	}
+	for i, unit := range units {
+		order.PutUint16(out[i*2:], unit)
+	}
+	return out
 }
 
 // runInstallSnippetEnv is runInstallSnippet with extra child environment, so a
@@ -270,6 +288,80 @@ func TestRemoveEnverCompletion(t *testing.T) {
 
 		if got := readFileString(t, sole); strings.TrimSpace(got) != "" {
 			t.Fatalf("profile holding only the block was not emptied:\n%q", got)
+		}
+	})
+}
+
+func TestRemoveEnverCompletionPreservesEncoding(t *testing.T) {
+	utf8BOM := []byte{0xEF, 0xBB, 0xBF}
+	utf16LEBOM := []byte{0xFF, 0xFE}
+	cases := []struct {
+		name   string
+		bom    []byte
+		encode func(string) []byte
+	}{
+		{"utf16le-bom", utf16LEBOM, func(s string) []byte { return utf16Bytes(s, false) }},
+		{"utf8-bom", utf8BOM, func(s string) []byte { return []byte(s) }},
+	}
+	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				completion := filepath.Join(dir, tc.name, "completions", "enver.ps1")
+				ifLine := fmt.Sprintf("if (Test-Path \"%s\") { . \"%s\" }", completion, completion)
+				before := "Set-Alias ll Get-ChildItem # café\r\n"
+				after := "Write-Host 'prêt'\r\n"
+				wired := before + enverCompletionMarker + "\r\n" + ifLine + "\r\n" + after
+				profile := filepath.Join(dir, tc.name, "profile.ps1")
+				if err := os.MkdirAll(filepath.Dir(profile), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(profile, append(append([]byte{}, tc.bom...), tc.encode(wired)...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				runInstallSnippet(t, engine, "Bypass", fmt.Sprintf(
+					"Remove-EnverCompletion -ProfilePath %s\n", psQuote(profile)))
+
+				got, err := os.ReadFile(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := append(append([]byte{}, tc.bom...), tc.encode(before+after)...)
+				if !bytes.Equal(got, want) {
+					t.Fatalf("profile bytes changed beyond the removed block:\n got %x\nwant %x", got, want)
+				}
+			})
+		}
+	})
+}
+
+func TestAddEnverCompletionPreservesEncoding(t *testing.T) {
+	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
+		bom := []byte{0xFF, 0xFE}
+		profile := filepath.Join(dir, "profile.ps1")
+		completion := filepath.Join(dir, "completions", "enver.ps1")
+		existing := "Set-Alias ll Get-ChildItem # café\r\n"
+		if err := os.WriteFile(profile, append(append([]byte{}, bom...), utf16Bytes(existing, false)...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		runInstallSnippet(t, engine, "Bypass", fmt.Sprintf(
+			"Add-EnverCompletion -CompletionScript %s -ProfilePath %s\n",
+			psQuote(completion), psQuote(profile)))
+
+		newline := "\n"
+		if runtime.GOOS == "windows" {
+			newline = "\r\n"
+		}
+		appended := enverCompletionMarker + newline +
+			fmt.Sprintf("if (Test-Path \"%s\") { . \"%s\" }", completion, completion) + newline
+		want := append(append([]byte{}, bom...), utf16Bytes(existing+appended, false)...)
+		got, err := os.ReadFile(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("profile bytes:\n got %x\nwant %x", got, want)
 		}
 	})
 }

@@ -27,6 +27,74 @@ function Get-EnverCompletionScriptPath {
   return Join-Path (Join-Path (Split-Path -Parent $InstallDir) "completions") "enver.ps1"
 }
 
+# Reads a text file with the encoding its byte order mark declares. A file
+# without a BOM is decoded with the engine default, which is what Get-Content
+# would use; the encoding instance is returned so a rewrite cannot silently
+# change the file.
+function Read-EnverTextFile {
+  param([string]$Path)
+
+  $Bytes = [System.IO.File]::ReadAllBytes($Path)
+  $Offset = 0
+  if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) {
+    $Encoding = [System.Text.UTF8Encoding]::new($true)
+    $Offset = 3
+  } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) {
+    $Encoding = [System.Text.UnicodeEncoding]::new($false, $true)
+    $Offset = 2
+  } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) {
+    $Encoding = [System.Text.UnicodeEncoding]::new($true, $true)
+    $Offset = 2
+  } else {
+    $Encoding = [System.Text.Encoding]::Default
+  }
+
+  return @{
+    Text = $Encoding.GetString($Bytes, $Offset, $Bytes.Length - $Offset)
+    Encoding = $Encoding
+    HasBom = ($Offset -gt 0)
+  }
+}
+
+# Replaces a text file while keeping the encoding and BOM that
+# Read-EnverTextFile detected.
+function Write-EnverTextFile {
+  param(
+    [string]$Path,
+    [string]$Text,
+    $Encoding,
+    [bool]$HasBom
+  )
+
+  $Body = $Encoding.GetBytes($Text)
+  if ($HasBom) {
+    $Preamble = $Encoding.GetPreamble()
+    $Bytes = New-Object byte[] ($Preamble.Length + $Body.Length)
+    [Array]::Copy($Preamble, 0, $Bytes, 0, $Preamble.Length)
+    [Array]::Copy($Body, 0, $Bytes, $Preamble.Length, $Body.Length)
+  } else {
+    $Bytes = $Body
+  }
+  [System.IO.File]::WriteAllBytes($Path, $Bytes)
+}
+
+# Appends in the detected encoding without touching the bytes already there.
+function Add-EnverTextFile {
+  param(
+    [string]$Path,
+    [string]$Text,
+    $Encoding
+  )
+
+  $Bytes = $Encoding.GetBytes($Text)
+  $Stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write)
+  try {
+    $Stream.Write($Bytes, 0, $Bytes.Length)
+  } finally {
+    $Stream.Dispose()
+  }
+}
+
 function Add-EnverCompletion {
   param(
     [string]$CompletionScript,
@@ -41,8 +109,8 @@ function Add-EnverCompletion {
     New-Item -ItemType File -Path $ProfilePath -Force | Out-Null
   }
 
-  $Content = Get-Content -Path $ProfilePath -Raw
-  if ($null -eq $Content) { $Content = "" }
+  $File = Read-EnverTextFile -Path $ProfilePath
+  $Content = $File.Text
 
   if ($Content -notmatch [regex]::Escape($EnverCompletionMarker)) {
     # The line is executed by the profile, so the path must survive both the
@@ -55,7 +123,7 @@ function Add-EnverCompletion {
     }
     $Text += $EnverCompletionMarker + $NewLine
     $Text += "if (Test-Path `"$Quoted`") { . `"$Quoted`" }" + $NewLine
-    [System.IO.File]::AppendAllText($ProfilePath, $Text)
+    Add-EnverTextFile -Path $ProfilePath -Text $Text -Encoding $File.Encoding
   }
 
   $Policy = Get-ExecutionPolicy
@@ -69,27 +137,34 @@ function Remove-EnverCompletion {
 
   if (-not (Test-Path -Path $ProfilePath)) { return }
 
-  $Lines = @(Get-Content -Path $ProfilePath)
-  $Kept = @()
+  $File = Read-EnverTextFile -Path $ProfilePath
+
+  # Keep each line terminator alongside its line, so surviving lines are
+  # written back byte for byte instead of in the engine default newline style.
+  $Parts = [regex]::Split($File.Text, "(\r\n|\r|\n)")
+  $Lines = @()
+  $Separators = @()
+  for ($i = 0; $i -lt $Parts.Length; $i++) {
+    if ($i % 2 -eq 0) { $Lines += $Parts[$i] } else { $Separators += $Parts[$i] }
+  }
+
+  $Kept = ""
   $Removed = $false
-  for ($i = 0; $i -lt $Lines.Count; $i++) {
+  for ($i = 0; $i -lt $Lines.Length; $i++) {
     if ($Lines[$i].Trim() -eq $EnverCompletionMarker) {
       $Next = $i + 1
-      if ($Next -lt $Lines.Count -and $Lines[$Next].Trim().StartsWith("if (Test-Path")) {
+      if ($Next -lt $Lines.Length -and $Lines[$Next].Trim().StartsWith("if (Test-Path")) {
         $i = $Next
       }
       $Removed = $true
       continue
     }
     $Kept += $Lines[$i]
+    if ($i -lt $Separators.Length) { $Kept += $Separators[$i] }
   }
 
   if ($Removed) {
-    if ($Kept.Count -eq 0) {
-      Clear-Content -Path $ProfilePath
-    } else {
-      Set-Content -Path $ProfilePath -Value $Kept
-    }
+    Write-EnverTextFile -Path $ProfilePath -Text $Kept -Encoding $File.Encoding -HasBom $File.HasBom
   }
 }
 
