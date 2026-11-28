@@ -79,6 +79,79 @@ func TestProfilesOrDefault(t *testing.T) {
 	}
 }
 
+// TestNoProfilesErrorNamesBothCommands pins the first-run remedy: both ways to
+// get a first profile in are named, so the error is a starting point rather
+// than a dead end.
+func TestNoProfilesErrorNamesBothCommands(t *testing.T) {
+	err := NoProfilesError()
+	for _, want := range []string{"enver add", "enver import <file> <profile>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q misses %q", err.Error(), want)
+		}
+	}
+}
+
+// TestResolveProfilesEmptyConfig pins the empty-config guard: a config with no
+// profiles gets the first-run remedy whether the profile list was empty or
+// named, since neither can resolve anything.
+func TestResolveProfilesEmptyConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("profiles: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+	want := NoProfilesError().Error()
+	for _, profiles := range [][]string{nil, {"dev"}} {
+		_, _, err := ResolveProfiles(opts, profiles)
+		if err == nil {
+			t.Fatalf("ResolveProfiles(%v) on an empty config must error", profiles)
+		}
+		if err.Error() != want {
+			t.Fatalf("ResolveProfiles(%v) err = %q, want the first-run remedy %q", profiles, err.Error(), want)
+		}
+	}
+}
+
+// TestResolveProfilesRecordsOnly pins the boundary the first-run guard draws:
+// a config that declares a record but no profiles is not a first run, so its
+// named miss keeps the pull remedy that would actually supply the profile,
+// and an unnamed request keeps the plain no-profile error.
+func TestResolveProfilesRecordsOnly(t *testing.T) {
+	dir := t.TempDir()
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return dir }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+	prevFlags := config.HintFlags
+	config.HintFlags = ""
+	t.Cleanup(func() { config.HintFlags = prevFlags })
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	body := "remotes:\n  other:\n    url: https://example.com/other.yaml\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+
+	_, _, err := ResolveProfiles(opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "no profile specified and no default set in config") {
+		t.Fatalf("an unnamed request on a records-only config must keep the plain no-profile error, got: %v", err)
+	}
+
+	_, _, err = ResolveProfiles(opts, []string{"other/base"})
+	if err == nil {
+		t.Fatal("ResolveProfiles(other/base) on a records-only config must error")
+	}
+	got := err.Error()
+	for _, want := range []string{`profile "other/base" not found`, `remote "other"`, "enver pull other"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("err %q misses %q", got, want)
+		}
+	}
+	if strings.Contains(got, "no profiles defined yet") {
+		t.Errorf("the first-run remedy must not fire on a records-only config: %q", got)
+	}
+}
+
 func TestRunRequiresCommand(t *testing.T) {
 	// No command after `--` → must error before touching config or exec.
 	cases := []struct {

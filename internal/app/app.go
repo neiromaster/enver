@@ -102,6 +102,15 @@ func loadMerged(opts Options, report bool) (config.Config, error) {
 	return cfg, err
 }
 
+// NoProfilesError is the first-run refusal for a config that declares neither
+// profiles nor remotes: nothing can resolve and nothing has been fetched, so
+// the remedy names both ways to create the first profile. A config with
+// records but no profiles is not this state — its named misses already carry
+// the pull remedy.
+func NoProfilesError() error {
+	return fmt.Errorf("no profiles defined yet; create one with `%s` or `%s`", config.HintCommand("add"), config.HintCommand("import", "<file>", "<profile>"))
+}
+
 // ResolveProfiles is the read-side trio: load the merged config, apply the
 // default to an empty profile list, resolve the composition. Every consuming
 // command shares this sequence. The returned label is the post-default list
@@ -111,6 +120,9 @@ func ResolveProfiles(opts Options, profiles []string) (string, config.Resolved, 
 	cfg, err := Load(opts)
 	if err != nil {
 		return "", config.Resolved{}, err
+	}
+	if len(cfg.Profiles) == 0 && len(cfg.Remotes) == 0 {
+		return "", config.Resolved{}, NoProfilesError()
 	}
 	profiles, err = profilesOrDefault(profiles, cfg.Default)
 	if err != nil {

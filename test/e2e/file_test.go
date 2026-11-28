@@ -131,8 +131,11 @@ func TestFileRelativeToChdir(t *testing.T) {
 func TestFileMissingStaysMissingOnRead(t *testing.T) {
 	s := newSandbox(t)
 	r := s.run("list", "--file", "new.yaml")
-	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "Create one at: new.yaml") {
+	if r.ExitCode != 0 || !strings.Contains(r.Stdout, "(no profiles defined)") {
 		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "enver add --file new.yaml") {
+		t.Fatalf("the hint must reproduce the --file view, stdout: %s", r.Stdout)
 	}
 	if _, err := os.Stat(filepath.Join(s.project, "new.yaml")); !os.IsNotExist(err) {
 		t.Fatal("a read created the file")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -117,6 +118,30 @@ func TestDoListVarsColumnExcludesUnsetFenced(t *testing.T) {
 		if got := strings.TrimRight(line[varsCol:], " "); got != c.want {
 			t.Errorf("profile %q vars cell = %q, want %q (line: %q)", c.profile, got, c.want, line)
 		}
+	}
+}
+
+// TestListEmptyTextHintsCreation pins the empty-config listing: the first line
+// stays, and the remedy names both working commands instead of a path.
+func TestListEmptyTextHintsCreation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withGlobalConfig(t, path)
+
+	var out bytes.Buffer
+	if err := doList(&out); err != nil {
+		t.Fatalf("doList: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"(no profiles defined)", "enver add", "enver import <file> <profile>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output %q misses %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Create one at:") {
+		t.Errorf("output %q still names the write target", got)
 	}
 }
 

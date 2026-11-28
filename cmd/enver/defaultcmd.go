@@ -42,6 +42,9 @@ var defaultCmd = &cobra.Command{
 			return err
 		}
 		if len(args) == 0 {
+			if len(cfg.Profiles) == 0 && len(cfg.Remotes) == 0 {
+				return app.NoProfilesError()
+			}
 			if cfg.Default == "" {
 				return fmt.Errorf("no default profile set; set one with `%s`", config.HintCommand("default", "<profile>"))
 			}

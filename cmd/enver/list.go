@@ -44,7 +44,7 @@ func doList(w io.Writer) error {
 	}
 	names := cfg.ProfileNames()
 	if len(names) == 0 {
-		_, err := fmt.Fprintf(w, "(no profiles defined)\n\nCreate one at: %s\n", writeTarget())
+		_, err := fmt.Fprintf(w, "(no profiles defined)\n\nCreate one with `%s` or `%s`\n", config.HintCommand("add"), config.HintCommand("import", "<file>", "<profile>"))
 		return err
 	}
 	type listRow struct {
