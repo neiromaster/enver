@@ -166,10 +166,10 @@ supplied, while a sibling parent listed alongside contributes fresh values
 regardless of unsets inside the other parent's branch.
 
 Author `unset` in YAML like multi-parent `extends` — a single name or a list,
-never a mapping (the interactive `add`/`edit` menus manage the list too — see
-**Manage unsets** in [`profiles.md`](./profiles.md#editing-profiles)).
-`enver validate` flags an `unset` naming a key the same profile also sets in
-the same layer's env (`contradictory-unset`; a cross-layer pair — say a local
-unset suppressing a global definition — resolves by ordering instead and draws
-no warning). On Windows, where env names are case-insensitive, unset matching
-is case-insensitive too.
+never a mapping (`enver edit` manages the list too — see **Manage unsets** in
+[`profiles.md`](./profiles.md#editing-profiles)). `enver validate` flags an
+`unset` naming a key the same profile also sets in the same layer's env
+(`contradictory-unset`; a cross-layer pair — say a local unset suppressing a
+global definition — resolves by ordering instead and draws no warning). On
+Windows, where env names are case-insensitive, unset matching is
+case-insensitive too.

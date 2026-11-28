@@ -23,11 +23,25 @@ func TestDocsReconciled(t *testing.T) {
 		return string(data)
 	}
 
-	if got := read("config.md"); strings.Contains(got, "menus do not manage the list") {
+	configDoc := read("config.md")
+	if strings.Contains(configDoc, "menus do not manage the list") {
 		t.Errorf("docs/config.md still says the menus do not manage the unset list")
 	}
-	for _, want := range []string{"enver completion", "default file completion"} {
-		if got := read("cli.md"); !strings.Contains(got, want) {
+	for _, want := range []string{
+		"`enver edit` manages the list too",
+		"](./profiles.md#editing-profiles))",
+	} {
+		if !strings.Contains(configDoc, want) {
+			t.Errorf("docs/config.md lacks %q", want)
+		}
+	}
+	cliDoc := read("cli.md")
+	for _, want := range []string{
+		"enver completion <shell>                  Print the completion script for bash, zsh, fish, or powershell",
+		"follow their shell's instructions; Homebrew and",
+		"default file completion",
+	} {
+		if !strings.Contains(cliDoc, want) {
 			t.Errorf("docs/cli.md lacks %q", want)
 		}
 	}
