@@ -33,13 +33,14 @@ func chdirTemp(t *testing.T) string {
 	return dir
 }
 
-// saveGlobalFlags snapshots the package globalFlags and the hint text derived
-// from it, restoring both on cleanup: a test that applies flags would otherwise
-// leave the next one a hint naming a temp directory.
+// saveGlobalFlags snapshots the package globalFlags and clears the hint text
+// derived from it on cleanup: a test that applies flags would otherwise leave
+// the next one a hint naming its temp directory. Clearing rather than restoring
+// keeps a taint from one test out of every test that follows it.
 func saveGlobalFlags(t *testing.T) {
 	t.Helper()
-	saved, savedHint := globalFlags, config.HintFlags
-	t.Cleanup(func() { globalFlags, config.HintFlags = saved, savedHint })
+	saved := globalFlags
+	t.Cleanup(func() { globalFlags, config.HintFlags = saved, "" })
 }
 
 // twoLayers builds distinct global and local files, each with profile "p" (A=g

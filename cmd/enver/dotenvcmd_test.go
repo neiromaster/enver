@@ -24,19 +24,37 @@ func writeTempConfig(t *testing.T, profile string, env map[string]string, commen
 }
 
 // withGlobalConfig sets globalFlags to point at path with local layering off and
-// the write target on the global/config file, restoring previous values on
-// cleanup. Use for tests that set up a single config file as the global config.
+// the write target on the global/config file, restoring previous values and the
+// hint text they derive on cleanup. Use for tests that set up a single config
+// file as the global config.
 func withGlobalConfig(t *testing.T, path string) {
 	t.Helper()
-	savedConfig, savedNoLocal, savedGlobal := globalFlags.configPath, globalFlags.noLocal, globalFlags.global
+	saveGlobalFlags(t)
 	globalFlags.configPath = path
 	globalFlags.noLocal = true
 	globalFlags.global = true
-	t.Cleanup(func() {
-		globalFlags.configPath = savedConfig
-		globalFlags.noLocal = savedNoLocal
-		globalFlags.global = savedGlobal
+}
+
+// TestWithGlobalConfigRestoresTheHint pins the fixture helper against hint
+// taint: runRoot applies --config through PersistentPreRunE, so a helper that
+// restores only the flag fields leaves the next hint naming this test's temp
+// config.
+func TestWithGlobalConfigRestoresTheHint(t *testing.T) {
+	t.Run("applies the flags", func(t *testing.T) {
+		withGlobalConfig(t, composeConfig(t))
+		if out := runRoot(t, "show", "base"); !strings.Contains(out, "ENDPOINT=from-base") {
+			t.Fatalf("show under the fixture: %q", out)
+		}
+		if config.HintFlags == "" {
+			t.Fatal("the fixture set no hint text, so this test proves nothing")
+		}
 	})
+	if config.HintFlags != "" {
+		t.Fatalf("the helper leaked a hint: %q", config.HintFlags)
+	}
+	if got := config.HintCommand("pull", "x"); got != "enver pull x" {
+		t.Fatalf("a later hint still names the previous config: %q", got)
+	}
 }
 
 func TestRunDotenvStdout(t *testing.T) {
