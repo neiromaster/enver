@@ -326,7 +326,7 @@ func composeTree(path, prefix string, contentOf func(path string) ([]byte, bool)
 		if len(chain) == 1 {
 			return nil, nil, nil
 		}
-		return nil, []string{fmt.Sprintf("remote %q: declared by remote %q but no stored content could be loaded, so its profiles are not loaded; run %q to fetch the subtree", path, chain[len(chain)-2], PullCommand(chain[0]))}, nil
+		return nil, []string{fmt.Sprintf("remote %q: declared by remote %q but no stored content could be loaded, so its profiles are not loaded; run `%s` to fetch the subtree", path, chain[len(chain)-2], PullCommand(chain[0]))}, nil
 	}
 	// The wrap names the record, so the parse step labels the content by its role
 	// rather than spelling the record path a second time back-to-back.
@@ -418,7 +418,7 @@ func RemoteLayers(records map[string]RemoteRecord) ([]Layer, []string, error) {
 			if _, statErr := os.Stat(RemoteContentPath(path)); statErr != nil {
 				return nil, false
 			}
-			warnings = append(warnings, fmt.Sprintf("remote %q: stored content cannot be read (%v), so none of its profiles are loaded; fix its permissions or run %q to re-fetch it", path, err, PullCommand(path)))
+			warnings = append(warnings, fmt.Sprintf("remote %q: stored content cannot be read (%v), so none of its profiles are loaded; fix its permissions or run `%s` to re-fetch it", path, err, PullCommand(path)))
 			return nil, false
 		}
 		return data, true
@@ -746,7 +746,7 @@ func divergenceWarnings(path string, rec RemoteRecord, pullTarget string) []stri
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return []string{fmt.Sprintf("remote %q: stored content cannot be inspected (%v); run %q to re-fetch it", path, err, PullCommand(pullTarget))}
+		return []string{fmt.Sprintf("remote %q: stored content cannot be inspected (%v); run `%s` to re-fetch it", path, err, PullCommand(pullTarget))}
 	}
 	out := stateDivergenceWarning(path, rec, pullTarget)
 	data, err := os.ReadFile(RemoteContentPath(path))
@@ -770,11 +770,11 @@ func divergenceWarnings(path string, rec RemoteRecord, pullTarget string) []stri
 func stateDivergenceWarning(path string, rec RemoteRecord, pullTarget string) []string {
 	url, ref, err := source.ResolveRecord(rec.URL, rec.Ref)
 	if err != nil {
-		return []string{fmt.Sprintf("remote %q: the record's source is unusable (%v); the stored content cannot be verified, so run %q once the record is fixed", path, err, PullCommand(pullTarget))}
+		return []string{fmt.Sprintf("remote %q: the record's source is unusable (%v); the stored content cannot be verified, so run `%s` once the record is fixed", path, err, PullCommand(pullTarget))}
 	}
 	st, ok := ReadRemoteState(path)
 	if !ok {
-		return []string{fmt.Sprintf("remote %q: content has no pull state to compare, and the record points at %s; run %q to re-fetch it", path, sourceLabel(url, ref), PullCommand(pullTarget))}
+		return []string{fmt.Sprintf("remote %q: content has no pull state to compare, and the record points at %s; run `%s` to re-fetch it", path, sourceLabel(url, ref), PullCommand(pullTarget))}
 	}
 	if url == st.URL && ref == st.Ref {
 		return nil
@@ -783,7 +783,7 @@ func stateDivergenceWarning(path string, rec RemoteRecord, pullTarget string) []
 	if source.Unpinned(ref) && st.Commit != "" {
 		warning += fmt.Sprintf("; the record pins no ref, so that source can serve different content at any time and the stored content is commit %s", st.Commit)
 	}
-	return []string{warning + fmt.Sprintf("; run %q to re-sync", PullCommand(pullTarget))}
+	return []string{warning + fmt.Sprintf("; run `%s` to re-sync", PullCommand(pullTarget))}
 }
 
 // sourceLabel names a resolved source in a warning: the URL alone when the
