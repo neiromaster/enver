@@ -94,6 +94,22 @@ func parentEnvFor(cfg config.Config, self string, extends config.Extends) (map[s
 	return backdrop, marked, warns
 }
 
+// degradedValuePrefix opens the note that stands in for a value the resolver
+// could not read. The note is display syntax, not a value: anything carrying a
+// row into an editor asks isDegradedValue first, so confirming that card can
+// never write the note into a file.
+const degradedValuePrefix = "(cannot decrypt: "
+
+// degradedValue renders the note for an unreadable value.
+func degradedValue(reason string) string {
+	return degradedValuePrefix + reason + ")"
+}
+
+// isDegradedValue reports whether v is a degraded note rather than a value.
+func isDegradedValue(v string) bool {
+	return strings.HasPrefix(v, degradedValuePrefix) && strings.HasSuffix(v, ")")
+}
+
 // remoteBackdrop resolves the remote-provided name as the inherited base for a
 // patch bootstrap. The saved copy lands as the top user layer, so the backdrop is
 // the merged view of the name — remote profile under any user copies of its
@@ -121,7 +137,7 @@ func remoteBackdrop(merged config.Config, name string) (map[string]string, map[s
 	var warns []string
 	for _, k := range slices.Sorted(maps.Keys(r.Undecryptable)) {
 		reason := r.Undecryptable[k]
-		env[k] = "(cannot decrypt: " + reason + ")"
+		env[k] = degradedValue(reason)
 		delete(marked, k)
 		warns = append(warns, fmt.Sprintf("note: %s cannot be decrypted from the remote (%s); its value stays hidden unless you override it", k, reason))
 	}

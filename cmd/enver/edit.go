@@ -124,8 +124,10 @@ const cannotDecryptNote = "cannot decrypt: no key"
 // holds decides, not the sealed flag: a resolved crypter already made an own
 // sealed value readable, and a typed replacement of an inherited sealed row is
 // sealed only when written, so only ciphertext with no key to open it blocks.
+// A degraded note blocks too: it is display text standing in for a value nobody
+// can read, and no key makes the note itself worth submitting.
 func editCardBlocked(e ui.EnvEntry, crypter *valueCrypter) bool {
-	return crypto.IsEncrypted(e.Value) && crypter == nil
+	return isDegradedValue(e.Value) || (crypto.IsEncrypted(e.Value) && crypter == nil)
 }
 
 // find returns the working copy's entry for key, matched by envname.Equal: on
@@ -318,14 +320,18 @@ func overrideKeySet(cfg config.Config, s editState) map[string]bool {
 // inherited variable: the inherited value (drawn from the menu's inherited set)
 // plus its resolved comment, so the user sees what they are deviating from, and
 // its secret mark and sealed flag, so deviating neither silently declassifies the
-// variable nor writes its replacement in the clear.
+// variable nor writes its replacement in the clear. A degraded row seeds neither
+// value nor flags — its note is not a value, and no mark belongs on one — so no
+// caller can carry the note into the working copy.
 func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key string) ui.EnvEntry {
 	seed := ui.EnvEntry{Key: key}
 	for _, e := range inherited {
 		if e.Key == key {
-			seed.Value = e.Value
-			seed.Secret = e.Secret
-			seed.Encrypted = e.Encrypted
+			if !isDegradedValue(e.Value) {
+				seed.Value = e.Value
+				seed.Secret = e.Secret
+				seed.Encrypted = e.Encrypted
+			}
 			break
 		}
 	}
@@ -333,6 +339,17 @@ func overrideSeed(inherited []ui.EnvEntry, comments map[string]string, key strin
 		seed.Comment = c
 	}
 	return seed
+}
+
+// degradedInherited reports whether the inherited row for key carries a note in
+// place of a value.
+func degradedInherited(inherited []ui.EnvEntry, key string) bool {
+	for _, e := range inherited {
+		if e.Key == key {
+			return isDegradedValue(e.Value)
+		}
+	}
+	return false
 }
 
 // addEntry commits one collected Add entry into the working copy, carrying the
@@ -633,6 +650,8 @@ func secretsChecked(s editState) []string {
 // take the picked mark set in place — routing them through addEntry would let the
 // carried mark restore exactly the mark being cleared. A picked inherited key
 // becomes an own marked entry seeded with the value and comment the picker showed.
+// A degraded inherited row is skipped: its note is display text, so staging it
+// would write the note into the file as the value.
 // The Encrypt-now row only schedules the post-commit step: nothing is written here.
 func applySecretsPick(s *editState, picked []string, inherited []ui.EnvEntry, comments map[string]string) {
 	on := make(map[string]bool, len(picked))
@@ -644,7 +663,7 @@ func applySecretsPick(s *editState, picked []string, inherited []ui.EnvEntry, co
 		s.entries[i].Secret = on[s.entries[i].Key]
 	}
 	for _, e := range inherited {
-		if !on[e.Key] || s.definesKey(e.Key) {
+		if !on[e.Key] || s.definesKey(e.Key) || isDegradedValue(e.Value) {
 			continue
 		}
 		seed := overrideSeed(inherited, comments, e.Key)
@@ -965,6 +984,12 @@ func doEdit(cmd *cobra.Command, args []string) error {
 			settleDefineFence(&s, edited.Key)
 			s.upsert(edited)
 		case "inherited":
+			// The seed of a degraded row holds no value, so editCardBlocked has
+			// nothing to see; the row itself is what says the card must stay shut.
+			if degradedInherited(inherited, key) {
+				fmt.Println("  " + cannotDecryptNote)
+				continue
+			}
 			edited, err := ui.EnvCard(overrideSeed(inherited, resolvedComments(cfg, s), key))
 			if err != nil {
 				continue
