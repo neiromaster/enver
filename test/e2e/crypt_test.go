@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -471,5 +472,61 @@ func TestAddRefusesToClobberSealedValueWithoutKey(t *testing.T) {
 	}
 	if strings.Contains(after, "typed") {
 		t.Fatalf("the typed value reached the file:\n%s", after)
+	}
+}
+
+// TestEncryptHelpNamesURLCredentials pins the rendered help of the command and
+// its --all flag: URL-embedded credentials are candidates too, so neither
+// description may claim ~marked values are the whole set.
+func TestEncryptHelpNamesURLCredentials(t *testing.T) {
+	s := newSandbox(t)
+	r := s.run("encrypt", "--help")
+	if r.ExitCode != 0 {
+		t.Fatalf("encrypt --help: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	for _, want := range []string{"secret candidates", "not just secret candidates"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Fatalf("encrypt --help must mention %q, got: %q", want, r.Stdout)
+		}
+	}
+}
+
+// TestExampleConfigNamesURLCredentials pins the skeleton how-to: the encrypt
+// line of config.example.yaml must name URL credentials, not only the mark.
+func TestExampleConfigNamesURLCredentials(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("read config.example.yaml: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 7 {
+		t.Fatalf("config.example.yaml has %d lines, want at least 7", len(lines))
+	}
+	if !strings.Contains(lines[6], "URL credentials") {
+		t.Fatalf("config.example.yaml line 7 must name URL credentials, got: %q", lines[6])
+	}
+}
+
+// TestNoStaleOnlyMarkedWording guards the help and doc copy against the
+// pre-v0.14 claim that the mark is the only selector: neither stale phrase may
+// reappear in these files. Lowercase restatements of the current behavior and
+// show's own "~ marked, not encrypted" annotation are not stale.
+func TestNoStaleOnlyMarkedWording(t *testing.T) {
+	files := []string{
+		filepath.Join(repoRoot(), "cmd", "enver", "cryptcmd.go"),
+		filepath.Join(repoRoot(), "config.example.yaml"),
+		filepath.Join(repoRoot(), "docs", "secrets.md"),
+		filepath.Join(repoRoot(), "docs", "cli.md"),
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, stale := range []string{"only ~", "Encrypt ~marked values"} {
+			if strings.Contains(string(data), stale) {
+				t.Errorf("%s still says %q", filepath.Base(file), stale)
+			}
+		}
 	}
 }

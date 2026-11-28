@@ -22,7 +22,7 @@ enver default [profile] [--clear]         Set, show, or clear the default profil
 enver validate [files...] [--strict]      Check config health, or named files by their own rules
 enver pull [<source>|<name>] [--as name]  Fetch a remote config (--local, --no-prefix, --rm, --list, --force)
 enver keygen [--random] [--force]         Passphrase-derived key; --random for a random key (CI)
-enver encrypt [profile] [--all]           Encrypt ~marked values (--all: every value)
+enver encrypt [profile] [--all]           Encrypt secret candidates (--all: every value)
 enver decrypt [profile]                   Decrypt values back to plaintext
 enver update [--check]                    Update the enver binary; --check reports (0/1/2 exit codes)
 ```
