@@ -68,6 +68,21 @@ func (s *sandbox) plantPatchFile(t *testing.T) {
 	s.writeFile(filepath.Join(store, "r.meta"), "url: https://example.com/team.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
 }
 
+// plantBootstrapFile writes the --file fixture the mode-blind and refusal pins
+// drive: a file declaring record llm, publish-marked when asked, and the content
+// a pull leaves for it in the store beside the file.
+func (s *sandbox) plantBootstrapFile(t *testing.T, publish bool) {
+	t.Helper()
+	body := "remotes:\n  llm:\n    url: " + patchRemoteURL + "\n"
+	if publish {
+		body = "publish: true\n" + body
+	}
+	s.writeFile(filepath.Join(s.project, "team.yaml"), body)
+	store := filepath.Join(s.project, ".enver", "team.yaml")
+	s.writeFile(filepath.Join(store, "llm.yaml"), patchStore)
+	s.writeFile(filepath.Join(store, "llm.meta"), "url: "+patchRemoteURL+"\npulled-at: 2026-11-15T10:00:00Z\n")
+}
+
 // hasPrefixToken reports whether any candidate lies under the namespace a
 // record prefixes its content with.
 func hasPrefixToken(tokens []string, prefix string) bool {
@@ -571,11 +586,95 @@ func TestMutatorCompletionStaysTargetScoped(t *testing.T) {
 		}
 	}
 
-	tokens := completionTokens(s.run("__complete", "edit", "").Stdout)
+	edit := s.run("__complete", "edit", "")
+	if edit.ExitCode != 0 {
+		t.Fatalf("edit: exit = %d, stderr: %s", edit.ExitCode, edit.Stderr)
+	}
+	tokens := completionTokens(edit.Stdout)
 	if slices.Contains(tokens, "g") {
 		t.Errorf("edit completion = %q, must not offer the global-owned %q: a local-target edit would refuse it", tokens, "g")
 	}
 	if hasPrefixToken(tokens, "ghost/") {
 		t.Errorf("edit completion = %q, an unpulled record must contribute no name", tokens)
+	}
+}
+
+// TestPatchBootstrapIsModeBlind pins that the publish mark never reaches the
+// writer: a publish-marked --file target offers a remote-projected name to add
+// and accepts the bootstrap write exactly as an unmarked target does, and the
+// file that leaves behind is what validate --strict refuses. The mark says how a
+// file is judged, not what a mutator may write, so validate — not the writer —
+// is the seam that reports the non-bare name the write produced.
+func TestPatchBootstrapIsModeBlind(t *testing.T) {
+	s := newSandbox(t)
+	s.plantBootstrapFile(t, true)
+
+	r := s.run("__complete", "add", "--file", "team.yaml", "")
+	if r.ExitCode != 0 {
+		t.Fatalf("completion: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if tokens := completionTokens(r.Stdout); !slices.Contains(tokens, "llm/ollama") {
+		t.Fatalf("add --file completion = %q, want the published name on offer", tokens)
+	}
+
+	a := startTUI(t, s, "add", "--file", "team.yaml", "llm/ollama")
+	a.wait("Extends")
+	a.keys("\r") // confirm the empty extends pick
+	a.wait("Variables (0 own · 2 inherited)")
+	a.enter("MODEL", "llama3")
+	a.wait("Variables (1 own · 1 inherited)")
+	a.keys("\r") // blank name finishes the collection
+	a.wait(`Set "llm/ollama" as the default profile?`)
+	a.keys("n")
+	a.keys("\r")
+	a.wait("wrote profile")
+	a.finish()
+
+	cfg := s.readFile(filepath.Join(s.project, "team.yaml"))
+	if !strings.Contains(cfg, "publish: true") {
+		t.Fatalf("the mark must survive the write it did not gate:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "llm/ollama") || !strings.Contains(cfg, "MODEL: llama3") || strings.Contains(cfg, "TEMP") {
+		t.Fatalf("the bootstrap must write a minimal patch over the published name:\n%s", cfg)
+	}
+
+	v := s.run("validate", "--strict", "team.yaml")
+	if v.ExitCode != 1 {
+		t.Fatalf("validate: exit = %d, stdout: %s, stderr: %s", v.ExitCode, v.Stdout, v.Stderr)
+	}
+	if !strings.Contains(v.Stdout, `team.yaml: error: profile "llm/ollama" is not a bare upstream profile name`) {
+		t.Fatalf("validate must name the non-bare profile the blind write produced:\n%s", v.Stdout)
+	}
+}
+
+// TestOtherMutatorsRefuseRemoteOnlyNames pins the refusals the bootstrap leaves
+// unchanged: every mutator that cannot write the patch copy still exits non-zero
+// on a remote-only name with the one message, the --file spelling of the hint
+// included, and none of them touches the target file.
+func TestOtherMutatorsRefuseRemoteOnlyNames(t *testing.T) {
+	s := newSandbox(t)
+	s.plantBootstrapFile(t, false)
+	const want = "enver: profile \"llm/ollama\" comes from remote \"llm\" and has no copy here; add a patch copy first (`enver add --file team.yaml llm/ollama`)\n"
+	for _, c := range []struct {
+		verb string
+		args []string
+	}{
+		{"remove", []string{"remove", "--yes", "--file", "team.yaml", "llm/ollama"}},
+		{"rename", []string{"rename", "--file", "team.yaml", "llm/ollama", "mine"}},
+		{"duplicate", []string{"duplicate", "--file", "team.yaml", "llm/ollama", "mine"}},
+		{"default", []string{"default", "--file", "team.yaml", "llm/ollama"}},
+		{"encrypt", []string{"encrypt", "--file", "team.yaml", "llm/ollama"}},
+		{"decrypt", []string{"decrypt", "--file", "team.yaml", "llm/ollama"}},
+	} {
+		r := s.run(c.args...)
+		if r.ExitCode != 1 {
+			t.Fatalf("%s: exit = %d, stderr: %s", c.verb, r.ExitCode, r.Stderr)
+		}
+		if r.Stderr != want {
+			t.Fatalf("%s: stderr = %q, want %q", c.verb, r.Stderr, want)
+		}
+	}
+	if cfg := s.readFile(filepath.Join(s.project, "team.yaml")); strings.Contains(cfg, "profiles:") {
+		t.Fatalf("a refused mutator must not write the target:\n%s", cfg)
 	}
 }

@@ -89,7 +89,10 @@ is silent by design. (A declared child with no stored content is the exception
   [Nested remotes](#nested-remotes)). Composition across the boundary is yours
   to write: a local profile may extend a projected name, and a local profile
   with the same name as a projected one patches it per key — your keys win,
-  the remote's other keys survive.
+  the remote's other keys survive. The patch does not have to start blank:
+  `add` and `edit` on a name only the remote provides open on the remote's
+  keys, shown as inherited rows, instead of refusing, and save only the entries
+  you made.
 - `unset` entries are env keys, not profile names — never rewritten.
 - Secret marks (`~KEY`) ride through untouched, so a patch you write over a
   marked remote value stays masked and remains an encrypt candidate.
@@ -250,12 +253,13 @@ profiles:
       ~OLLAMA_API_KEY: sk-live
 ```
 
-`enver add llm/ollama` is the bootstrap for this: on a name only remote content
-provides it writes the patch into the write target instead of refusing, and its
-summary says which remote it patches. The other mutators — `edit`, `remove`,
-`rename`, `default`, `encrypt`, `decrypt` — point at that same `add` on a
-remote-only name, since remote content is a read-only base, and removing remote
-content is `enver pull --rm`, never `remove`. See
+`enver add llm/ollama` and `enver edit llm/ollama` are the bootstrap for this: on
+a name only remote content provides both open on the remote's keys and write the
+patch into the write target instead of refusing, and the closing report says
+which remote it patches. The other mutators — `remove`, `rename`, `duplicate`,
+`default`, `encrypt`, `decrypt` — point at that same patch copy on a remote-only
+name, since remote content is a read-only base, and removing remote content is
+`enver pull --rm`, never `remove`. See
 [`profiles.md`](./profiles.md#remote-projected-profiles) for the management
 side.
 
