@@ -529,6 +529,23 @@ func TestOverrideSeedCarriesSealedFlag(t *testing.T) {
 	}
 }
 
+// TestOverrideSeedDropsDegradedValue pins the seed as the last line of defense:
+// a degraded row's note is display text, so seeding the card with it would let a
+// confirm write the note into the file as the value. Only the key and its comment
+// survive.
+func TestOverrideSeedDropsDegradedValue(t *testing.T) {
+	degraded := ui.EnvEntry{Key: "K", Value: degradedValue("no key"), Secret: true, Encrypted: true}
+	seed := overrideSeed([]ui.EnvEntry{degraded}, nil, "K")
+	if seed.Key != "K" || seed.Value != "" || seed.Secret || seed.Encrypted {
+		t.Fatalf("seed = %+v, want only the key from a degraded row", seed)
+	}
+
+	withComment := overrideSeed([]ui.EnvEntry{degraded}, map[string]string{"K": "why"}, "K")
+	if withComment.Value != "" || withComment.Secret || withComment.Encrypted || withComment.Comment != "why" {
+		t.Fatalf("seed = %+v, want the comment kept beside an empty value", withComment)
+	}
+}
+
 func TestDeleteVarOptionsMarksFences(t *testing.T) {
 	s := plainState(t, "p",
 		config.Profile{Env: map[string]string{"FKEY": "v", "OWN": "x"}, Unset: config.Unsets{"FKEY"}},
@@ -1433,6 +1450,32 @@ func TestSecretsMenuListsInheritedKeys(t *testing.T) {
 	}
 }
 
+// TestApplySecretsPickSkipsDegradedRow pins the Secrets menu against the note:
+// a picked inherited row whose value is a degraded note must stage nothing, while
+// a healthy sibling in the same selection still materializes. Staging the note
+// would write display text into the file as the variable's value.
+func TestApplySecretsPickSkipsDegradedRow(t *testing.T) {
+	s := plainState(t, "p", config.Profile{Env: map[string]string{"OWN": "x"}}, nil, false)
+	inherited := []ui.EnvEntry{
+		{Key: "REMOTE_SECRET", Value: degradedValue("wrong key (remote)"), Secret: true},
+		{Key: "GH_TOKEN", Value: "from-base", Secret: true},
+	}
+	applySecretsPick(&s, []string{"REMOTE_SECRET", "GH_TOKEN"}, inherited, nil)
+
+	if _, ok := s.find("REMOTE_SECRET"); ok {
+		t.Fatalf("a degraded inherited row must not become an own entry: %+v", s.entries)
+	}
+	for _, e := range s.entries {
+		if isDegradedValue(e.Value) {
+			t.Fatalf("the note was staged as a value: %+v", s.entries)
+		}
+	}
+	entry, ok := s.find("GH_TOKEN")
+	if !ok || !entry.Secret || entry.Value != "from-base" {
+		t.Fatalf("a healthy inherited pick must still stage: %+v", s.entries)
+	}
+}
+
 // TestSecretsEncryptRunsAfterCommit pins the order of the two writes: the Done
 // commit lands the mark in the file, and the encrypt step that follows finds the
 // marked plaintext there and seals it under the file's own key.
@@ -1854,6 +1897,19 @@ func TestEditCardBlockedWithoutCrypter(t *testing.T) {
 	}
 	if editCardBlocked(ui.EnvEntry{Key: "K", Value: "typed", Encrypted: true}, nil) {
 		t.Fatal("a typed replacement of a sealed row is readable now; its flag only seals it on write")
+	}
+}
+
+// TestEditCardBlockedDegradedValue pins the other reason a card stays shut: the
+// row holds a note, not a value, so a resolved crypter opens nothing — submitting
+// the note as text would replace the secret with it.
+func TestEditCardBlockedDegradedValue(t *testing.T) {
+	degraded := ui.EnvEntry{Key: "K", Value: degradedValue("wrong key (remote)")}
+	if !editCardBlocked(degraded, testCrypter()) {
+		t.Fatal("a degraded note must keep the card shut even with a resolved crypter")
+	}
+	if !editCardBlocked(degraded, nil) {
+		t.Fatal("a degraded note must keep the card shut without a crypter too")
 	}
 }
 

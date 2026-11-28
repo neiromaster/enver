@@ -522,6 +522,56 @@ func TestEditPatchBootstrapDegradesUndecryptable(t *testing.T) {
 	}
 }
 
+// TestEditDegradedRowDoesNotWriteNote pins the persistence half of the display
+// seam: selecting the degraded inherited row keeps its card shut and reports why,
+// so the note the menu shows can never be confirmed into the local copy as the
+// variable's value. The save still writes the other key, and show keeps degrading
+// the remote secret.
+func TestEditDegradedRowDoesNotWriteNote(t *testing.T) {
+	s := patchSandbox(t)
+	cipher := plantForeignCiphertext(t, s)
+	s.plantPatchStore(t, "profiles:\n  ollama:\n    env:\n      MODEL: glm\n      ~SECRET: "+cipher+"\n")
+
+	e := startEdit(t, s, "llm/ollama")
+	e.wait("Edit profile: llm/ollama")
+
+	e.keys("\r") // open MODEL's inherited row
+	e.wait("blank name finishes")
+	e.replaceValue("llama3")
+	e.wait("MODEL = llama3")
+
+	e.keys("j") // the degraded inherited row
+	e.keys("\r")
+	e.wait("cannot decrypt: no key")
+
+	e.keys("G") // jump to the last row (Done)
+	e.keys("\r")
+	e.wait("patches remote")
+	e.finish()
+
+	cfg := s.readLocal()
+	if strings.Contains(cfg, "(cannot decrypt") {
+		t.Fatalf("the degraded note must not be written as a value:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "SECRET") {
+		t.Fatalf("the degraded row must not be staged as an own key:\n%s", cfg)
+	}
+	if !strings.Contains(cfg, "MODEL: llama3") {
+		t.Fatalf("the override of the other key must still save:\n%s", cfg)
+	}
+
+	r := s.run("show", "llm/ollama")
+	if r.ExitCode != 0 {
+		t.Fatalf("show: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "SECRET=(cannot decrypt: wrong key (remote))") {
+		t.Fatalf("show must still degrade the remote secret:\n%s", r.Stdout)
+	}
+	if !strings.Contains(r.Stdout, "MODEL=llama3") {
+		t.Fatalf("the saved override must win from the local layer:\n%s", r.Stdout)
+	}
+}
+
 // TestEditAddCompletionOffersRemoteNames pins discoverability: the two commands
 // that bootstrap a patch copy offer the names remote content projects, beside
 // the target's own names, and under --file they offer the file's own projection
