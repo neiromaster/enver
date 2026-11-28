@@ -770,3 +770,84 @@ func TestAddRefusesCrossLayerShadow(t *testing.T) {
 		t.Fatalf("a name no layer declares must be writable: %v", err)
 	}
 }
+
+// remoteLocalOnlyFixture lands a pulled remote's content and declares its record
+// in the local .enver.yaml alone, which is what a -g write cannot see: the
+// merged view the guard is answered against still carries the record, the
+// global file the patch would land in does not.
+func remoteLocalOnlyFixture(t *testing.T) (globalPath string, merged config.Config) {
+	t.Helper()
+	dir := chdirTemp(t)
+	saveGlobalFlags(t)
+	prevDir := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prevDir })
+
+	if err := config.WriteRemoteContent("llm", []byte("profiles:\n  ollama:\n    env:\n      MODEL: llama\n")); err != nil {
+		t.Fatalf("write remote content: %v", err)
+	}
+	if err := config.WriteRemoteState("llm", config.RemoteState{URL: "https://example.com/enver.yaml", PulledAt: time.Now()}); err != nil {
+		t.Fatalf("write remote state: %v", err)
+	}
+	record := "remotes:\n  llm:\n    url: https://example.com/enver.yaml\n"
+	if err := os.WriteFile(config.LocalPath(), []byte(record), 0o600); err != nil {
+		t.Fatalf("write local config: %v", err)
+	}
+	globalPath = filepath.Join(dir, "global.yaml")
+	globalFlags.configPath = globalPath
+	globalFlags.global = true
+	globalFlags.noLocal = false
+	merged, err := app.Load(appOpts())
+	if err != nil {
+		t.Fatalf("load merged: %v", err)
+	}
+	return globalPath, merged
+}
+
+// TestAddPlacementRefusesGlobalInvisibleRecord pins the -g guard: a global patch
+// may only be bootstrapped over a record the global file itself declares. When
+// only the local file declares it, the same profile resolves through a record the
+// global file does not have, so the global patch would mean something different
+// outside this directory — the refusal says so and points at dropping -g. A
+// global file declaring the same record keeps the bootstrap working.
+func TestAddPlacementRefusesGlobalInvisibleRecord(t *testing.T) {
+	globalPath, merged := remoteLocalOnlyFixture(t)
+	const name = "llm/ollama"
+	if _, ok := merged.Profiles[name]; !ok {
+		t.Fatalf("fixture premise: %q must resolve through the local record's projection (%v)", name, merged.ProfileNames())
+	}
+	targetCfg, err := config.LoadFile(globalPath)
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	if _, ok := targetCfg.Remotes["llm"]; ok {
+		t.Fatal("fixture premise: the global target must not declare the record")
+	}
+
+	_, err = addPlacement(merged, targetCfg, globalPath, name)
+	const want = `profile "llm/ollama" comes from remote "llm" not declared by the global config; a global patch would resolve differently outside this directory — re-run without -g`
+	if err == nil || err.Error() != want {
+		t.Fatalf("a global patch over a locally declared record must be refused with %q, got %v", want, err)
+	}
+
+	// The same record in the global file makes the patch mean what it means here,
+	// so the bootstrap proceeds.
+	if err := os.WriteFile(globalPath, []byte("remotes:\n  llm:\n    url: https://example.com/enver.yaml\n"), 0o600); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	merged, err = app.Load(appOpts())
+	if err != nil {
+		t.Fatalf("load merged after declaring the record globally: %v", err)
+	}
+	targetCfg, err = config.LoadFile(globalPath)
+	if err != nil {
+		t.Fatalf("load target after declaring the record globally: %v", err)
+	}
+	patchRemote, err := addPlacement(merged, targetCfg, globalPath, name)
+	if err != nil {
+		t.Fatalf("a record the global file declares keeps the -g bootstrap working: %v", err)
+	}
+	if patchRemote != "llm" {
+		t.Fatalf("patchRemote = %q, want llm", patchRemote)
+	}
+}

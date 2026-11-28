@@ -205,6 +205,15 @@ func (a *tuiSession) finish() string {
 	return a.screen.String()
 }
 
+// exit waits for a session expected to end on a refusal rather than a clean
+// finish, draining the screen so the caller can assert on what it left.
+func (a *tuiSession) exit() error {
+	err := a.cmd.Wait()
+	_ = a.tty.Close()
+	<-a.done
+	return err
+}
+
 var ansiSeqRe = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
 
 // plainScreen drops the SGR and cursor sequences so row assertions can span the
@@ -762,4 +771,36 @@ func TestRemoteOnlyRefusalNamesTopLevelRecord(t *testing.T) {
 	if strings.Contains(r.Stderr, "--rm team/llm") {
 		t.Fatalf("pull --rm refuses a nested record, so the hint must not name one:\n%s", r.Stderr)
 	}
+}
+
+// TestEditPatchBootstrapRefusesGlobalInvisibleRecord pins the -g guard: the
+// global patch copy is read against the global file everywhere else, so the
+// bootstrap may only open over a record that file declares itself. A record only
+// the local file declares is refused before the menu opens, leaving both files
+// untouched, while a global file declaring the same record opens the bootstrap
+// exactly as a local write does.
+func TestEditPatchBootstrapRefusesGlobalInvisibleRecord(t *testing.T) {
+	s := patchSandbox(t)
+	e := startTUI(t, s, "edit", "--global", "llm/ollama")
+	waitForScreen(t, e.screen, "not declared by the global config")
+	if err := e.exit(); err == nil {
+		t.Fatalf("a global patch over a locally declared record must exit non-zero:\n%s", plainScreen(e.screen.String()))
+	}
+	screen := plainScreen(e.screen.String())
+	if !strings.Contains(screen, `profile "llm/ollama" comes from remote "llm" not declared by the global config`) {
+		t.Fatalf("the refusal must say the record is not the global config's:\n%s", screen)
+	}
+	if !strings.Contains(screen, "re-run without -g") {
+		t.Fatalf("the refusal must point at dropping -g:\n%s", screen)
+	}
+	if cfg := s.readLocal(); strings.Contains(cfg, "llm/ollama") {
+		t.Fatalf("a refused bootstrap must write nothing:\n%s", cfg)
+	}
+
+	ok := patchSandbox(t)
+	ok.writeGlobal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\n")
+	o := startTUI(t, ok, "edit", "--global", "llm/ollama")
+	o.wait("saving writes a patch copy here")
+	o.keys("\x03") // ctrl+c: cancel the session without writing
+	o.finish()
 }

@@ -31,6 +31,27 @@ type RemoteRecord struct {
 	NoPrefix bool `yaml:"no_prefix,omitempty"`
 }
 
+// RemoteRecordVisible reports whether the write target declares the record the
+// merged view resolves a remote-projected name through. The comparison is on the
+// top-level segment of the record path: that segment is the declaration a user
+// file carries, while a nested path names a record inside the pulled content. A
+// name no remote provides raises no question here and reports true. The whole
+// record is compared, so a target pointing the same name at another source or ref
+// does not count as declaring it.
+func RemoteRecordVisible(merged, target Config, name string) bool {
+	record, ok := RemoteName(merged.ProfileLayer[name])
+	if !ok {
+		return true
+	}
+	top, _, _ := strings.Cut(record, "/")
+	effective, ok := merged.Remotes[top]
+	if !ok {
+		return false
+	}
+	declared, ok := target.Remotes[top]
+	return ok && declared == effective
+}
+
 // recordNameRe matches a single-level record name: the name becomes a profile
 // prefix and a file name under the remotes directory, so a slash would escape
 // the prefix namespace the pull writes into.

@@ -820,6 +820,9 @@ func doEdit(cmd *cobra.Command, args []string) error {
 		if !isRemote {
 			return notFoundInTarget(name, path, "edit")
 		}
+		if globalFlags.global && !config.RemoteRecordVisible(cfg, targetCfg, name) {
+			return patchRecordRefusal(name, remote)
+		}
 		patchRemote = remote
 	}
 	wasDefault := isDefault
