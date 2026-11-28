@@ -135,8 +135,9 @@ func FileStoreDir(file string) string {
 }
 
 // HintFlags holds the flag text every command-line hint carries after
-// `enver <verb>`: `--file <path>` under `--file`, empty otherwise. The CLI sets
-// it once per process, so a hint suggests the same view the user is in.
+// `enver <verb>`: whichever of the --chdir, --config and --file flags is set,
+// and empty when none is. The CLI sets it once per process, so a hint suggests
+// the same view the user is in.
 var HintFlags string
 
 // HintCommand renders the command line a hint shows: the flag text right after
