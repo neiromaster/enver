@@ -92,14 +92,15 @@ func TestConfigHomeRungPlatformHome(t *testing.T) {
 }
 
 // TestConfigHomeRungFallbackHint pins the bottom rung: with every home
-// variable dropped, os.UserHomeDir errors and xdg falls back to "/". No
-// writes anywhere — machine paths are off limits, nothing is written. The
-// local decoy must stay unlisted under --no-local: a fallback that regressed
-// to the working directory would resolve the global layer to it instead of
-// the empty text.
+// variable dropped, os.UserHomeDir errors and xdg falls back to "/". Nothing
+// is written outside the sandbox. The decoy sits at the config path a
+// fallback regressed to the working directory would actually read, so such a
+// regression lists the decoy profile instead of the empty text; the local
+// decoy must likewise stay unlisted under --no-local.
 func TestConfigHomeRungFallbackHint(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME", "USERPROFILE")
 	s.writeLocal(decoyYAML)
+	s.writeFile(filepath.Join(s.project, ".config", "enver", "config.yaml"), decoyYAML)
 	assertListed(t, s.run("list", "-g", "--no-local"), emptyListText, "decoy")
 }
