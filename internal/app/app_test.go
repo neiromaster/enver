@@ -112,11 +112,32 @@ func TestResolveProfilesEmptyConfig(t *testing.T) {
 	}
 }
 
-// TestResolveProfilesRecordsOnly pins the boundary the first-run guard draws:
+// TestResolveProfilesDanglingDefaultOnEmptyConfig pins that a default pointing
+// at nothing on an otherwise empty config is still a first run: the guard
+// fires before the default is applied, so the remedy is the one that creates
+// the profile the default needs, never a miss for a profile nothing supplies.
+func TestResolveProfilesDanglingDefaultOnEmptyConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("default: dev\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+	want := NoProfilesError().Error()
+
+	_, _, err := ResolveProfiles(opts, nil)
+	if err == nil {
+		t.Fatal("ResolveProfiles(nil) on a dangling-default config must error")
+	}
+	if err.Error() != want {
+		t.Fatalf("ResolveProfiles(nil) err = %q, want the first-run remedy %q", err.Error(), want)
+	}
+}
+
+// TestResolveProfilesRecordsOnlyKeepsPullHint pins the boundary the first-run guard draws:
 // a config that declares a record but no profiles is not a first run, so its
 // named miss keeps the pull remedy that would actually supply the profile,
 // and an unnamed request keeps the plain no-profile error.
-func TestResolveProfilesRecordsOnly(t *testing.T) {
+func TestResolveProfilesRecordsOnlyKeepsPullHint(t *testing.T) {
 	dir := t.TempDir()
 	prevDir := config.RemotesDir
 	config.RemotesDir = func() string { return dir }

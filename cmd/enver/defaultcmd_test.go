@@ -49,6 +49,29 @@ func TestDefaultNoProfilesHintsCreation(t *testing.T) {
 	}
 }
 
+// TestDefaultDanglingDefaultOnEmptyConfigHintsCreation pins that a default
+// pointing at nothing on an otherwise empty config is still a first run:
+// creating the profile is what makes the default resolve again, so a bare
+// `enver default` hands back the same remedy as an empty config rather than a
+// miss for a profile nothing can supply.
+func TestDefaultDanglingDefaultOnEmptyConfigHintsCreation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("default: dev\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withGlobalConfig(t, path)
+
+	err := defaultCmd.RunE(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatal("default on a dangling-default config must error")
+	}
+	for _, want := range []string{"enver add", "enver import <file> <profile>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q misses %q", err.Error(), want)
+		}
+	}
+}
+
 func TestDefaultCorruptTargetFileErrorsLoudly(t *testing.T) {
 	global := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, true)
 	dir := t.TempDir()
