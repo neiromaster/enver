@@ -148,7 +148,7 @@ in `$XDG_CONFIG_HOME/enver/remotes/` and the next pull overwrites it.
   reference in the same file: any `extends: old` in other profiles and the
   top-level `default` if it matches. Refused if the new name already exists.
   (References in the *other* layer are not rewritten; `validate` surfaces any
-  that go dangling.)
+  extends that go dangling, and reports a default naming no profile.)
 - **`enver duplicate <src> [new]`** — make a structural copy of a profile
   (extends, env, and comments). The copy is not made the default.
 - **`enver default [profile]`** — with no argument, print the current default;

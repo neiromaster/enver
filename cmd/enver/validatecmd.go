@@ -30,9 +30,9 @@ own content declares.
 
 With no files, the merged config of the current directory is checked: dangling
 extends and extends cycles, empty profiles, profiles that define and unset the
-same key, ~-marked keys left in plaintext, and a global profile that extends a
-name only a local or remote layer defines. Exits non-zero on an error, and
-on a warning under --strict.
+same key, ~-marked keys left in plaintext, a global profile that extends a name
+only a local or remote layer defines, and a default naming no profile. Exits
+non-zero on an error, and on a warning under --strict.
 
 With file arguments, every named file is checked offline: no store is read, no
 network is touched, no key is needed. The file's own content picks the rules.
@@ -52,7 +52,7 @@ for publication" or "<file>: ✓ valid as a local config", and the summary is th
 command's error: N of M files failed. Notes never fail. --strict makes warnings
 fail, in this mode and the merged one — a ~-marked key left in plaintext is a
 warning, so --strict stops a commit on a forgotten encrypt. A file named by
---file joins the same list.
+--file joins the same list; a file named more than once is checked once.
 
 Whether a declared source is reachable is not validate's job: the full
 rehearsal is enver pull --file <file>, which fetches the tree and gates every
@@ -202,7 +202,8 @@ func checkFileVerdict(path string, data []byte, strict bool) fileVerdict {
 			emit(config.SeverityWarning, is.String())
 		}
 		// A default governs the commands that fall back to it, so only a local
-		// config is judged by it: a publish file's default is the consumer's.
+		// config is judged by it: Project drops a remote's default, so a publish
+		// file's default has no effect.
 		if kind == config.FileLocal {
 			for _, is := range config.ValidateDefault(cfg) {
 				emit(is.Severity, is.String())

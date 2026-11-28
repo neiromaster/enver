@@ -225,6 +225,29 @@ func TestValidateFilesUnderFileFlag(t *testing.T) {
 	}
 }
 
+// TestValidateHelpNamesDanglingDefault pins the help and comment wording the
+// default check and the checked-once rule owe a reader: the Long text names
+// both, and the gate comment no longer explains the exemption by a consumer.
+func TestValidateHelpNamesDanglingDefault(t *testing.T) {
+	for _, want := range []string{"default naming no profile", "checked once"} {
+		if !strings.Contains(validateCmd.Long, want) {
+			t.Errorf("validateCmd.Long lacks %q", want)
+		}
+	}
+	for _, c := range []struct{ path, stale string }{
+		{filepath.Join("..", "..", "cmd", "enver", "validatecmd.go"), "a publish file's default is the consumer's"},
+		{filepath.Join("..", "..", "internal", "config", "remotes.go"), "empty otherwise"},
+	} {
+		data, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte(c.stale)) {
+			t.Errorf("%s still says %q", c.path, c.stale)
+		}
+	}
+}
+
 // TestCheckFileVerdictDanglingDefault pins the local-file default check: a
 // default naming no profile is an error, so the file fails without --strict,
 // and the line carries no profile prefix to misread as one.

@@ -25,7 +25,12 @@ enver keygen [--random] [--force]         Passphrase-derived key; --random for a
 enver encrypt [profile] [--all]           Encrypt secret candidates (--all: every value)
 enver decrypt [profile]                   Decrypt values back to plaintext
 enver update [--check]                    Update the enver binary; --check reports (0/1/2 exit codes)
+enver completion <shell>                  Print the completion script for bash, zsh, fish, or powershell
 ```
+
+Go install, npm and `install.sh` users generate completions once with
+`enver completion <shell>` and follow their shell's instructions; Homebrew and
+`install.ps1` wire them automatically.
 
 On an interactive terminal, `enver x` primes the tab title with the profile
 label — the composed `base+slotA` when several profiles are given — before
@@ -43,7 +48,8 @@ empty; an explicit list replaces it. `show` renders the composed chain
 (`# profile: base → slotA`), and the composed label `base+slotA` is what the
 tab title, the JSON `profile` field, and the dotenv header carry. Completion
 offers profiles at every position before `--` — already-typed members are
-excluded — and after `--` the child command owns the completion.
+excluded — while after `--` completion falls back to the shell's
+default file completion; the child command's own completions are not applied.
 
 `enver update` applies the latest release, dispatching to the package
 manager that owns the install (npm, brew, go install) or replacing a
