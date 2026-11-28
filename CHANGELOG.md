@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.15.0 - 2026-11-28
+
 - **New:** `enver edit llm/ollama` (and `enver add llm/ollama`) on a name only
   a remote provides opens on that remote's keys instead of refusing or starting
   blank: the remote content is shown as the patch backdrop, your entries
