@@ -13,8 +13,7 @@ import (
 // TestWriteTarget covers the write-scope rule: local .enver.yaml in cwd by
 // default, the global config under --global (honoring --config).
 func TestWriteTarget(t *testing.T) {
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	// EvalSymlinks: on macOS t.TempDir() returns /var/... but Getwd resolves the
 	// /var → /private/var symlink, so compare against the resolved path.
@@ -49,8 +48,7 @@ func TestWriteTarget(t *testing.T) {
 }
 
 func TestApplyChdir(t *testing.T) {
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -96,8 +94,7 @@ func TestApplyChdir(t *testing.T) {
 // PersistentPreRunE (which applies chdir for normal runs) does not run during
 // shell completion, so the completion functions must apply it themselves.
 func TestCompletionAppliesChdir(t *testing.T) {
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	wd, err := os.Getwd()
 	if err != nil {

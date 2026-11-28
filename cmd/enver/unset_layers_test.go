@@ -26,8 +26,7 @@ func writeDoc(t *testing.T, path, doc string) {
 // the way is restored through t.Cleanup.
 func runCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

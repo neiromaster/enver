@@ -25,6 +25,32 @@ func resetFile(t *testing.T, file string) string {
 	return file
 }
 
+func TestHintFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		g    globalOptions
+		want string
+	}{
+		{"plain", globalOptions{}, ""},
+		{"chdir", globalOptions{chdir: "sub"}, "--chdir sub"},
+		{"config", globalOptions{configPath: "c.yaml"}, "--config c.yaml"},
+		{"file", globalOptions{file: "x.yaml"}, "--file x.yaml"},
+		{"chdir+file", globalOptions{chdir: "sub", file: "x.yaml"}, "--chdir sub --file x.yaml"},
+		{"chdir+config", globalOptions{chdir: "sub", configPath: "c.yaml"}, "--chdir sub --config c.yaml"},
+		{"whitespace", globalOptions{chdir: "my dir", file: "team.yaml"}, `--chdir "my dir" --file team.yaml`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			old := globalFlags
+			t.Cleanup(func() { globalFlags = old })
+			globalFlags = c.g
+			if got := hintFlags(); got != c.want {
+				t.Fatalf("hintFlags() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestApplyFileConflicts(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -110,6 +136,21 @@ func TestWriteTargetAndAddCommandLineUnderFile(t *testing.T) {
 	}
 	if got := addCommandLine("p"); got != "enver add --file x.yaml p" {
 		t.Fatalf("addCommandLine() = %q", got)
+	}
+}
+
+func TestAddCommandLineCarriesRelocationFlags(t *testing.T) {
+	old := globalFlags
+	t.Cleanup(func() { globalFlags = old; config.HintFlags = "" })
+	globalFlags = globalOptions{chdir: "sub", configPath: "c.yaml", global: true}
+	config.HintFlags = hintFlags()
+	if got := addCommandLine("p"); got != "enver add --chdir sub --config c.yaml -g p" {
+		t.Fatalf("addCommandLine() = %q", got)
+	}
+	globalFlags = globalOptions{global: true}
+	config.HintFlags = hintFlags()
+	if got := addCommandLine("p"); got != "enver add -g p" {
+		t.Fatalf("addCommandLine() without relocation flags = %q", got)
 	}
 }
 

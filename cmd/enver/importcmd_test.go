@@ -550,8 +550,7 @@ func runImportCmd(t *testing.T, envBody string, args ...string) error {
 
 func importFixtureLayers(t *testing.T) string {
 	t.Helper()
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	dir := t.TempDir()
 	wd, err := os.Getwd()

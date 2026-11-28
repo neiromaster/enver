@@ -34,8 +34,7 @@ func TestGuardRemovable(t *testing.T) {
 
 // TestNotFoundInTarget covers the cross-layer --global hint vs plain not-found.
 func TestNotFoundInTarget(t *testing.T) {
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	dir := t.TempDir()
 	wd, err := os.Getwd()

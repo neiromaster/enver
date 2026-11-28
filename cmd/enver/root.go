@@ -194,13 +194,17 @@ func applyGlobalFlags() error {
 	if err := applyChdir(); err != nil {
 		return err
 	}
-	return applyFile()
+	if err := applyFile(); err != nil {
+		return err
+	}
+	config.HintFlags = hintFlags()
+	return nil
 }
 
 // applyFile points the process at one config file, once, before any command
-// logic: it redirects the remote store beside the file and spells the pull
-// hint, so every load and write reads the file alone. Conflicts and unusable
-// paths are refused here rather than re-checked per command.
+// logic: it redirects the remote store beside the file, so every load and write
+// reads the file alone. Conflicts and unusable paths are refused here rather
+// than re-checked per command.
 func applyFile() error {
 	if globalFlags.file == "" {
 		return nil
@@ -233,8 +237,28 @@ func applyFile() error {
 	}
 	store := config.FileStoreDir(abs)
 	config.RemotesDir = func() string { return store }
-	config.HintFlags = "--file " + hintPath(globalFlags.file)
 	return nil
+}
+
+// hintFlags reproduces the invocation's relocation flags in a hint line, in the
+// order applyGlobalFlags applies them, so a hint copied back into the original
+// shell addresses the same config file. Layer-selecting flags stay out: -g and
+// --no-local pick the command's own layer rather than replaying the view.
+func hintFlags() string {
+	var parts []string
+	for _, f := range []struct {
+		name  string
+		value string
+	}{
+		{"--chdir", globalFlags.chdir},
+		{"--config", globalFlags.configPath},
+		{"--file", globalFlags.file},
+	} {
+		if f.value != "" {
+			parts = append(parts, f.name+" "+hintPath(f.value))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // hintPath spells a path inside a hint line: quoted only when it contains
@@ -385,10 +409,11 @@ func notFoundInTarget(name, target string) error {
 
 // addCommandLine is the command a scope hint points at: the patch copy lands in
 // the write target, so it needs the same scope flag the refused write carried.
-// --file comes through the hint seam; -g keeps its shorthand.
+// The relocation flags come through the hint seam; -g rides along as an
+// argument, since cobra accepts persistent flags in any position.
 func addCommandLine(name string) string {
 	if globalFlags.global {
-		return "enver add -g " + name
+		return config.HintCommand("add", "-g", name)
 	}
 	return config.HintCommand("add", name)
 }
