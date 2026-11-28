@@ -28,6 +28,27 @@ func TestDefaultShowWithoutDefaultHintsTheFix(t *testing.T) {
 	}
 }
 
+// TestDefaultNoProfilesHintsCreation pins the first-run branch of a bare
+// `enver default`: a config with no profiles cannot answer the default
+// question, so the error names both ways to create the first profile.
+func TestDefaultNoProfilesHintsCreation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withGlobalConfig(t, path)
+
+	err := defaultCmd.RunE(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatal("default on an empty config must error")
+	}
+	for _, want := range []string{"enver add", "enver import <file> <profile>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q misses %q", err.Error(), want)
+		}
+	}
+}
+
 func TestDefaultCorruptTargetFileErrorsLoudly(t *testing.T) {
 	global := writeTempConfig(t, "prod", map[string]string{"A": "1"}, nil, true)
 	dir := t.TempDir()

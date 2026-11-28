@@ -14,11 +14,10 @@ const (
 	decoyYAML  = "profiles:\n  decoy:\n    env:\n      DECOY: \"1\"\n"
 )
 
-// fallbackHint is the exact bottom-rung resolution: with no home at all, xdg
-// falls back to "/", so the hint names the "/"-rooted config path. It is
-// left-anchored on the "Create one at: " prefix because a fallback regressed
-// to the working directory would carry the same tail.
-var fallbackHint = "Create one at: " + filepath.Join("/", ".config", "enver", "config.yaml")
+// emptyListText is the empty-config listing's anchor line. The rung tests
+// pair it with a decoy: a rung that regressed to the working directory or to
+// USERPROFILE would list the decoy profile instead of the empty text.
+const emptyListText = "(no profiles defined)"
 
 // assertListed requires the run to exit 0, its output to carry want, and —
 // unless notWant is empty — not to carry notWant.
@@ -67,13 +66,17 @@ func TestConfigHomeRungHOME(t *testing.T) {
 // XDG and HOME dropped, os.UserHomeDir resolves the config home. Windows
 // reads USERPROFILE, so a config planted there must win; POSIX reads $HOME
 // only (already dropped), so the rung degrades to the bottom rung — and the
-// still-set USERPROFILE must stay unconsulted, yielding the same
-// "/"-fallback hint pinned by TestConfigHomeRungFallbackHint.
+// still-set USERPROFILE must stay unconsulted, so the decoy planted there
+// stays unlisted while the empty text renders.
 func TestConfigHomeRungPlatformHome(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME")
 	if runtime.GOOS == "windows" {
 		s.writeGlobal(ladderYAML) // USERPROFILE/.config
+	} else {
+		upAlt := filepath.Join(s.home, "up-alt")
+		s.setEnv("USERPROFILE", upAlt)
+		s.writeFile(filepath.Join(upAlt, ".config", "enver", "config.yaml"), decoyYAML)
 	}
 	r := s.run("list", "-g")
 	if r.ExitCode != 0 {
@@ -85,14 +88,18 @@ func TestConfigHomeRungPlatformHome(t *testing.T) {
 		}
 		return
 	}
-	assertListed(t, r, fallbackHint, "")
+	assertListed(t, r, emptyListText, "decoy")
 }
 
 // TestConfigHomeRungFallbackHint pins the bottom rung: with every home
 // variable dropped, os.UserHomeDir errors and xdg falls back to "/". No
-// writes anywhere — machine paths are off limits, nothing is written.
+// writes anywhere — machine paths are off limits, nothing is written. The
+// local decoy must stay unlisted under --no-local: a fallback that regressed
+// to the working directory would resolve the global layer to it instead of
+// the empty text.
 func TestConfigHomeRungFallbackHint(t *testing.T) {
 	s := newSandbox(t)
 	s.dropEnv("XDG_CONFIG_HOME", "HOME", "USERPROFILE")
-	assertListed(t, s.run("list", "-g"), fallbackHint, "")
+	s.writeLocal(decoyYAML)
+	assertListed(t, s.run("list", "-g", "--no-local"), emptyListText, "decoy")
 }
