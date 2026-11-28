@@ -107,7 +107,8 @@ $env:ENVER_UNINSTALL = "1"; irm https://raw.githubusercontent.com/neiromaster/en
 Your user data lives in `~/.config/enver` — `config.yaml`, the encryption
 key, pulled remotes — and survives the script uninstalls above; delete it
 yourself if that is what you want. `brew uninstall --zap enver` removes it
-along with the cask.
+along with the cask. With a custom `XDG_CONFIG_HOME`, see the Homebrew note
+above.
 
 **Update**:
 
