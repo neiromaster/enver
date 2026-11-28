@@ -58,8 +58,7 @@ func TestRenameToExistingNameErrors(t *testing.T) {
 // same way remove does, because RenameProfile rewrites extends refs in the
 // target file only and would dangle the cross-layer child.
 func TestRenameRefusesWhenExtendedFromOtherLayer(t *testing.T) {
-	saved := globalFlags
-	t.Cleanup(func() { globalFlags = saved })
+	saveGlobalFlags(t)
 
 	dir := t.TempDir()
 	wd, err := os.Getwd()

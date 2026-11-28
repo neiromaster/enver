@@ -313,6 +313,47 @@ func TestFileCompletionOffersTheFileToImportExtends(t *testing.T) {
 	}
 }
 
+// TestHintReplaysFromOriginalCwd pins what the relocation flags in a hint buy:
+// pasted back into the shell the original command ran in, the suggested line
+// reads the same file, because it repeats --chdir before the relative --file.
+func TestHintReplaysFromOriginalCwd(t *testing.T) {
+	s := newSandbox(t)
+	team := filepath.Join(s.project, "sub", "team.yaml")
+	s.writeFile(team, "profiles:\n  dev:\n    env:\n      K: v\n")
+	r := s.run("--chdir", "sub", "--file", "team.yaml", "default")
+	if r.ExitCode != 1 || !strings.Contains(r.Stderr, "enver default --chdir sub --file team.yaml <profile>") {
+		t.Fatalf("the no-default hint does not reproduce the invocation: exit %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if r := s.run("default", "--chdir", "sub", "--file", "team.yaml", "dev"); r.ExitCode != 0 {
+		t.Fatalf("replaying the hint: exit %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if cfg := s.readFile(team); !strings.Contains(cfg, "default: dev") {
+		t.Fatalf("the replay wrote elsewhere:\n%s", cfg)
+	}
+	if _, err := os.Stat(s.localPath()); !os.IsNotExist(err) {
+		t.Fatal("the replay created a root-level .enver.yaml")
+	}
+}
+
+// TestHintQuotesChdirPath pins the quoting half of the same contract: a
+// relocation path with a space is quoted in the hint, so the replay splits it
+// back into one argument.
+func TestHintQuotesChdirPath(t *testing.T) {
+	s := newSandbox(t)
+	team := filepath.Join(s.project, "my dir", "team.yaml")
+	s.writeFile(team, "profiles:\n  dev:\n    env:\n      K: v\n")
+	r := s.run("--chdir", "my dir", "--file", "team.yaml", "default")
+	if r.ExitCode != 1 || !strings.Contains(r.Stderr, `--chdir "my dir" --file team.yaml`) {
+		t.Fatalf("the hint does not quote the chdir path: exit %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if r := s.run("default", "--chdir", "my dir", "--file", "team.yaml", "dev"); r.ExitCode != 0 {
+		t.Fatalf("replaying the quoted hint: exit %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if cfg := s.readFile(team); !strings.Contains(cfg, "default: dev") {
+		t.Fatalf("the replay wrote elsewhere:\n%s", cfg)
+	}
+}
+
 // TestFileCompletionOffersTheFileToPull pins record completion: pull under
 // --file offers the file's records, not the global config's.
 func TestFileCompletionOffersTheFileToPull(t *testing.T) {

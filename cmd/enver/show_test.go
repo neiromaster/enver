@@ -256,7 +256,10 @@ func TestUnpulledRemoteReferenceNamesPull(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%v resolved a profile no layer holds", args)
 		}
-		for _, want := range []string{`profile "other/base" not found`, `remote "other"`, "enver pull other"} {
+		// The suggested pull reproduces this invocation's relocation flags, so
+		// running it reads the same config file the show did.
+		pull := "enver pull --chdir " + hintPath(dir) + " --config " + hintPath(cfgPath) + " other"
+		for _, want := range []string{`profile "other/base" not found`, `remote "other"`, pull} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%v error misses %q: %v", args, want, err)
 			}
