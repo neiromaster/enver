@@ -48,6 +48,56 @@ func TestRemotesRecordMerge(t *testing.T) {
 	}
 }
 
+// TestRemoteRecordVisible pins the question a global patch asks: does the write
+// target declare the very record the merged view resolves a remote-projected name
+// through? The whole record is the comparison, so a target that points the same
+// name at another URL, ref or prefix mode does not count as declaring it.
+func TestRemoteRecordVisible(t *testing.T) {
+	merged := Config{
+		Profiles:     map[string]Profile{"llm/ollama": {}},
+		ProfileLayer: map[string]string{"llm/ollama": RemoteLayer("llm")},
+		Remotes:      map[string]RemoteRecord{"llm": {URL: "B"}},
+	}
+	const name = "llm/ollama"
+	cases := []struct {
+		what   string
+		target map[string]RemoteRecord
+		want   bool
+	}{
+		{"the target declares the same record", map[string]RemoteRecord{"llm": {URL: "B"}}, true},
+		{"the target declares no llm record", nil, false},
+		{"the target points llm at another URL", map[string]RemoteRecord{"llm": {URL: "A"}}, false},
+		{"the target pins another ref", map[string]RemoteRecord{"llm": {URL: "B", Ref: "v2"}}, false},
+	}
+	for _, c := range cases {
+		if got := RemoteRecordVisible(merged, Config{Remotes: c.target}, name); got != c.want {
+			t.Errorf("%s: visible = %t, want %t", c.what, got, c.want)
+		}
+	}
+	if !RemoteRecordVisible(merged, Config{}, "plain") {
+		t.Error("a name no remote provides is not the guard's concern")
+	}
+}
+
+// TestRemoteRecordVisibleNestedTopLevel pins the top-level segment as the record
+// the comparison is made on: a name under the nested record team/llm is declared
+// by the user layer's team record, and the nested path is a record inside the
+// pulled content, which no user file declares.
+func TestRemoteRecordVisibleNestedTopLevel(t *testing.T) {
+	merged := Config{
+		Profiles:     map[string]Profile{"team/llm/profile": {}},
+		ProfileLayer: map[string]string{"team/llm/profile": RemoteLayer("team/llm")},
+		Remotes:      map[string]RemoteRecord{"team": {URL: "A"}},
+	}
+	const name = "team/llm/profile"
+	if !RemoteRecordVisible(merged, Config{Remotes: map[string]RemoteRecord{"team": {URL: "A"}}}, name) {
+		t.Fatal("a target declaring the top-level team record must see the nested name")
+	}
+	if RemoteRecordVisible(merged, Config{}, name) {
+		t.Fatal("a target declaring no team record must not see the nested name")
+	}
+}
+
 func TestRemotesYAMLParse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "remotes:\n" +

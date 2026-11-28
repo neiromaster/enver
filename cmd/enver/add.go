@@ -267,7 +267,9 @@ func commitAdd(cfgPath, name string, extends config.Extends, entries []ui.EnvEnt
 // patchRemote answer is the record it patches. A name the other user layer
 // declares is neither: writing it here would shadow the user's own profile
 // rather than patch anything, so the scope hint sends the user to the layer that
-// owns it.
+// owns it. A global patch additionally needs the global file to declare the
+// record the merged view resolves the name through, since that is the file every
+// other directory reads the copy against.
 func addPlacement(merged, target config.Config, path, name string) (patchRemote string, err error) {
 	if _, ok := target.Profiles[name]; ok {
 		return "", nil
@@ -277,9 +279,19 @@ func addPlacement(merged, target config.Config, path, name string) (patchRemote 
 		return "", nil
 	}
 	if remote, isRemote := config.RemoteName(layer); isRemote {
+		if globalFlags.global && !config.RemoteRecordVisible(merged, target, name) {
+			return "", patchRecordRefusal(name, remote)
+		}
 		return remote, nil
 	}
 	return "", notFoundInTarget(name, path, "add")
+}
+
+// patchRecordRefusal reports a global patch bootstrap the global file cannot see:
+// the name resolves through a record only another layer declares, so the copy
+// would mean something different wherever the global file is the whole story.
+func patchRecordRefusal(name, remote string) error {
+	return fmt.Errorf("profile %q comes from remote %q not declared by the global config; a global patch would resolve differently outside this directory — re-run without -g", name, remote)
 }
 
 // addSummary renders add's closing report: where the profile landed, the remote
