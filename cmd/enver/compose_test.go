@@ -140,7 +140,8 @@ func TestCompleteProfileAfterDashFallsToFileCompletion(t *testing.T) {
 	path := composeConfig(t)
 	cmd := completeCmd(t, path)
 	// Fake the raw __complete line `enver x base slotA -- <TAB>`: the cursor
-	// sits after the dash, so the child command owns the completion.
+	// sits after the dash, so completion falls back to the shell's file
+	// completion.
 	prev := osArgs
 	osArgs = []string{"enver", "__complete", "x", "base", "slotA", "--", ""}
 	t.Cleanup(func() { osArgs = prev })
