@@ -190,3 +190,31 @@ func TestValidateFilesUnderFileFlag(t *testing.T) {
 		t.Fatalf("--file's file must be checked first:\n%s", out.String())
 	}
 }
+
+// TestCheckFileVerdictDanglingDefault pins the local-file default check: a
+// default naming no profile is an error, so the file fails without --strict,
+// and the line carries no profile prefix to misread as one.
+func TestCheckFileVerdictDanglingDefault(t *testing.T) {
+	v := checkFileVerdict("ci.yaml", []byte("profiles:\n  dev:\n    env:\n      K: v\ndefault: ghost\n"), false)
+	if !v.failed {
+		t.Fatalf("failed = false without --strict, lines: %q", v.lines)
+	}
+	if want := `ci.yaml: error: default "ghost" names no profile`; !slices.Contains(v.lines, want) {
+		t.Fatalf("lines = %q, want %q", v.lines, want)
+	}
+}
+
+// TestCheckFileVerdictPublishIgnoresDefault pins the publish file's exemption:
+// a marked file is judged by what a consumer's pull applies, so the local-file
+// default check stays out of it.
+func TestCheckFileVerdictPublishIgnoresDefault(t *testing.T) {
+	v := checkFileVerdict("team.yaml", []byte("publish: true\nprofiles:\n  dev:\n    env:\n      K: v\ndefault: ghost\n"), false)
+	if v.failed {
+		t.Fatalf("a publish file must not fail on its default, lines: %q", v.lines)
+	}
+	for _, line := range v.lines {
+		if strings.Contains(line, "names no profile") {
+			t.Fatalf("publish file got the local-file default check: %q", v.lines)
+		}
+	}
+}

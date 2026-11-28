@@ -212,3 +212,27 @@ func TestValidateUnreadablePathsDoNotStopTheRest(t *testing.T) {
 		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
 	}
 }
+
+// TestValidateNamedFileDanglingDefaultFails pins the named-file default check
+// end to end: a default naming no profile fails the file as an error, not a
+// warning that only --strict would catch.
+func TestValidateNamedFileDanglingDefaultFails(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "ci.yaml"), "profiles:\n  dev:\n    env:\n      K: v\ndefault: ghost\n")
+	r := s.run("validate", "ci.yaml")
+	if r.ExitCode != 1 || !strings.Contains(r.Stdout, `ci.yaml: error: default "ghost" names no profile`) {
+		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}
+
+// TestValidateMergedDanglingDefault pins the same finding in the no-files mode:
+// the merged view's default names no profile, so the run fails with the line
+// carrying no profile label.
+func TestValidateMergedDanglingDefault(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  dev:\n    env:\n      K: v\ndefault: ghost\n")
+	r := s.run("validate")
+	if r.ExitCode != 1 || !strings.Contains(r.Stdout, `error: default "ghost" names no profile`) {
+		t.Fatalf("exit %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+}

@@ -215,6 +215,68 @@ func TestIssueReasonMarkedEmpty(t *testing.T) {
 	}
 }
 
+// TestValidateDefaultDangling pins the top-level default as a health finding:
+// a default naming no profile breaks every command that falls back to it, so
+// it is an error whose text stands alone, with no profile to prefix it.
+func TestValidateDefaultDangling(t *testing.T) {
+	issues := ValidateDefault(Config{Default: "ghost", Profiles: map[string]Profile{"dev": {}}})
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly one dangling-default error", issues)
+	}
+	got := issues[0]
+	if got.Kind != KindDanglingDefault || got.Severity != SeverityError || got.Target != "ghost" {
+		t.Fatalf("issue = %+v, want a dangling-default error naming ghost", got)
+	}
+	if want := `default "ghost" names no profile`; got.String() != want {
+		t.Errorf("issue text = %q, want %q", got.String(), want)
+	}
+}
+
+// TestValidateDefaultClean pins the silent cases: no default at all, and a
+// default naming a profile the config declares.
+func TestValidateDefaultClean(t *testing.T) {
+	if got := ValidateDefault(Config{}); got != nil {
+		t.Errorf("no default = %+v, want nil", got)
+	}
+	cfg := Config{Default: "dev", Profiles: map[string]Profile{"dev": {}}}
+	if got := ValidateDefault(cfg); got != nil {
+		t.Errorf("a default naming a declared profile = %+v, want nil", got)
+	}
+}
+
+// TestValidateDefaultToleratesDeclaredRecords pins what a named file checked
+// offline must not fail on: a default a declared record can still supply is
+// legal before the pull, whether the name lands under the record prefix or,
+// for a no-prefix record, bare.
+func TestValidateDefaultToleratesDeclaredRecords(t *testing.T) {
+	prefixed := Config{
+		Default: "llm/ollama",
+		Remotes: map[string]RemoteRecord{"llm": {URL: "https://example.com/llm.yaml"}},
+	}
+	if got := ValidateDefault(prefixed); got != nil {
+		t.Errorf("a default a declared record projects = %+v, want nil", got)
+	}
+	bare := Config{
+		Default: "bare",
+		Remotes: map[string]RemoteRecord{"r": {URL: "https://example.com/r.yaml", NoPrefix: true}},
+	}
+	if got := ValidateDefault(bare); got != nil {
+		t.Errorf("a bare default under a no-prefix record = %+v, want nil", got)
+	}
+}
+
+// TestValidateIncludesDefault pins the merged view carrying the check:
+// config.Validate is what validate's no-files mode calls.
+func TestValidateIncludesDefault(t *testing.T) {
+	cfg := Config{Default: "ghost", Profiles: map[string]Profile{"dev": {Env: map[string]string{"K": "v"}}}}
+	for _, is := range Validate(cfg) {
+		if is.Kind == KindDanglingDefault && is.Target == "ghost" && is.Severity == SeverityError {
+			return
+		}
+	}
+	t.Fatalf("Validate on a dangling default = %+v, want the dangling-default error", Validate(cfg))
+}
+
 func hasIssue(issues []Issue, kind IssueKind) bool {
 	for _, is := range issues {
 		if is.Kind == kind {

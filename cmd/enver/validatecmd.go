@@ -200,6 +200,13 @@ func checkFileVerdict(path string, data []byte, strict bool) fileVerdict {
 		for _, is := range config.ValidateOwn(cfg) {
 			emit(config.SeverityWarning, is.String())
 		}
+		// A default governs the commands that fall back to it, so only a local
+		// config is judged by it: a publish file's default is the consumer's.
+		if kind == config.FileLocal {
+			for _, is := range config.ValidateDefault(cfg) {
+				emit(is.Severity, is.String())
+			}
+		}
 		// A parse the check refused decodes to an empty view, which would read
 		// as declaring nothing; only a completed check may say that.
 		if kind == config.FilePublish && !refused && len(cfg.Profiles) == 0 && len(cfg.Remotes) == 0 {

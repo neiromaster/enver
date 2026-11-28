@@ -22,6 +22,7 @@ const (
 	KindContradictoryUnset IssueKind = "contradictory-unset"
 	KindPlaintextSecret    IssueKind = "plaintext-secret"
 	KindMarkedEmpty        IssueKind = "marked-empty"
+	KindDanglingDefault    IssueKind = "dangling-default"
 )
 
 // Severity grades how loudly an Issue surfaces.
@@ -48,6 +49,9 @@ type Issue struct {
 }
 
 func (i Issue) String() string {
+	if i.Profile == "" {
+		return i.Reason()
+	}
 	return fmt.Sprintf("%s: %s", i.Profile, i.Reason())
 }
 
@@ -71,6 +75,8 @@ func (i Issue) Reason() string {
 		return fmt.Sprintf("%q is marked secret but stored in plaintext", i.Target)
 	case KindMarkedEmpty:
 		return "marked for publication but declares neither profiles nor remotes"
+	case KindDanglingDefault:
+		return fmt.Sprintf("default %q names no profile", i.Target)
 	}
 	return string(i.Kind)
 }
@@ -109,8 +115,42 @@ func ValidateOwn(cfg Config) []Issue {
 	return issues
 }
 
+// ValidateDefault reports a top-level default no profile answers to. A default
+// a declared record can still project is left alone: the name is legal before
+// the pull that supplies it, so a file checked offline must not fail on it.
+func ValidateDefault(cfg Config) []Issue {
+	if cfg.Default == "" {
+		return nil
+	}
+	if _, declared := cfg.Profiles[cfg.Default]; declared {
+		return nil
+	}
+	if cfg.remoteProjected(cfg.Default) {
+		return nil
+	}
+	return []Issue{{Kind: KindDanglingDefault, Severity: SeverityError, Target: cfg.Default}}
+}
+
+// remoteProjected reports whether a declared record can still supply name: a
+// prefixed name belongs to the record its first segment names, and a record
+// pulled without a prefix lands its profiles bare.
+func (c Config) remoteProjected(name string) bool {
+	for _, rec := range c.Remotes {
+		if rec.NoPrefix {
+			return true
+		}
+	}
+	prefix, rest, ok := strings.Cut(name, "/")
+	if !ok || rest == "" {
+		return false
+	}
+	_, declared := c.Remotes[prefix]
+	return declared
+}
+
 // Validate audits cfg for dangling extends, cycles, no-op profiles, unset
-// contradictions, and marked secrets still stored in plaintext.
+// contradictions, marked secrets still stored in plaintext, and a default
+// naming no profile.
 func Validate(cfg Config) []Issue {
 	exists := map[string]bool{}
 	for n := range cfg.Profiles {
@@ -132,7 +172,7 @@ func Validate(cfg Config) []Issue {
 			}
 		}
 	}
-	return append(issues, ValidateOwn(cfg)...)
+	return append(append(issues, ValidateOwn(cfg)...), ValidateDefault(cfg)...)
 }
 
 // ValidateGlobal audits the global config over the remote layers it sits on
