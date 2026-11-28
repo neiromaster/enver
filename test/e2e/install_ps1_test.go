@@ -447,6 +447,31 @@ func TestUninstallRemovesAllEnverArtifacts(t *testing.T) {
 	})
 }
 
+// TestUninstallStillWorksAfterHeaderEdit pins that the comment-only header edit
+// left the param() block intact: -Uninstall still removes every planted
+// artifact and leaves the rest of the profile alone.
+func TestUninstallStillWorksAfterHeaderEdit(t *testing.T) {
+	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
+		s := newUninstallSandbox(t, dir)
+		before, after := s.plant(t)
+
+		runUninstall(t, engine, s.env(), s.installDir, s.profile, "")
+
+		for _, gone := range []string{s.exe, s.completion, filepath.Dir(s.completion), s.installRoot} {
+			if _, err := os.Stat(gone); !os.IsNotExist(err) {
+				t.Fatalf("%s survived uninstall (stat err: %v)", gone, err)
+			}
+		}
+		profile := normalizeNewlines(readFileString(t, s.profile))
+		if strings.Contains(profile, enverCompletionMarker) {
+			t.Fatalf("completion block stayed in the profile:\n%s", profile)
+		}
+		if want := before + "\n" + after + "\n"; profile != want {
+			t.Fatalf("profile:\n%q\nwant:\n%q", profile, want)
+		}
+	})
+}
+
 func TestUninstallUserDataNoteHonorsXDG(t *testing.T) {
 	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
 		s := newUninstallSandbox(t, dir)
@@ -609,4 +634,59 @@ func TestUninstallLockedExeFails(t *testing.T) {
 			t.Fatalf("profile block was removed before the abort:\n%s", content)
 		}
 	})
+}
+
+// TestInstallHeaderDocumentsUninstall keeps the pipe examples byte-identical
+// and proves the header edit stayed comment-only: every line before param()
+// must be blank or a comment.
+func TestInstallHeaderDocumentsUninstall(t *testing.T) {
+	lines := strings.Split(normalizeNewlines(readFileString(t,
+		filepath.Join(repoRoot(), "scripts", "install.ps1"))), "\n")
+	paramAt := slices.IndexFunc(lines, func(line string) bool {
+		return strings.HasPrefix(line, "param(")
+	})
+	if paramAt < 0 {
+		t.Fatal("scripts/install.ps1 has no param( line")
+	}
+	header := strings.Join(lines[:paramAt], "\n")
+	for _, want := range []string{"-Uninstall", "ENVER_UNINSTALL"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("installer header lacks %q:\n%s", want, header)
+		}
+	}
+	const pipeExample = "#   irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex"
+	if !slices.Contains(lines[:paramAt], pipeExample) {
+		t.Error("installer header lost the unpinned pipe example line")
+	}
+	for i, line := range lines[:paramAt] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			t.Errorf("line %d before param( is neither blank nor a comment: %q", i+1, line)
+		}
+	}
+}
+
+// TestReadmeNamesBrewZapInUninstallNote scopes the user-data note to the script
+// uninstalls it sits under and names the brew zap exception, so the note cannot
+// promise data survival that zap takes away.
+func TestReadmeNamesBrewZapInUninstallNote(t *testing.T) {
+	readme := normalizeNewlines(readFileString(t, filepath.Join(repoRoot(), "README.md")))
+	var note string
+	for _, paragraph := range strings.Split(readme, "\n\n") {
+		if strings.Contains(paragraph, "Your user data lives in") {
+			note = paragraph
+			break
+		}
+	}
+	if note == "" {
+		t.Fatal("README.md has no user-data note")
+	}
+	for _, want := range []string{"brew uninstall --zap", "script uninstalls"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("user-data note lacks %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, "survives uninstall") {
+		t.Errorf("user-data note still claims user data survives uninstall unconditionally:\n%s", note)
+	}
 }

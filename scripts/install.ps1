@@ -5,11 +5,13 @@
 #   irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
 #   $env:ENVER_VERSION = "v0.9.1"; irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Version v0.9.1
+#   .\install.ps1 -Uninstall
 #
 # Env:
 #   ENVER_VERSION        tag to install (default: latest release)
 #   ENVER_INSTALL_DIR    install dir (default: $env:LOCALAPPDATA\enver\bin)
 #   ENVER_NO_COMPLETION  set to 1 to skip PowerShell completion setup
+#   ENVER_UNINSTALL      set to 1 to uninstall instead of installing
 #
 # Requires PowerShell 5.0+ (Expand-Archive). No admin rights needed.
 
