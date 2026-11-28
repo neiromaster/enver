@@ -700,6 +700,31 @@ func TestAddCompletionHidesNestedProjectedNames(t *testing.T) {
 	}
 }
 
+// TestAddCompletionHidesNestedTargetNames pins the other half of the add
+// filter: add refuses a name with more than one slash wherever the name comes
+// from, so a nested name the write target itself declares must stay out of its
+// offers, while edit accepts and writes such a name and keeps offering it.
+func TestAddCompletionHidesNestedTargetNames(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  team/llm/own:\n    env:\n      A: \"1\"\n")
+
+	add := s.run("__complete", "add", "")
+	if add.ExitCode != 0 {
+		t.Fatalf("add: exit = %d, stderr: %s", add.ExitCode, add.Stderr)
+	}
+	if tokens := completionTokens(add.Stdout); slices.Contains(tokens, "team/llm/own") {
+		t.Fatalf("add completion = %q, must not offer a nested name it refuses", tokens)
+	}
+
+	edit := s.run("__complete", "edit", "")
+	if edit.ExitCode != 0 {
+		t.Fatalf("edit: exit = %d, stderr: %s", edit.ExitCode, edit.Stderr)
+	}
+	if tokens := completionTokens(edit.Stdout); !slices.Contains(tokens, "team/llm/own") {
+		t.Fatalf("edit completion = %q, want the nested name the target declares", tokens)
+	}
+}
+
 // TestGlobalCompletionHidesInvisibleRecord pins the -g half of the filter: the
 // global bootstrap is refused a record the global file does not declare, so
 // completion must not offer the name a record only the local file declares, and
@@ -869,4 +894,29 @@ func TestEditPatchBootstrapRefusesGlobalInvisibleRecord(t *testing.T) {
 	o.wait("saving writes a patch copy here")
 	o.keys("\x03") // ctrl+c: cancel the session without writing
 	o.finish()
+}
+
+// TestPatchRecordRefusalNamesTopLevelRecord pins that the -g patch refusal names
+// a record the global file can declare: a remotes entry takes a single-level
+// name, so a profile under the nested record team/llm must be pointed at team.
+func TestPatchRecordRefusalNamesTopLevelRecord(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("remotes:\n  team:\n    url: https://example.com/team.yaml\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team.yaml"), "remotes:\n  llm:\n    url: https://example.com/team/llm.yaml\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team.meta"), "url: https://example.com/team.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team", "llm.yaml"), "profiles:\n  profile:\n    env:\n      A: \"1\"\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team", "llm.meta"), "url: https://example.com/team/llm.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+
+	e := startTUI(t, s, "edit", "--global", "team/llm/profile")
+	waitForScreen(t, e.screen, "not declared by the global config")
+	if err := e.exit(); err == nil {
+		t.Fatalf("a global patch over a locally declared record must exit non-zero:\n%s", plainScreen(e.screen.String()))
+	}
+	screen := plainScreen(e.screen.String())
+	if !strings.Contains(screen, `profile "team/llm/profile" comes from remote "team" not declared by the global config`) {
+		t.Fatalf("the refusal must name the top-level record the global file can declare:\n%s", screen)
+	}
+	if strings.Contains(screen, `remote "team/llm"`) {
+		t.Fatalf("a remotes entry cannot carry a slash, so the refusal must not name a nested record:\n%s", screen)
+	}
 }
