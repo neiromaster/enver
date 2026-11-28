@@ -406,6 +406,17 @@ func MatchingRemoteProfiles(opts Options, toComplete string) []string {
 	})
 }
 
+// MatchingRemoteProfilesForTarget is the -g variant of MatchingRemoteProfiles:
+// it additionally drops a remote-projected name whose record the target does not
+// declare, since a global bootstrap over such a name is refused. The name is
+// still projected by the merged view — the other layer's record is what puts it
+// there — so only the target comparison separates the two.
+func MatchingRemoteProfilesForTarget(opts Options, toComplete string, target config.Config) []string {
+	return matchingProfiles(opts, toComplete, func(cfg config.Config, name string) bool {
+		return config.IsRemoteLayer(cfg.ProfileLayer[name]) && config.RemoteRecordVisible(cfg, target, name)
+	})
+}
+
 // matchingProfiles is the one candidate scan both completion variants share;
 // keep decides which merged names are eligible, and nil admits every one.
 func matchingProfiles(opts Options, toComplete string, keep func(config.Config, string) bool) []string {

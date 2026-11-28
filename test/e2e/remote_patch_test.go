@@ -83,6 +83,19 @@ func (s *sandbox) plantBootstrapFile(t *testing.T, publish bool) {
 	s.writeFile(filepath.Join(store, "llm.meta"), "url: "+patchRemoteURL+"\npulled-at: 2026-11-15T10:00:00Z\n")
 }
 
+// plantNestedPatchFile writes the --file fixture whose record nests another:
+// the file declares team, its stored content declares llm, and that child's
+// content projects team/llm/profile.
+func (s *sandbox) plantNestedPatchFile(t *testing.T) {
+	t.Helper()
+	s.writeFile(filepath.Join(s.project, "team.yaml"), "remotes:\n  team:\n    url: https://example.com/team.yaml\n")
+	store := filepath.Join(s.project, ".enver", "team.yaml")
+	s.writeFile(filepath.Join(store, "team.yaml"), "remotes:\n  llm:\n    url: https://example.com/team/llm.yaml\n")
+	s.writeFile(filepath.Join(store, "team.meta"), "url: https://example.com/team.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+	s.writeFile(filepath.Join(store, "team", "llm.yaml"), "profiles:\n  profile:\n    env:\n      A: \"1\"\n")
+	s.writeFile(filepath.Join(store, "team", "llm.meta"), "url: https://example.com/team/llm.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+}
+
 // hasPrefixToken reports whether any candidate lies under the namespace a
 // record prefixes its content with.
 func hasPrefixToken(tokens []string, prefix string) bool {
@@ -659,6 +672,59 @@ func TestMutatorCompletionStaysTargetScoped(t *testing.T) {
 	}
 	if hasPrefixToken(tokens, "ghost/") {
 		t.Errorf("edit completion = %q, an unpulled record must contribute no name", tokens)
+	}
+}
+
+// TestAddCompletionHidesNestedProjectedNames pins the nested-name half of the
+// filter: add refuses a name with more than one slash, so the name a nested
+// record projects must stay out of its offers, while edit accepts and writes
+// such a name and keeps offering it.
+func TestAddCompletionHidesNestedProjectedNames(t *testing.T) {
+	s := newSandbox(t)
+	s.plantNestedPatchFile(t)
+
+	add := s.run("__complete", "add", "--file", "team.yaml", "")
+	if add.ExitCode != 0 {
+		t.Fatalf("add --file: exit = %d, stderr: %s", add.ExitCode, add.Stderr)
+	}
+	if tokens := completionTokens(add.Stdout); slices.Contains(tokens, "team/llm/profile") {
+		t.Fatalf("add --file completion = %q, must not offer a nested name it refuses", tokens)
+	}
+
+	edit := s.run("__complete", "edit", "--file", "team.yaml", "")
+	if edit.ExitCode != 0 {
+		t.Fatalf("edit --file: exit = %d, stderr: %s", edit.ExitCode, edit.Stderr)
+	}
+	if tokens := completionTokens(edit.Stdout); !slices.Contains(tokens, "team/llm/profile") {
+		t.Fatalf("edit --file completion = %q, want the nested projected name", tokens)
+	}
+}
+
+// TestGlobalCompletionHidesInvisibleRecord pins the -g half of the filter: the
+// global bootstrap is refused a record the global file does not declare, so
+// completion must not offer the name a record only the local file declares, and
+// must still offer it once the global file declares the same record.
+func TestGlobalCompletionHidesInvisibleRecord(t *testing.T) {
+	local := patchSandbox(t)
+	declared := patchSandbox(t)
+	declared.writeGlobal("remotes:\n  llm:\n    url: " + patchRemoteURL + "\n")
+
+	for _, sub := range []string{"add", "edit"} {
+		hidden := local.run("__complete", sub, "-g", "")
+		if hidden.ExitCode != 0 {
+			t.Fatalf("%s -g: exit = %d, stderr: %s", sub, hidden.ExitCode, hidden.Stderr)
+		}
+		if tokens := completionTokens(hidden.Stdout); slices.Contains(tokens, "llm/ollama") {
+			t.Errorf("%s -g completion = %q, must not offer a name only the local record projects", sub, tokens)
+		}
+
+		ok := declared.run("__complete", sub, "-g", "")
+		if ok.ExitCode != 0 {
+			t.Fatalf("%s -g with the record global: exit = %d, stderr: %s", sub, ok.ExitCode, ok.Stderr)
+		}
+		if tokens := completionTokens(ok.Stdout); !slices.Contains(tokens, "llm/ollama") {
+			t.Errorf("%s -g completion = %q, want the record the global file declares", sub, tokens)
+		}
 	}
 }
 
