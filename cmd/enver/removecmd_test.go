@@ -59,16 +59,16 @@ func TestNotFoundInTarget(t *testing.T) {
 
 	// dev is global-only: targeting local should hint --global.
 	globalFlags.global = false
-	if err := notFoundInTarget("dev", local); err == nil || !strings.Contains(err.Error(), "--global") {
+	if err := notFoundInTarget("dev", local, "default"); err == nil || !strings.Contains(err.Error(), "--global") {
 		t.Fatalf("dev in local target: want --global hint, got %v", err)
 	}
 	// stage is local-only: targeting global should hint running without --global.
 	globalFlags.global = true
-	if err := notFoundInTarget("stage", global); err == nil || !strings.Contains(err.Error(), "without --global") {
+	if err := notFoundInTarget("stage", global, "default"); err == nil || !strings.Contains(err.Error(), "without --global") {
 		t.Fatalf("stage in global target: want without---global hint, got %v", err)
 	}
 	// ghost lives nowhere: plain not-found.
-	if err := notFoundInTarget("ghost", global); err == nil || strings.Contains(err.Error(), "--global") {
+	if err := notFoundInTarget("ghost", global, "default"); err == nil || strings.Contains(err.Error(), "--global") {
 		t.Fatalf("ghost: want plain not-found, got %v", err)
 	}
 }

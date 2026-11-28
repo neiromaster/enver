@@ -344,10 +344,11 @@ func loadTarget() (path string, cfg config.Config, err error) {
 }
 
 // requireTargetProfile reports notFound when the write target has no profile
-// named name, keeping the cross-layer hint in one place.
-func requireTargetProfile(cfg config.Config, path, name string) error {
+// named name, keeping the cross-layer hint in one place. verb is the mutator
+// asking, so the refusal can name the remedy that verb's user meant.
+func requireTargetProfile(cfg config.Config, path, name, verb string) error {
 	if _, ok := cfg.Profiles[name]; !ok {
-		return notFoundInTarget(name, path)
+		return notFoundInTarget(name, path, verb)
 	}
 	return nil
 }
@@ -357,7 +358,7 @@ func requireTargetProfile(cfg config.Config, path, name string) error {
 // happens in the user's own copy, so a name only remote content provides is a
 // miss the scope hint answers. An unnamed run (encrypt --all) covers whatever
 // the target holds.
-func requireWriteTargetProfile(profile string) (string, error) {
+func requireWriteTargetProfile(profile, verb string) (string, error) {
 	path, cfg, err := loadTarget()
 	if err != nil {
 		return "", err
@@ -365,7 +366,7 @@ func requireWriteTargetProfile(profile string) (string, error) {
 	if profile == "" {
 		return path, nil
 	}
-	return path, requireTargetProfile(cfg, path, profile)
+	return path, requireTargetProfile(cfg, path, profile, verb)
 }
 
 // pickerConfig is the extends-picker set: merged by default (a local profile may
@@ -378,11 +379,10 @@ func pickerConfig(merged config.Config) (config.Config, error) {
 }
 
 // notFoundInTarget hints at --global when the profile lives in the other layer,
-// and at `add` when it lives only in remote content: remote profiles are a
-// read-only base, so the writer's remedy is a patch copy in the user layer.
-// Under --file there is no other user layer to point at, so only the remote
-// hint remains.
-func notFoundInTarget(name, target string) error {
+// and at the remedy remote content leaves when the profile lives only there: a
+// patch copy for a writer, the removal of the record for a delete. Under --file
+// there is no other user layer to point at, so only the remote hint remains.
+func notFoundInTarget(name, target, verb string) error {
 	if globalFlags.file == "" {
 		other := config.LocalPath()
 		if target == other {
@@ -401,10 +401,28 @@ func notFoundInTarget(name, target string) error {
 	// already knows is a miss, so the plain not-found answer stands.
 	if merged, err := app.Load(appOpts()); err == nil {
 		if remote, ok := config.RemoteName(merged.ProfileLayer[name]); ok {
-			return fmt.Errorf("profile %q comes from remote %q and has no copy here; add a patch copy first (`%s`)", name, remote, addCommandLine(name))
+			return remoteOnlyRefusal(name, remote, verb)
 		}
 	}
 	return fmt.Errorf("profile %q not found", name)
+}
+
+// remoteOnlyRefusal names the remedy for a profile only remote content provides.
+// A delete cannot patch anything, so it points at the pull that removes the
+// content; every other verb points at the patch copy that claims the name.
+func remoteOnlyRefusal(name, remote, verb string) error {
+	switch verb {
+	case "remove", "rename", "duplicate":
+		return fmt.Errorf("profile %q comes from remote %q and has no copy here; remove the remote content with `%s`", name, remote, config.PullCommand("--rm", topRecord(remote)))
+	}
+	return fmt.Errorf("profile %q comes from remote %q and has no copy here; add a patch copy first (`%s`)", name, remote, addCommandLine(name))
+}
+
+// topRecord is the record a nested record hangs off: pull --rm takes top-level
+// records only, and removing one removes the subtree it declares.
+func topRecord(record string) string {
+	parent, _, _ := strings.Cut(record, "/")
+	return parent
 }
 
 // addCommandLine is the command a scope hint points at: the patch copy lands in

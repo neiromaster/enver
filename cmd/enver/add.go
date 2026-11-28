@@ -263,7 +263,7 @@ func addPlacement(merged, target config.Config, path, name string) (patchRemote 
 	if remote, isRemote := config.RemoteName(layer); isRemote {
 		return remote, nil
 	}
-	return "", notFoundInTarget(name, path)
+	return "", notFoundInTarget(name, path, "add")
 }
 
 // addSummary renders add's closing report: where the profile landed, the remote
