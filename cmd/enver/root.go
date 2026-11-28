@@ -539,13 +539,28 @@ func completeProfileInTarget(cmd *cobra.Command, args []string, toComplete strin
 // target's own names plus the merged names a remote projects, since those are
 // the names they can patch into the target. A user layer's own name stays out —
 // a local target refuses a global profile, so offering it would suggest a
-// command that fails — and so does a name no pulled content provides.
+// command that fails — and so does a name no pulled content provides. Each verb
+// then keeps its own refusals out of the offers: add drops a name its name rule
+// rejects, and the global bootstrap drops a name whose record only another
+// layer declares.
 func completeProfileInTargetOrRemote(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 	out := targetProfiles(cmd, toComplete)
-	for _, name := range app.MatchingRemoteProfiles(completionOptions(cmd), toComplete) {
+	g, _ := cmd.Flags().GetBool("global")
+	var projected []string
+	if target, err := completionTarget(cmd); err == nil {
+		if g {
+			projected = app.MatchingRemoteProfilesForTarget(completionOptions(cmd), toComplete, target)
+		} else {
+			projected = app.MatchingRemoteProfiles(completionOptions(cmd), toComplete)
+		}
+	}
+	for _, name := range projected {
+		if cmd.Name() == "add" && !profileNameRe.MatchString(name) {
+			continue
+		}
 		if !slices.Contains(out, name) {
 			out = append(out, name)
 		}

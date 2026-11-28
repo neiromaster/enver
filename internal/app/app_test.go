@@ -1013,6 +1013,45 @@ func TestMatchingRemoteProfiles(t *testing.T) {
 	}
 }
 
+// TestMatchingRemoteProfilesForTarget pins the -g variant: the write target
+// narrows the remote-projected names to the records it declares itself, so a
+// global bootstrap is never offered a name only the local layer's record
+// projects.
+func TestMatchingRemoteProfilesForTarget(t *testing.T) {
+	dir := t.TempDir()
+	prev := config.RemotesDir
+	config.RemotesDir = func() string { return filepath.Join(dir, "remotes") }
+	t.Cleanup(func() { config.RemotesDir = prev })
+	if err := os.MkdirAll(config.RemotesDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.RemoteContentPath("llm"), []byte("profiles:\n  ollama:\n    env:\n      A: \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfgContent := "profiles:\n  alpha:\n    env:\n      A: \"1\"\nremotes:\n  llm:\n    url: https://example.com/llm.yaml\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{ConfigPath: cfgPath, NoLocal: true}
+
+	declaring := config.Config{Remotes: map[string]config.RemoteRecord{
+		"llm": {URL: "https://example.com/llm.yaml"},
+	}}
+	if got := MatchingRemoteProfilesForTarget(opts, "", declaring); !slices.Equal(got, []string{"llm/ollama"}) {
+		t.Fatalf(`MatchingRemoteProfilesForTarget("", llm declared) = %v, want [llm/ollama]`, got)
+	}
+	if got := MatchingRemoteProfilesForTarget(opts, "", config.Config{}); got == nil || len(got) != 0 {
+		t.Fatalf(`MatchingRemoteProfilesForTarget("", no record) = %v, want the invisible name filtered out`, got)
+	}
+	other := config.Config{Remotes: map[string]config.RemoteRecord{
+		"llm": {URL: "https://example.com/other.yaml"},
+	}}
+	if got := MatchingRemoteProfilesForTarget(opts, "", other); got == nil || len(got) != 0 {
+		t.Fatalf(`MatchingRemoteProfilesForTarget("", other source) = %v, want the record pointing elsewhere filtered out`, got)
+	}
+}
+
 func TestChildEnvDropsEnverKey(t *testing.T) {
 	t.Setenv("ENVER_KEY", "sk-decrypt-master")
 	env, _, err := childEnv(Options{}, map[string]string{"ENVER_INJECTED": "yes"})
