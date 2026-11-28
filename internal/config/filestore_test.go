@@ -104,10 +104,16 @@ func TestHintsSpellCommandsInBackticks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var sources []string
 		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") {
-				continue
+			if !strings.HasSuffix(f, "_test.go") {
+				sources = append(sources, f)
 			}
+		}
+		if len(sources) == 0 {
+			t.Fatalf("no Go sources found under %s", filepath.ToSlash(dir))
+		}
+		for _, f := range sources {
 			data, err := os.ReadFile(f)
 			if err != nil {
 				t.Fatal(err)
