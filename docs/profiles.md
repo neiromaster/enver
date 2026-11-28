@@ -120,11 +120,11 @@ that carry them, are in [`remotes.md`](./remotes.md).
 - **Patch with `add` or `edit`.** On a name only remote content provides, both
   open on the remote's keys: they are shown as inherited rows, the entries you
   make override them per key, and the save writes only your entries into the
-  write target — the patch the feature exists for. Its summary says which
-  remote it patches.
-- **Remote content is never a write target.** Every other mutator (`remove`,
-  `rename`, `duplicate`, `default`, `encrypt`, `decrypt`) refuses a remote-only
-  name and points at the patch copy; deleting remote content is
+  write target — the patch the feature exists for. The closing summary says
+  which remote it patches.
+- **Remote content is never a write target.** The other mutators (`remove`,
+  `rename`, `duplicate`, `default`, `encrypt`, `decrypt`) refuse a remote-only
+  name and point at the patch copy; deleting remote content is
   `enver pull --rm <record>`.
 - **Patches in the other user layer keep the scope hint.** When the other user
   layer already declares the name, `add` refuses with the usual scope hint

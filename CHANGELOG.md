@@ -7,7 +7,8 @@
   blank: the remote content is shown as the patch backdrop, your entries
   override it per key, and the save writes a minimal patch copy of your entries
   alone. The closing report names the patched remote. Completion offers those
-  names to `edit` and `add`; every other mutator still refuses them. The
+  names to `edit` and `add`; `remove`, `rename`, `duplicate`, `default`,
+  `encrypt` and `decrypt` still refuse them. The
   publish mark gates nothing at write time — a `publish: true` file accepts the
   write — and `enver validate` reports the non-bare profile name a publish-marked
   file is left with.
