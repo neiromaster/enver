@@ -9,7 +9,7 @@ credentials in a URL (see [Marking arbitrary values](#marking-arbitrary-values))
 ```sh
 enver keygen                    # prompt for a passphrase, write the key cache (mode 0600)
 enver keygen --random           # non-interactive: write a random key cache instead (for CI)
-enver encrypt                   # encrypt ~marked values (enc:v3:argon2id:...)
+enver encrypt                   # encrypt ~marked values and URL credentials
 enver encrypt glm --all         # encrypt every value in the "glm" profile
 enver decrypt                   # restore plaintext (the ~ marks stay)
 ```

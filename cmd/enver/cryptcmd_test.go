@@ -44,6 +44,15 @@ func TestCompleteProfileForCryptAndDefault(t *testing.T) {
 	}
 }
 
+// TestEncryptShortNamesSecretCandidates pins the Short wording: URL-embedded
+// credentials joined the candidate set in v0.14, so the one-line help must not
+// claim the mark is the only selector.
+func TestEncryptShortNamesSecretCandidates(t *testing.T) {
+	if got, want := encryptCmd.Short, "Encrypt secret candidates in the config"; got != want {
+		t.Fatalf("encryptCmd.Short = %q, want %q", got, want)
+	}
+}
+
 // TestEncryptWithoutKeyNamesWhatItBlocked pins the fail-loudly row for the crypt
 // commands: they reach app.ResolveKeyOrPrompt without resolve, so requireKey has
 // to name the blocked keys itself, scoped to the profile the run rewrites.

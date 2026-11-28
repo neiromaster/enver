@@ -4,7 +4,7 @@
 #
 # To store secrets encrypted here, run:
 #   enver keygen        # creates ~/.config/enver/key  (NEVER commit the key)
-#   enver encrypt       # encrypts ~marked values (enc:v3:argon2id:...) in this file
+#   enver encrypt       # encrypts ~marked values and values with URL credentials
 # Decryption at runtime is transparent: `enver x <profile> -- <cmd>` just works.
 
 # Remote configs: a config someone else publishes, fetched on demand and read
