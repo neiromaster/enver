@@ -558,12 +558,12 @@ func completeProfileInTargetOrRemote(cmd *cobra.Command, args []string, toComple
 		}
 	}
 	for _, name := range projected {
-		if cmd.Name() == "add" && !profileNameRe.MatchString(name) {
-			continue
-		}
 		if !slices.Contains(out, name) {
 			out = append(out, name)
 		}
+	}
+	if cmd.Name() == "add" {
+		out = slices.DeleteFunc(out, func(n string) bool { return !profileNameRe.MatchString(n) })
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp
 }

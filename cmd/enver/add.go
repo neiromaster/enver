@@ -290,8 +290,10 @@ func addPlacement(merged, target config.Config, path, name string) (patchRemote 
 // patchRecordRefusal reports a global patch bootstrap the global file cannot see:
 // the name resolves through a record only another layer declares, so the copy
 // would mean something different wherever the global file is the whole story.
+// The global file can declare top-level records only, so the remedy names the
+// record a nested one hangs off rather than the full record path.
 func patchRecordRefusal(name, remote string) error {
-	return fmt.Errorf("profile %q comes from remote %q not declared by the global config; a global patch would resolve differently outside this directory — re-run without -g", name, remote)
+	return fmt.Errorf("profile %q comes from remote %q not declared by the global config; a global patch would resolve differently outside this directory — re-run without -g", name, topRecord(remote))
 }
 
 // addSummary renders add's closing report: where the profile landed, the remote
