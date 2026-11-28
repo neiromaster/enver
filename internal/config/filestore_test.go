@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +90,35 @@ func TestPullCommand(t *testing.T) {
 	HintFlags = "--file team.yaml"
 	if got := PullCommand("--rm", "base"); got != "enver pull --file team.yaml --rm base" {
 		t.Fatalf("PullCommand with flags = %q", got)
+	}
+}
+
+// TestHintsSpellCommandsInBackticks fails on any format string that renders a
+// suggested command with %q: on Windows %q doubles every path separator, the
+// defect the backtick hint convention avoids.
+func TestHintsSpellCommandsInBackticks(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	for _, dir := range []string{"internal/config", "internal/app", "cmd/enver"} {
+		files, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(dir), "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, line := range strings.Split(string(data), "\n") {
+				if !strings.Contains(line, `run %q`) {
+					continue
+				}
+				rel, _ := filepath.Rel(root, f)
+				t.Errorf("%s:%d spells a suggested command with %%q; spell it in backticks with %%s", rel, i+1)
+			}
+		}
 	}
 }

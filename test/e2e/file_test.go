@@ -166,7 +166,7 @@ func TestFileHintsNameTheFile(t *testing.T) {
 	s.writeFile(filepath.Join(store, "r.yaml"), "profiles:\n  default:\n    env:\n      R: \"1\"\n")
 	s.writeFile(filepath.Join(store, "r.meta"), "url: https://other.example/r.yaml\npulled-at: 2026-01-01T00:00:00Z\n")
 	r := s.run("show", "--file", "team.yaml", "t")
-	if r.ExitCode != 0 || !strings.Contains(r.Stderr, `run "enver pull --file team.yaml r" to re-sync`) {
+	if r.ExitCode != 0 || !strings.Contains(r.Stderr, "run `enver pull --file team.yaml r` to re-sync") {
 		t.Fatalf("the hint does not name the file: exit %d, stderr: %s", r.ExitCode, r.Stderr)
 	}
 	r = s.run("pull", "--file", "team.yaml", "nope")
