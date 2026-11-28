@@ -71,6 +71,11 @@ func TestHintPath(t *testing.T) {
 	if got := hintPath(p); got != want {
 		t.Fatalf("hintPath(%q) = %q, want %q", p, got, want)
 	}
+	if runtime.GOOS == "windows" {
+		if got, want := hintPath(`C:\my dir\`), `"C:\my dir\\"`; got != want {
+			t.Fatalf("hintPath with a trailing separator = %q, want %q", got, want)
+		}
+	}
 }
 
 func TestApplyFileConflicts(t *testing.T) {
