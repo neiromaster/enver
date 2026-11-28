@@ -49,10 +49,11 @@ remote-provided parent shows up there as a dimmed `(external)` row.
 
 Profile completion follows the same split: read commands (`show`, `export`,
 `dotenv`, `x`) complete against the merged view — both user layers plus every
-remote-projected name — while mutating commands complete only the profiles the
-write target declares. On a read command every position before `--` offers
-profiles (already-typed members drop out of the candidates), so completion
-keeps working at every step of a composed run line.
+remote-projected name — while mutating commands complete the profiles the write
+target declares. `add` and `edit` are the exception: they also offer the
+remote-projected names they can patch into the target. On a read command every
+position before `--` offers profiles (already-typed members drop out of the
+candidates), so completion keeps working at every step of a composed run line.
 
 ## Editing profiles
 
@@ -116,12 +117,14 @@ A pulled remote contributes profiles under its record prefix (`llm/ollama`,
 base below your own layers. The rules that follow from that, and the commands
 that carry them, are in [`remotes.md`](./remotes.md).
 
-- **Patch with `add`.** `enver add llm/ollama` on a name only remote content
-  provides writes your copy of the projected name into the write target — the
-  patch the feature exists for. Its summary says which remote it patches.
-- **Remote content is never a write target.** Every other mutator (`edit`,
-  `remove`, `rename`, `duplicate`, `default`, `encrypt`, `decrypt`) refuses a
-  remote-only name and points at that same `add`; deleting remote content is
+- **Patch with `add` or `edit`.** On a name only remote content provides, both
+  open on the remote's keys: they are shown as inherited rows, the entries you
+  make override them per key, and the save writes only your entries into the
+  write target — the patch the feature exists for. Its summary says which
+  remote it patches.
+- **Remote content is never a write target.** Every other mutator (`remove`,
+  `rename`, `duplicate`, `default`, `encrypt`, `decrypt`) refuses a remote-only
+  name and points at the patch copy; deleting remote content is
   `enver pull --rm <record>`.
 - **Patches in the other user layer keep the scope hint.** When the other user
   layer already declares the name, `add` refuses with the usual scope hint

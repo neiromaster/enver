@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **New:** `enver edit llm/ollama` (and `enver add llm/ollama`) on a name only
+  a remote provides opens on that remote's keys instead of refusing or starting
+  blank: the remote content is shown as the patch backdrop, your entries
+  override it per key, and the save writes a minimal patch copy of your entries
+  alone. The closing report names the patched remote. Completion offers those
+  names to `edit` and `add`; every other mutator still refuses them. The
+  publish mark gates nothing at write time — a `publish: true` file accepts the
+  write — and `enver validate` reports the non-bare profile name a publish-marked
+  file is left with.
+
 ## v0.14.0 - 2026-11-28
 
 - **Breaking:** a key's name no longer makes it a secret. `enver encrypt`
