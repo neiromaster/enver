@@ -447,15 +447,37 @@ func TestUninstallRemovesAllEnverArtifacts(t *testing.T) {
 	})
 }
 
-// TestUninstallStillWorksAfterHeaderEdit pins that the comment-only header edit
-// left the param() block intact: -Uninstall still removes every planted
-// artifact and leaves the rest of the profile alone.
+// TestUninstallStillWorksAfterHeaderEdit runs the installer end to end with
+// -Uninstall, so a header or param() edit that drops the switch or the
+// uninstall branch fails here: the run exits 0 and every planted artifact is
+// gone.
 func TestUninstallStillWorksAfterHeaderEdit(t *testing.T) {
 	forEachPowerShellEngine(t, func(t *testing.T, engine, dir string) {
 		s := newUninstallSandbox(t, dir)
 		before, after := s.plant(t)
 
-		runUninstall(t, engine, s.env(), s.installDir, s.profile, "")
+		scriptPath := filepath.Join(dir, "install.ps1")
+		if err := os.WriteFile(scriptPath, []byte(installScriptText(t)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		snippet := fmt.Sprintf("$PROFILE = %s\n& %s -Uninstall\n",
+			psQuote(s.profile), psQuote(scriptPath))
+		env := map[string]string{
+			"ENVER_SKIP_INSTALL_FLOW": "0",
+			"ENVER_INSTALL_DIR":       s.installDir,
+			"ENVER_UNINSTALL":         "",
+			"HOME":                    s.home,
+			"USERPROFILE":             s.home,
+			"LOCALAPPDATA":            filepath.Join(dir, "LocalAppData"),
+			"XDG_CONFIG_HOME":         "",
+		}
+		stdout, err := runPowerShell(t, engine, "Bypass", snippet, env)
+		if err != nil {
+			t.Fatalf("installer -Uninstall failed: %v\nstdout:\n%s", err, stdout)
+		}
+		if !strings.Contains(normalizeNewlines(stdout), s.userDataLine()) {
+			t.Fatalf("installer printed no user-data note, so uninstall did not run:\n%s", stdout)
+		}
 
 		for _, gone := range []string{s.exe, s.completion, filepath.Dir(s.completion), s.installRoot} {
 			if _, err := os.Stat(gone); !os.IsNotExist(err) {
@@ -649,9 +671,12 @@ func TestInstallHeaderDocumentsUninstall(t *testing.T) {
 		t.Fatal("scripts/install.ps1 has no param( line")
 	}
 	header := strings.Join(lines[:paramAt], "\n")
-	for _, want := range []string{"-Uninstall", "ENVER_UNINSTALL"} {
-		if !strings.Contains(header, want) {
-			t.Errorf("installer header lacks %q:\n%s", want, header)
+	for _, want := range []string{
+		"#   .\\install.ps1 -Uninstall",
+		"#   ENVER_UNINSTALL      set to 1 to uninstall instead of installing",
+	} {
+		if !slices.Contains(lines[:paramAt], want) {
+			t.Errorf("installer header lacks the line %q:\n%s", want, header)
 		}
 	}
 	const pipeExample = "#   irm https://raw.githubusercontent.com/neiromaster/enver/main/scripts/install.ps1 | iex"
@@ -671,16 +696,16 @@ func TestInstallHeaderDocumentsUninstall(t *testing.T) {
 // promise data survival that zap takes away.
 func TestReadmeNamesBrewZapInUninstallNote(t *testing.T) {
 	readme := normalizeNewlines(readFileString(t, filepath.Join(repoRoot(), "README.md")))
-	var note string
+	var notes []string
 	for _, paragraph := range strings.Split(readme, "\n\n") {
 		if strings.Contains(paragraph, "Your user data lives in") {
-			note = paragraph
-			break
+			notes = append(notes, paragraph)
 		}
 	}
-	if note == "" {
-		t.Fatal("README.md has no user-data note")
+	if len(notes) != 1 {
+		t.Fatalf("README.md has %d user-data notes, want exactly one", len(notes))
 	}
+	note := notes[0]
 	for _, want := range []string{"brew uninstall --zap", "script uninstalls"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("user-data note lacks %q:\n%s", want, note)
