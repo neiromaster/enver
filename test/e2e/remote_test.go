@@ -261,3 +261,45 @@ func TestE2ERemoteLoadWarningReachesTheTUI(t *testing.T) {
 		t.Fatalf("a cancelled add must not write the local layer, stat err: %v", err)
 	}
 }
+
+// TestPullEmptyShowsRegistrationHint pins the empty state of an argument-less
+// pull: with nothing registered, the run explains how to register a remote
+// instead of printing the interactive-run fallback.
+func TestPullEmptyShowsRegistrationHint(t *testing.T) {
+	s := newSandbox(t)
+	r := s.run("pull")
+	if r.ExitCode != 0 {
+		t.Fatalf("pull: exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	for _, want := range []string{"no remotes registered", "register one with enver pull <source> --as <name>"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Fatalf("stdout misses %q:\n%s", want, r.Stdout)
+		}
+	}
+	if strings.Contains(r.Stdout, "aborted") {
+		t.Fatalf("an empty pull must explain registration instead of aborting:\n%s", r.Stdout)
+	}
+}
+
+// TestPullDeclaredRemoteIsNotTheEmptyState pins the other side of the
+// empty-state branch: a declared record makes an argument-less pull fetch, so
+// the registration hint must never print over a real run. The record points at
+// a loopback port nothing listens on, which fails the fetch without a network,
+// and the fetch error surfaces on stderr naming the record.
+func TestPullDeclaredRemoteIsNotTheEmptyState(t *testing.T) {
+	s := newSandbox(t)
+	s.dropEnv("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")
+	s.writeGlobal("remotes:\n  llm:\n    url: https://127.0.0.1:1/llm.yaml\n")
+	r := s.run("pull")
+	if r.ExitCode == 0 {
+		t.Fatalf("a declared record makes an argument-less pull fetch; exit = 0:\n%s", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "no remotes registered") {
+		t.Fatalf("a declared remote must not produce the registration hint:\n%s", r.Stdout)
+	}
+	for _, want := range []string{`remote "llm"`, "https://127.0.0.1:1/llm.yaml"} {
+		if !strings.Contains(r.Stderr, want) {
+			t.Fatalf("stderr misses the fetch failure %q:\nstderr:\n%s", want, r.Stderr)
+		}
+	}
+}
