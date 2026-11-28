@@ -885,7 +885,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 				}
 				if s.encryptNow {
 					if err := encryptMarked(path, s.name); err != nil {
-						return fmt.Errorf("profile %q saved, but encrypting its marked values failed: %w", s.name, err)
+						return fmt.Errorf("profile %q saved, but encrypting its secret candidates failed: %w", s.name, err)
 					}
 				}
 				return nil

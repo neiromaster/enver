@@ -508,25 +508,54 @@ func TestExampleConfigNamesURLCredentials(t *testing.T) {
 }
 
 // TestNoStaleOnlyMarkedWording guards the help and doc copy against the
-// pre-v0.14 claim that the mark is the only selector: neither stale phrase may
-// reappear in these files. Lowercase restatements of the current behavior and
-// show's own "~ marked, not encrypted" annotation are not stale.
+// pre-v0.14 claim that the mark is the only encrypt selector. Patterns are
+// matched case-folded, so a lowercase restatement cannot hide. secrets.md and
+// the example config pin the full old line tail instead of the bare phrase:
+// their accurate replacement legitimately still says "~marked values", just
+// continued by the second candidate set. show's own "~ marked, not encrypted"
+// annotation describes a display note, not the encrypt set, and is not stale.
 func TestNoStaleOnlyMarkedWording(t *testing.T) {
-	files := []string{
-		filepath.Join(repoRoot(), "cmd", "enver", "cryptcmd.go"),
-		filepath.Join(repoRoot(), "config.example.yaml"),
-		filepath.Join(repoRoot(), "docs", "secrets.md"),
-		filepath.Join(repoRoot(), "docs", "cli.md"),
-	}
-	for _, file := range files {
-		data, err := os.ReadFile(file)
+	const encTail = "~marked values (enc:v3:argon2id:...)"
+	for _, tt := range []struct {
+		elems []string
+		stale []string
+	}{
+		{[]string{"cmd", "enver", "cryptcmd.go"}, []string{"only ~", "encrypt ~marked values"}},
+		{[]string{"config.example.yaml"}, []string{"only ~", encTail}},
+		{[]string{"docs", "secrets.md"}, []string{"only ~", encTail}},
+		{[]string{"docs", "cli.md"}, []string{"only ~", "encrypt ~marked values"}},
+		{[]string{"cmd", "enver", "edit.go"}, []string{"only ~", "encrypting its marked values"}},
+	} {
+		rel := filepath.Join(tt.elems...)
+		data, err := os.ReadFile(filepath.Join(repoRoot(), rel))
 		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
+			t.Fatalf("read %s: %v", rel, err)
 		}
-		for _, stale := range []string{"only ~", "Encrypt ~marked values"} {
-			if strings.Contains(string(data), stale) {
-				t.Errorf("%s still says %q", filepath.Base(file), stale)
+		low := strings.ToLower(string(data))
+		for _, stale := range tt.stale {
+			if strings.Contains(low, stale) {
+				t.Errorf("%s still says %q", filepath.Join(tt.elems...), stale)
 			}
 		}
+	}
+
+	// The accurate copy must stay: the encrypt how-to line of docs/secrets.md
+	// has to name URL credentials, not the mark alone.
+	sec, err := os.ReadFile(filepath.Join(repoRoot(), "docs", "secrets.md"))
+	if err != nil {
+		t.Fatalf("read docs/secrets.md: %v", err)
+	}
+	var howto string
+	for _, line := range strings.Split(string(sec), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "enver encrypt ") {
+			howto = line
+			break
+		}
+	}
+	if howto == "" {
+		t.Fatal("docs/secrets.md lost its plain encrypt how-to line")
+	}
+	if !strings.Contains(howto, "URL credentials") {
+		t.Fatalf("the docs/secrets.md encrypt how-to line must name URL credentials, got: %q", howto)
 	}
 }
