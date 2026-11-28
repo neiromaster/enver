@@ -36,13 +36,10 @@ func TestDefaultCorruptTargetFileErrorsLoudly(t *testing.T) {
 	}
 	t.Chdir(dir)
 
-	savedConfig, savedNoLocal, savedGlobal := globalFlags.configPath, globalFlags.noLocal, globalFlags.global
+	saveGlobalFlags(t)
 	globalFlags.configPath = global
 	globalFlags.noLocal = true
 	globalFlags.global = false
-	t.Cleanup(func() {
-		globalFlags.configPath, globalFlags.noLocal, globalFlags.global = savedConfig, savedNoLocal, savedGlobal
-	})
 
 	err := defaultCmd.RunE(&cobra.Command{}, []string{"prod"})
 	if err == nil {
