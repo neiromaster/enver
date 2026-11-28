@@ -37,7 +37,7 @@ var removeCmd = &cobra.Command{
 			}
 			name = picked
 		}
-		if err := requireTargetProfile(targetCfg, path, name); err != nil {
+		if err := requireTargetProfile(targetCfg, path, name, "remove"); err != nil {
 			return err
 		}
 		merged, err := app.Load(appOpts())

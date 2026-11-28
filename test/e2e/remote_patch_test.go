@@ -653,36 +653,63 @@ func TestPatchBootstrapIsModeBlind(t *testing.T) {
 
 // TestOtherMutatorsRefuseRemoteOnlyNames pins the refusals the bootstrap leaves
 // unchanged: every mutator that cannot write the patch copy still exits non-zero
-// on a remote-only name with the one message, the --file spelling of the hint
-// included, and none of them leaves the target file changed by a byte. Every
-// verb is checked even when an earlier one fails, so one run proves all six.
+// on a remote-only name with the message its verb calls for, the --file spelling
+// of the hint included, and none of them leaves the target file changed by a
+// byte. Deleting intents — remove, rename, duplicate — point at the pull that
+// removes the remote content; the rest point at the patch copy. Every verb is
+// checked even when an earlier one fails, so one run proves all six.
 func TestOtherMutatorsRefuseRemoteOnlyNames(t *testing.T) {
 	s := newSandbox(t)
 	s.plantBootstrapFile(t, false)
 	target := filepath.Join(s.project, "team.yaml")
 	before := s.readFile(target)
 	const want = "enver: profile \"llm/ollama\" comes from remote \"llm\" and has no copy here; add a patch copy first (`enver add --file team.yaml llm/ollama`)\n"
+	const wantPull = "enver: profile \"llm/ollama\" comes from remote \"llm\" and has no copy here; remove the remote content with `enver pull --file team.yaml --rm llm`\n"
 	for _, c := range []struct {
 		verb string
 		args []string
+		want string
 	}{
-		{"remove", []string{"remove", "--yes", "--file", "team.yaml", "llm/ollama"}},
-		{"rename", []string{"rename", "--file", "team.yaml", "llm/ollama", "mine"}},
-		{"duplicate", []string{"duplicate", "--file", "team.yaml", "llm/ollama", "mine"}},
-		{"default", []string{"default", "--file", "team.yaml", "llm/ollama"}},
-		{"encrypt", []string{"encrypt", "--file", "team.yaml", "llm/ollama"}},
-		{"decrypt", []string{"decrypt", "--file", "team.yaml", "llm/ollama"}},
+		{"remove", []string{"remove", "--yes", "--file", "team.yaml", "llm/ollama"}, wantPull},
+		{"rename", []string{"rename", "--file", "team.yaml", "llm/ollama", "mine"}, wantPull},
+		{"duplicate", []string{"duplicate", "--file", "team.yaml", "llm/ollama", "mine"}, wantPull},
+		{"default", []string{"default", "--file", "team.yaml", "llm/ollama"}, want},
+		{"encrypt", []string{"encrypt", "--file", "team.yaml", "llm/ollama"}, want},
+		{"decrypt", []string{"decrypt", "--file", "team.yaml", "llm/ollama"}, want},
 	} {
 		r := s.run(c.args...)
 		if r.ExitCode != 1 {
 			t.Errorf("%s: exit = %d, stderr: %s", c.verb, r.ExitCode, r.Stderr)
 			continue
 		}
-		if r.Stderr != want {
-			t.Errorf("%s: stderr = %q, want %q", c.verb, r.Stderr, want)
+		if r.Stderr != c.want {
+			t.Errorf("%s: stderr = %q, want %q", c.verb, r.Stderr, c.want)
 		}
 		if after := s.readFile(target); after != before {
 			t.Errorf("%s: a refused mutator must leave the target byte-identical:\n%s", c.verb, after)
 		}
+	}
+}
+
+// TestRemoteOnlyRefusalNamesTopLevelRecord pins that the delete refusal names a
+// record a pull can remove: pull --rm takes top-level records only, so a profile
+// under the nested record team/llm must be pointed at team.
+func TestRemoteOnlyRefusalNamesTopLevelRecord(t *testing.T) {
+	s := newSandbox(t)
+	s.writeGlobal("remotes:\n  team:\n    url: https://example.com/team.yaml\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team.yaml"), "remotes:\n  llm:\n    url: https://example.com/team/llm.yaml\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team.meta"), "url: https://example.com/team.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team", "llm.yaml"), "profiles:\n  profile:\n    env:\n      A: \"1\"\n")
+	s.writeFile(filepath.Join(s.remotesDir(), "team", "llm.meta"), "url: https://example.com/team/llm.yaml\npulled-at: 2026-11-15T10:00:00Z\n")
+
+	r := s.run("remove", "--yes", "team/llm/profile")
+	if r.ExitCode != 1 {
+		t.Fatalf("exit = %d, stdout: %s, stderr: %s", r.ExitCode, r.Stdout, r.Stderr)
+	}
+	if !strings.Contains(r.Stderr, "`enver pull --rm team`") {
+		t.Fatalf("the refusal must name the top-level record a pull removes:\n%s", r.Stderr)
+	}
+	if strings.Contains(r.Stderr, "--rm team/llm") {
+		t.Fatalf("pull --rm refuses a nested record, so the hint must not name one:\n%s", r.Stderr)
 	}
 }

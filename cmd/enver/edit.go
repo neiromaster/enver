@@ -799,7 +799,7 @@ func doEdit(cmd *cobra.Command, args []string) error {
 	if !ok {
 		remote, isRemote := config.RemoteName(cfg.ProfileLayer[name])
 		if !isRemote {
-			return notFoundInTarget(name, path)
+			return notFoundInTarget(name, path, "edit")
 		}
 		patchRemote = remote
 	}

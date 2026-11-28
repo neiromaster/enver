@@ -88,7 +88,7 @@ var encryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		path, err := requireWriteTargetProfile(profile)
+		path, err := requireWriteTargetProfile(profile, "encrypt")
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ var decryptCmd = &cobra.Command{
 		if len(args) > 0 {
 			profile = args[0]
 		}
-		path, err := requireWriteTargetProfile(profile)
+		path, err := requireWriteTargetProfile(profile, "decrypt")
 		if err != nil {
 			return err
 		}

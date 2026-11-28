@@ -56,7 +56,7 @@ var defaultCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := requireTargetProfile(targetCfg, path, name); err != nil {
+		if err := requireTargetProfile(targetCfg, path, name, "default"); err != nil {
 			return err
 		}
 		if err := config.SetDefault(path, name); err != nil {

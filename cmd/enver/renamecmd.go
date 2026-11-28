@@ -51,7 +51,7 @@ var renameCmd = &cobra.Command{
 			}
 			newName = n
 		}
-		if err := requireTargetProfile(targetCfg, path, oldName); err != nil {
+		if err := requireTargetProfile(targetCfg, path, oldName, "rename"); err != nil {
 			return err
 		}
 		if newName == oldName {
