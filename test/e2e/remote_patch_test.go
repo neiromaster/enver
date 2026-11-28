@@ -545,7 +545,11 @@ func TestEditAddCompletionOffersRemoteNames(t *testing.T) {
 	}
 
 	s.plantPatchFile(t)
-	tokens := completionTokens(s.run("__complete", "edit", "--file", "team.yaml", "").Stdout)
+	fileEdit := s.run("__complete", "edit", "--file", "team.yaml", "")
+	if fileEdit.ExitCode != 0 {
+		t.Fatalf("edit --file: exit = %d, stderr: %s", fileEdit.ExitCode, fileEdit.Stderr)
+	}
+	tokens := completionTokens(fileEdit.Stdout)
 	for _, want := range []string{"t", "r/default"} {
 		if !slices.Contains(tokens, want) {
 			t.Fatalf("edit --file completion = %q, want %q", tokens, want)
@@ -650,10 +654,13 @@ func TestPatchBootstrapIsModeBlind(t *testing.T) {
 // TestOtherMutatorsRefuseRemoteOnlyNames pins the refusals the bootstrap leaves
 // unchanged: every mutator that cannot write the patch copy still exits non-zero
 // on a remote-only name with the one message, the --file spelling of the hint
-// included, and none of them touches the target file.
+// included, and none of them leaves the target file changed by a byte. Every
+// verb is checked even when an earlier one fails, so one run proves all six.
 func TestOtherMutatorsRefuseRemoteOnlyNames(t *testing.T) {
 	s := newSandbox(t)
 	s.plantBootstrapFile(t, false)
+	target := filepath.Join(s.project, "team.yaml")
+	before := s.readFile(target)
 	const want = "enver: profile \"llm/ollama\" comes from remote \"llm\" and has no copy here; add a patch copy first (`enver add --file team.yaml llm/ollama`)\n"
 	for _, c := range []struct {
 		verb string
@@ -668,13 +675,14 @@ func TestOtherMutatorsRefuseRemoteOnlyNames(t *testing.T) {
 	} {
 		r := s.run(c.args...)
 		if r.ExitCode != 1 {
-			t.Fatalf("%s: exit = %d, stderr: %s", c.verb, r.ExitCode, r.Stderr)
+			t.Errorf("%s: exit = %d, stderr: %s", c.verb, r.ExitCode, r.Stderr)
+			continue
 		}
 		if r.Stderr != want {
-			t.Fatalf("%s: stderr = %q, want %q", c.verb, r.Stderr, want)
+			t.Errorf("%s: stderr = %q, want %q", c.verb, r.Stderr, want)
 		}
-	}
-	if cfg := s.readFile(filepath.Join(s.project, "team.yaml")); strings.Contains(cfg, "profiles:") {
-		t.Fatalf("a refused mutator must not write the target:\n%s", cfg)
+		if after := s.readFile(target); after != before {
+			t.Errorf("%s: a refused mutator must leave the target byte-identical:\n%s", c.verb, after)
+		}
 	}
 }

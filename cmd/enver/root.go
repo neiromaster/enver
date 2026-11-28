@@ -411,9 +411,9 @@ func targetProfiles(cmd *cobra.Command, toComplete string) []string {
 }
 
 // completionTarget is the config completion offers profile names from: the
-// file under --file (its own profiles — every mutator refuses a name only
-// remote content projects), the local file by default, the global one
-// under --global.
+// file under --file (its own profiles — remove, rename, duplicate, default,
+// encrypt and decrypt refuse a name only remote content projects), the local
+// file by default, the global one under --global.
 func completionTarget(cmd *cobra.Command) (config.Config, error) {
 	if file, _ := cmd.Flags().GetString("file"); file != "" {
 		return config.LoadFile(file)
