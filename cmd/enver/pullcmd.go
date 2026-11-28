@@ -102,6 +102,9 @@ closest declaration.`,
 			return err
 		}
 		if summary == "" {
+			if len(opts.Merged.Remotes) == 0 {
+				return printRemoteStatuses(cmd.OutOrStdout(), nil)
+			}
 			return aborted(cmd.OutOrStdout())
 		}
 		_, err = fmt.Fprint(cmd.OutOrStdout(), summary)
