@@ -270,7 +270,7 @@ func Run(args []string, dashAt int, opts Options) error {
 	if len(cmdArgs) == 0 {
 		if dashAt < 0 && len(args) > 1 {
 			rest := strings.Join(args[1:], " ")
-			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s`", opts.Name, args[0], rest, config.HintCommand(strings.TrimPrefix(opts.Name, "enver "), args[0], "--", rest))
+			return fmt.Errorf("%s: no `--` before the command; interpreted %q as the profile and dropped %q; use `%s`; profiles compose before `--`: to run several, enver x <p1> <p2> -- <command>", opts.Name, args[0], rest, config.HintCommand(strings.TrimPrefix(opts.Name, "enver "), args[0], "--", rest))
 		}
 		return fmt.Errorf("%s requires a command after `--`", opts.Name)
 	}

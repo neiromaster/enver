@@ -142,6 +142,28 @@ func TestXMultiProfileNoDashErrors(t *testing.T) {
 	}
 }
 
+// TestXMissingDashCompositionHint pins the dropped-token stderr end to end:
+// the split echo and the composition rule ride out on one line, so the user
+// sees both the reading enver chose and the command that works.
+func TestXMissingDashCompositionHint(t *testing.T) {
+	s := newSandbox(t)
+	s.writeLocal("profiles:\n  base:\n    env:\n      A: \"1\"\n")
+	r := s.run("x", "base", "slotA", "offline", "claude")
+	if r.ExitCode == 0 {
+		t.Fatal("a run line without -- must fail loudly")
+	}
+	for _, want := range []string{
+		`interpreted "base"`,
+		`dropped "slotA offline claude"`,
+		"enver x base -- slotA offline claude",
+		"profiles compose before `--`: to run several, enver x <p1> <p2> -- <command>",
+	} {
+		if !strings.Contains(r.Stderr, want) {
+			t.Errorf("stderr %q misses %q", r.Stderr, want)
+		}
+	}
+}
+
 func TestXInheritedUnsetStillFences(t *testing.T) {
 	s := newSandbox(t)
 	s.writeLocal("profiles:\n  base:\n    env:\n      A: from-base\n  leaf:\n    extends: [base]\n    unset: [A]\n")

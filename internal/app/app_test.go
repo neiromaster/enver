@@ -190,6 +190,47 @@ func TestRunMissingDashEchoesInterpretedSplit(t *testing.T) {
 	}
 }
 
+// TestRunMissingDashTeachesComposition pins that the dropped-token error keeps
+// echoing the split it chose and adds the composition rule, so a user who
+// meant several profiles learns the command that works.
+func TestRunMissingDashTeachesComposition(t *testing.T) {
+	err := Run([]string{"dev", "offline", "claude"}, -1, Options{Name: "enver x"})
+	if err == nil {
+		t.Fatal("Run returned nil, want an error")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		`interpreted "dev"`,
+		`dropped "offline claude"`,
+		"enver x dev -- offline claude",
+		"profiles compose before",
+		"enver x <p1> <p2> -- <command>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("error %q misses %q", got, want)
+		}
+	}
+}
+
+// TestRunMissingDashTwoProfilesNoCommand pins that the composition rule fires
+// without guessing the split: neither by reading the second token as the
+// command start nor by rebuilding a two-profile line the user never typed.
+func TestRunMissingDashTwoProfilesNoCommand(t *testing.T) {
+	err := Run([]string{"base", "slotA"}, -1, Options{Name: "enver x"})
+	if err == nil {
+		t.Fatal("Run returned nil, want an error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "profiles compose before") {
+		t.Errorf("error %q misses the composition rule", got)
+	}
+	for _, banned := range []string{"-- base", "enver x base slotA --"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("error %q must not guess the split as %q", got, banned)
+		}
+	}
+}
+
 func TestResolveLazyKey(t *testing.T) {
 	// A plaintext profile resolves with no key available.
 	cfg := config.Config{Profiles: map[string]config.Profile{
