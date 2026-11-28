@@ -95,8 +95,9 @@ func parentEnvFor(cfg config.Config, self string, extends config.Extends) (map[s
 }
 
 // remoteBackdrop resolves the remote-provided name as the inherited base for a
-// patch bootstrap. The merged view has no user-layer copy of the name — that is
-// the bootstrap precondition — so resolving it here is the remote's own chain.
+// patch bootstrap. The saved copy lands as the top user layer, so the backdrop is
+// the merged view of the name — remote profile under any user copies of its
+// parents, which compose into the effective base.
 // Resolution rides the display seam the show command uses: an undecryptable
 // remote value degrades to a per-key note instead of failing, which is the only
 // honest answer for ciphertext its author may have written under another key.
