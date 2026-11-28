@@ -259,7 +259,7 @@ func TestUnpulledRemoteReferenceNamesPull(t *testing.T) {
 		// The suggested pull reproduces this invocation's relocation flags, so
 		// running it reads the same config file the show did.
 		pull := "enver pull --chdir " + hintPath(dir) + " --config " + hintPath(cfgPath) + " other"
-		for _, want := range []string{`profile "other/base" not found`, `remote "other"`, pull} {
+		for _, want := range []string{`profile "other/base" not found`, `remote "other"`, "so run `" + pull + "` to fetch it"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%v error misses %q: %v", args, want, err)
 			}

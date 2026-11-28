@@ -44,6 +44,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -262,12 +263,17 @@ func hintFlags() string {
 }
 
 // hintPath spells a path inside a hint line: quoted only when it contains
-// whitespace, so the common case stays bare.
+// whitespace, so the common case stays bare. Backslash is a literal in cmd.exe,
+// PowerShell and Go's own Windows argv parsing, so a Windows path goes into the
+// hint verbatim inside plain quotes; strconv.Quote stays for POSIX shells.
 func hintPath(p string) string {
-	if strings.IndexFunc(p, unicode.IsSpace) >= 0 {
-		return strconv.Quote(p)
+	if strings.IndexFunc(p, unicode.IsSpace) < 0 {
+		return p
 	}
-	return p
+	if runtime.GOOS == "windows" {
+		return `"` + p + `"`
+	}
+	return strconv.Quote(p)
 }
 
 func requireInteractive(what string) error {
