@@ -105,6 +105,21 @@ func TestValidateFileNamesTheFileOnce(t *testing.T) {
 	}
 }
 
+// TestValidateFileFlagPlusArgDedup pins the overlapping naming forms: one file
+// named by --file and again as a positional is judged once, so its verdict
+// prints one line.
+func TestValidateFileFlagPlusArgDedup(t *testing.T) {
+	s := newSandbox(t)
+	s.writeFile(filepath.Join(s.project, "team.yaml"), "profiles:\n  dev:\n    env:\n      K: v\n")
+	r := s.run("validate", "--file", "team.yaml", "team.yaml")
+	if r.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if got := strings.Count(r.Stdout, "team.yaml: ✓ valid as a local config"); got != 1 {
+		t.Fatalf("verdict printed %d times, want 1:\n%s", got, r.Stdout)
+	}
+}
+
 // TestValidateEmptyFileIsSkipped pins the empty document: it declares nothing
 // enver-shaped, so the file is skipped and the run still succeeds.
 func TestValidateEmptyFileIsSkipped(t *testing.T) {

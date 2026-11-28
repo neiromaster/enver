@@ -86,6 +86,40 @@ func TestCheckFile(t *testing.T) {
 	}
 }
 
+// TestDedupPaths pins the key: two spellings of one file count once, the first
+// spelling is kept, and input order survives.
+func TestDedupPaths(t *testing.T) {
+	got := dedupPaths([]string{"x.yaml", "x.yaml", "./x.yaml", "y.yaml"})
+	if want := []string{"x.yaml", "y.yaml"}; !slices.Equal(got, want) {
+		t.Fatalf("dedupPaths = %q, want %q", got, want)
+	}
+	if got := dedupPaths([]string{}); got != nil {
+		t.Fatalf("dedupPaths of nothing = %q, want nil", got)
+	}
+}
+
+// TestRunFileValidateDeduplicatesPaths pins the run: one file named in three
+// spellings is read and judged once, so the verdict prints once and the
+// summary counts one file.
+func TestRunFileValidateDeduplicatesPaths(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "ci.yaml")
+	if err := os.WriteFile(p, []byte("profiles:\n  dev:\n    env:\n      K: v\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alt := filepath.Dir(p) + "/./" + filepath.Base(p)
+
+	var out bytes.Buffer
+	if err := runFileValidate(&out, []string{p, p, alt}, false); err != nil {
+		t.Fatalf("runFileValidate = %v, stdout:\n%s", err, out.String())
+	}
+	if got := strings.Count(out.String(), "✓ valid as a local config"); got != 1 {
+		t.Fatalf("verdict printed %d times, want 1:\n%s", got, out.String())
+	}
+	if got := strings.Count(out.String(), p+": "); got != 1 {
+		t.Fatalf("path label printed %d times, want 1:\n%s", got, out.String())
+	}
+}
+
 func TestRunFileValidateSummary(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -250,11 +251,30 @@ func checkErrLine(err error) string {
 	return oneLine(err.Error())
 }
 
+// dedupPaths drops repeated paths, keyed by filepath.Clean so two spellings of
+// one file count once. The first spelling is kept and input order preserved:
+// the path as given is the label a finding prints under.
+func dedupPaths(paths []string) []string {
+	seen := make(map[string]bool, len(paths))
+	var out []string
+	for _, p := range paths {
+		key := filepath.Clean(p)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, p)
+	}
+	return out
+}
+
 // runFileValidate checks the named paths in order and prints each file's lines
-// under the previous one's. A path nothing can be read from counts as checked
-// and failed; a skipped file counts toward neither total. The returned error
-// is the run's summary, so main exits 1 with it on stderr.
+// under the previous one's. A file named more than once is checked once. A path
+// nothing can be read from counts as checked and failed; a skipped file counts
+// toward neither total. The returned error is the run's summary, so main exits
+// 1 with it on stderr.
 func runFileValidate(w io.Writer, paths []string, strict bool) error {
+	paths = dedupPaths(paths)
 	checked, failed := 0, 0
 	warnFailed := false
 	for _, path := range paths {
