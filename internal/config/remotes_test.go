@@ -1010,6 +1010,25 @@ remotes:
 	})
 }
 
+// TestPullHintVerbatimPaths pins the unpulled-profile hint's exact spelling:
+// the command sits in backticks, the record name keeps its quotes, and
+// HintFlags reach the command with their separators untouched — %q would wrap
+// the line in double quotes and double every backslash, so a Windows path
+// suggested to a Windows shell would arrive mangled.
+func TestPullHintVerbatimPaths(t *testing.T) {
+	dir := t.TempDir()
+	defer remotesDirIn(dir)()
+	prevFlags := HintFlags
+	t.Cleanup(func() { HintFlags = prevFlags })
+	HintFlags = `--chdir C:\Users\my dir`
+
+	cfg := Config{Remotes: map[string]RemoteRecord{"llm": {URL: "https://example.com/llm.yaml"}}}
+	want := "remote \"llm\" is declared but its content is not pulled, so run `enver pull --chdir C:\\Users\\my dir llm` to fetch it"
+	if got := cfg.pullHint("llm/base"); got != want {
+		t.Fatalf("pullHint(llm/base) = %q, want %q", got, want)
+	}
+}
+
 // Prefix math across the no_prefix rule: a no-prefix child of a prefixed parent
 // lands under the parent prefix with no segment of its own, so a name the
 // parent already defines collides and the fold hands it to the child; a

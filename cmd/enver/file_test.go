@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -48,6 +50,26 @@ func TestHintFlags(t *testing.T) {
 				t.Fatalf("hintFlags() = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestHintPath pins the spelling of a path inside a hint line: bare without
+// whitespace, otherwise double-quoted. The quoted text is the path verbatim on
+// Windows, where backslash is a literal in every shell and in Go's own argv
+// parsing; strconv.Quote's escaping stays for POSIX shells. The backslash
+// whitespace path distinguishes the branches: Quote alone would double every
+// separator on Windows.
+func TestHintPath(t *testing.T) {
+	if got := hintPath("sub/x.yaml"); got != "sub/x.yaml" {
+		t.Fatalf("hintPath(%q) = %q, want it bare", "sub/x.yaml", got)
+	}
+	p := `C:\Users\my dir`
+	want := `"` + p + `"`
+	if runtime.GOOS != "windows" {
+		want = strconv.Quote(p)
+	}
+	if got := hintPath(p); got != want {
+		t.Fatalf("hintPath(%q) = %q, want %q", p, got, want)
 	}
 }
 

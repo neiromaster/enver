@@ -227,5 +227,5 @@ func (c Config) pullHint(parent string) string {
 	if fi, err := os.Stat(RemoteContentPath(name)); err == nil && !fi.IsDir() {
 		return ""
 	}
-	return fmt.Sprintf("remote %q is declared but its content is not pulled, so run %q to fetch it", name, PullCommand(name))
+	return fmt.Sprintf("remote %q is declared but its content is not pulled, so run `%s` to fetch it", name, PullCommand(name))
 }
